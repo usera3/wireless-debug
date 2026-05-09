@@ -1,35 +1,27 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { useState } from 'react';
+import { Layout } from './components/Layout';
+import { ConnectionPanel } from './components/ConnectionPanel';
+import { OscilloscoperPage } from './components/OscilloscoperPage';
 
-function App() {
-  const [count, setCount] = useState(0)
+type Tab = 'osc' | 'params' | 'connection';
 
-  return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+// ParamPage implemented in Task 7
+function ParamPage() {
+  return <div className="p-6 text-slate-400">参数编辑（Task 7 实现）</div>;
 }
 
-export default App
+export default function App() {
+  const [activeTab, setActiveTab] = useState<Tab>('osc');
+
+  const content = {
+    osc: <OscilloscoperPage />,
+    params: <ParamPage />,
+    connection: <ConnectionPanel />,
+  }[activeTab];
+
+  return (
+    <Layout activeTab={activeTab} onTabChange={setActiveTab}>
+      {content}
+    </Layout>
+  );
+}
