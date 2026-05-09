@@ -1,17 +1,30 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Layout } from './components/Layout';
 import { ConnectionPanel } from './components/ConnectionPanel';
 import { OscilloscoperPage } from './components/OscilloscoperPage';
+import { ParamPage } from './components/ParamPage';
+import { useConnectionStore } from './store/connectionStore';
+import { wsClient } from './lib/wsClient';
 
 type Tab = 'osc' | 'params' | 'connection';
 
-// ParamPage implemented in Task 7
-function ParamPage() {
-  return <div className="p-6 text-slate-400">参数编辑（Task 7 实现）</div>;
-}
-
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('osc');
+  const { connected, disconnect } = useConnectionStore();
+  const [toast, setToast] = useState<string | null>(null);
+
+  // 监听 WebSocket 意外断开
+  useEffect(() => {
+    function checkDisconnect() {
+      if (connected && wsClient.readyState !== WebSocket.OPEN) {
+        disconnect();
+        setToast('WebSocket 连接已断开');
+        setTimeout(() => setToast(null), 3000);
+      }
+    }
+    const timer = setInterval(checkDisconnect, 2000);
+    return () => clearInterval(timer);
+  }, [connected, disconnect]);
 
   const content = {
     osc: <OscilloscoperPage />,
@@ -22,6 +35,12 @@ export default function App() {
   return (
     <Layout activeTab={activeTab} onTabChange={setActiveTab}>
       {content}
+      {/* Toast 通知 */}
+      {toast && (
+        <div className="fixed bottom-4 right-4 bg-red-700 text-white px-4 py-2 rounded shadow-lg text-sm z-50">
+          {toast}
+        </div>
+      )}
     </Layout>
   );
 }
