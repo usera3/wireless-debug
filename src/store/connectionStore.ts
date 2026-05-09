@@ -10,7 +10,7 @@ interface ConnectionState {
 }
 
 export const useConnectionStore = create<ConnectionState>((set, get) => ({
-  url: 'ws://192.168.4.1:8765',
+  url: import.meta.env.VITE_WS_URL ?? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`,
   connected: false,
   setUrl: (url) => set({ url }),
   connect: () => {
