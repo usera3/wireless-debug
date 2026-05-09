@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useConnectionStore } from '../store/connectionStore';
 
-type Tab = 'osc' | 'params' | 'connection';
+type Tab = 'osc' | 'params' | 'connection' | 'debug';
 
 interface LayoutProps {
   activeTab: Tab;
@@ -13,6 +13,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'osc', label: '示波器', icon: '📈' },
   { id: 'params', label: '参数编辑', icon: '⚙️' },
   { id: 'connection', label: '连接设置', icon: '🔌' },
+  { id: 'debug', label: '调试信息', icon: '🐛' },
 ];
 
 export function Layout({ activeTab, onTabChange, children }: LayoutProps) {

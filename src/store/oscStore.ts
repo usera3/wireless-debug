@@ -14,8 +14,7 @@ interface OscState {
   maxChannels: number;
   frameLen: number;
   channels: ChannelConfig[];
-  waveData: Map<number, number[]>; // channelNo -> 最新 N 个点
-  maxPoints: number;
+  waveData: Map<number, number[]>; // channelNo -> 全量采样点
   setRunning: (v: boolean) => void;
   setSampleRate: (v: number) => void;
   setMaxChannels: (v: number) => void;
@@ -32,7 +31,6 @@ export const useOscStore = create<OscState>((set) => ({
   frameLen: 130,
   channels: [],
   waveData: new Map(),
-  maxPoints: 3000,
   setRunning: (v) => set({ running: v }),
   setSampleRate: (v) => set({ sampleRate: v }),
   setMaxChannels: (v) => set({ maxChannels: v }),
@@ -42,8 +40,7 @@ export const useOscStore = create<OscState>((set) => ({
     set((s) => {
       const map = new Map(s.waveData);
       const existing = map.get(channelNo) ?? [];
-      const merged = [...existing, ...samples].slice(-s.maxPoints);
-      map.set(channelNo, merged);
+      map.set(channelNo, [...existing, ...samples]);
       return { waveData: map };
     }),
   clearWaveData: () => set({ waveData: new Map() }),

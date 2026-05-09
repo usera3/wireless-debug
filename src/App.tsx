@@ -3,10 +3,11 @@ import { Layout } from './components/Layout';
 import { ConnectionPanel } from './components/ConnectionPanel';
 import { OscilloscoperPage } from './components/OscilloscoperPage';
 import { ParamPage } from './components/ParamPage';
+import { DebugPage } from './components/DebugPage';
 import { useConnectionStore } from './store/connectionStore';
 import { wsClient } from './lib/wsClient';
 
-type Tab = 'osc' | 'params' | 'connection';
+type Tab = 'osc' | 'params' | 'connection' | 'debug';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('osc');
@@ -30,6 +31,7 @@ export default function App() {
     osc: <OscilloscoperPage />,
     params: <ParamPage />,
     connection: <ConnectionPanel />,
+    debug: <DebugPage />,
   }[activeTab];
 
   return (
