@@ -1,9 +1,9 @@
 // ⚠️ ChartGPU 集成暂缓，待库 API 确认后实现
 // 当前版本：显示各通道最新采样值 + 累计帧数计数
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useMemo, useState } from 'react';
 import { createChart } from 'chartgpu';
-import type { ChartGPUInstance } from 'chartgpu';
+import type { ChartGPUInstance, ChartGPUOptions } from 'chartgpu';
 
 const CHANNEL_COLORS = [
   '#4ade80', '#60a5fa', '#f97316', '#e879f9',
@@ -11,94 +11,196 @@ const CHANNEL_COLORS = [
   '#fb923c', '#38bdf8', '#4ade80', '#f472b6',
 ];
 
+function generateDemoData(): Map<number, number[]> {
+  const map = new Map<number, number[]>();
+  const N = 5000;
+  const ch1: number[] = [];
+  const ch2: number[] = [];
+  for (let i = 0; i < N; i++) {
+    const t = i / 100;
+    ch1.push(Math.sin(t * 2 * Math.PI));
+    ch2.push(Math.cos(t * 2 * Math.PI) * 0.5);
+  }
+  map.set(1, ch1);
+  map.set(2, ch2);
+  return map;
+}
+
 interface OscChartProps {
   channels: Map<number, number[]>;
   sampleRate: number;
 }
 
+// Build a Float32Array [x0,y0, x1,y1, ...] for a single channel
+function buildSeriesData(values: number[]): Float32Array {
+  const buf = new Float32Array(values.length * 2);
+  for (let i = 0; i < values.length; i++) {
+    buf[i * 2]     = i;
+    buf[i * 2 + 1] = values[i];
+  }
+  return buf;
+}
+
 export function OscChart({ channels, sampleRate }: OscChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ChartGPUInstance | null>(null);
-  // stable ordered list of channelNos established at init time
   const channelOrderRef = useRef<number[]>([]);
-  // how many points have already been appended to the chart per channelNo
-  const pushedRef = useRef<Map<number, number>>(new Map());
-  // key snapshot that triggered the current chart instance
+  // store the options object so setOption can reuse it
+  const optionsRef = useRef<ChartGPUOptions | null>(null);
   const initKeyRef = useRef<string>('');
+  // fixed window width in samples — the single source of truth
+  const windowSamplesRef = useRef<number>(0);
+  // total samples from the previous render, needed to back-calculate windowSamples from %
+  const prevTotalRef = useRef<number>(0);
+  // when true, user has panned away from the right edge — stop auto-scrolling
+  const userPannedRef = useRef<boolean>(false);
+  // absolute sample-index range to hold when panned ([startSample, endSample])
+  const pausedRangeRef = useRef<[number, number] | null>(null);
 
-  const currentKey = Array.from(channels.keys()).sort().join(',');
+  const [gpuError, setGpuError] = useState<string | null>(null);
 
-  // ── chart initialization ────────────────────────────────────────────────────
-  // Runs when the set of channel keys changes (i.e. a new start() cycle).
+  const demoData = useMemo(() => generateDemoData(), []);
+  const effectiveChannels = channels.size > 0 ? channels : demoData;
+
+  const currentKey = Array.from(effectiveChannels.keys()).sort().join(',');
+
+  // ── chart initialization ──────────────────────────────────────────────────
   useEffect(() => {
-    if (!containerRef.current || channels.size === 0) return;
-    if (currentKey === initKeyRef.current) return; // already initialised for this key
+    if (!containerRef.current || effectiveChannels.size === 0) return;
+    if (currentKey === initKeyRef.current) return;
     initKeyRef.current = currentKey;
+    setGpuError(null);
 
     const container = containerRef.current;
-    const channelNos = Array.from(channels.keys()).sort((a, b) => a - b);
+    const channelNos = Array.from(effectiveChannels.keys()).sort((a, b) => a - b);
     channelOrderRef.current = channelNos;
-    pushedRef.current = new Map();
 
     let cancelled = false;
 
     (async () => {
-      // dispose previous instance synchronously before awaiting
-      if (chartRef.current) {
-        chartRef.current.dispose();
-        chartRef.current = null;
+      try {
+        if (chartRef.current) {
+          chartRef.current.dispose();
+          chartRef.current = null;
+          optionsRef.current = null;
+        }
+
+        const initialOptions: ChartGPUOptions = {
+          theme: 'dark' as const,
+          animation: false,
+          autoScroll: false,
+          xAxis: { type: 'value' as const, name: 'Sample' },
+          yAxis: { type: 'value' as const },
+          dataZoom: [{ type: 'inside' as const }, { type: 'slider' as const }],
+          legend: { show: true },
+          series: channelNos.map((chNo, i) => ({
+            type: 'line' as const,
+            name: `CH${chNo}`,
+            color: CHANNEL_COLORS[i % CHANNEL_COLORS.length],
+            data: buildSeriesData(effectiveChannels.get(chNo) ?? []),
+            lineStyle: { width: 3 },
+            sampling: 'none' as const,
+          })),
+        };
+
+        const chart = await createChart(container, initialOptions);
+
+        if (cancelled) {
+          chart.dispose();
+          return;
+        }
+
+        chartRef.current = chart;
+        optionsRef.current = initialOptions;
+
+        // record initial window size (full data) and jump to end
+        const firstValues = effectiveChannels.get(channelNos[0]) ?? [];
+        windowSamplesRef.current = Math.round(firstValues.length * 0.1); // show last 10%
+        prevTotalRef.current = firstValues.length;
+        userPannedRef.current = false;
+        pausedRangeRef.current = null;
+        chart.setZoomRange(90, 100);
+      } catch (err: unknown) {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        setGpuError(msg);
       }
-
-      const chart = await createChart(container, {
-        theme: 'dark',
-        animation: false,
-        autoScroll: true,
-        xAxis: { type: 'value', name: 'Sample' },
-        yAxis: { type: 'value' },
-        dataZoom: [{ type: 'inside' }, { type: 'slider' }],
-        legend: { show: true },
-        series: channelNos.map((chNo, i) => ({
-          type: 'line' as const,
-          name: `CH${chNo}`,
-          color: CHANNEL_COLORS[i % CHANNEL_COLORS.length],
-          data: [],
-          lineStyle: { width: 1 },
-          sampling: 'lttb',
-        })),
-      });
-
-      if (cancelled) {
-        chart.dispose();
-        return;
-      }
-
-      chartRef.current = chart;
-
-      // flush any data that arrived while we were awaiting createChart
-      flushPending(chart, channelNos, channels, pushedRef.current);
     })();
 
     return () => {
       cancelled = true;
-      // Don't dispose here — the async block checks cancelled and disposes itself.
-      // We only null the ref so subsequent data effects skip gracefully.
+      chartRef.current?.dispose();
       chartRef.current = null;
+      optionsRef.current = null;
       initKeyRef.current = '';
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentKey]);
 
-  // ── streaming data append ───────────────────────────────────────────────────
-  // Runs on every waveData update. If chart is ready, append immediately.
-  // If not yet ready (createChart still in flight), the init effect will flush
-  // via flushPending once the chart resolves.
+  // ── full data update + manual autoScroll ──────────────────────────────────
   useEffect(() => {
     const chart = chartRef.current;
-    if (!chart) return;
-    flushPending(chart, channelOrderRef.current, channels, pushedRef.current);
-  }, [channels]);
+    const opts  = optionsRef.current;
+    if (!chart || !opts) return;
 
-  // ── resize ──────────────────────────────────────────────────────────────────
+    const channelNos = channelOrderRef.current;
+
+    // If user manually dragged the zoom handles, getZoomRange() will reflect that.
+    // We must convert back to samples using prevTotalRef (the OLD total before this update),
+    // because effectiveChannels already contains the NEW data.
+    const zoomRange = chart.getZoomRange();
+    if (zoomRange && prevTotalRef.current > 0) {
+      const prev = prevTotalRef.current;
+      windowSamplesRef.current = Math.round(((zoomRange.end - zoomRange.start) / 100) * prev);
+
+      // Detect if user has panned away from the right edge (gap > 1 sample).
+      const samplesFromEnd = Math.round(((100 - zoomRange.end) / 100) * prev);
+      const wasPanned = userPannedRef.current;
+      userPannedRef.current = samplesFromEnd > 1;
+
+      if (userPannedRef.current) {
+        // Convert current % range to absolute sample indices and freeze them.
+        pausedRangeRef.current = [
+          Math.round((zoomRange.start / 100) * prev),
+          Math.round((zoomRange.end   / 100) * prev),
+        ];
+      } else if (wasPanned && !userPannedRef.current) {
+        // User dragged back to the right edge — resume auto-scroll.
+        pausedRangeRef.current = null;
+      }
+    }
+
+    // Build updated series array (reuse existing series metadata, only replace data)
+    const newSeries = (opts.series ?? []).map((s: NonNullable<ChartGPUOptions['series']>[number], i: number) => {
+      const chNo = channelNos[i];
+      const values = chNo !== undefined ? (effectiveChannels.get(chNo) ?? []) : [];
+      return { ...s, data: buildSeriesData(values) };
+    }) as ChartGPUOptions['series'];
+
+    const newOptions: ChartGPUOptions = { ...opts, series: newSeries };
+    optionsRef.current = newOptions;
+    chart.setOption(newOptions);
+
+    // recompute zoom
+    const firstCh = channelNos[0];
+    const totalSamples = firstCh !== undefined ? (effectiveChannels.get(firstCh) ?? []).length : 0;
+    if (totalSamples > 0 && windowSamplesRef.current > 0) {
+      if (userPannedRef.current && pausedRangeRef.current) {
+        // Paused: hold the absolute x range by converting sample indices back to %.
+        const [s, e] = pausedRangeRef.current;
+        chart.setZoomRange((s / totalSamples) * 100, (e / totalSamples) * 100);
+      } else if (!userPannedRef.current) {
+        // Auto-scroll: pin the fixed-width window to the right end.
+        const spanPct = Math.min((windowSamplesRef.current / totalSamples) * 100, 100);
+        chart.setZoomRange(100 - spanPct, 100);
+      }
+    }
+
+    // update prevTotal AFTER setZoomRange so next render reads the correct old total
+    prevTotalRef.current = totalSamples;
+  }, [effectiveChannels]);
+
+  // ── resize ────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current) return;
     const ro = new ResizeObserver(() => chartRef.current?.resize());
@@ -106,46 +208,28 @@ export function OscChart({ channels, sampleRate }: OscChartProps) {
     return () => ro.disconnect();
   }, []);
 
-  if (channels.size === 0) {
-    return (
-      <div className="border border-slate-700 rounded p-4 bg-slate-900 text-slate-500 text-sm text-center h-full flex items-center justify-center">
-        暂无波形数据，请先配置通道并开始采样
-      </div>
-    );
-  }
-
   return (
     <div className="border border-slate-700 rounded bg-slate-900 h-full relative">
       <div className="absolute top-2 right-3 text-xs text-slate-500 z-10">
         采样率 {sampleRate} Hz
+        {channels.size === 0 && <span className="ml-2 text-amber-400">（示例数据）</span>}
       </div>
       <div ref={containerRef} className="w-full h-full" />
+      {gpuError && (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 rounded z-20">
+          <div className="text-center px-6 py-4 max-w-md">
+            <div className="text-amber-400 text-lg font-semibold mb-2">⚠️ WebGPU 不可用</div>
+            <div className="text-slate-400 text-sm leading-relaxed break-all">
+              {gpuError}
+            </div>
+            <div className="text-slate-500 text-xs mt-3">
+              请使用 Chrome 113+ 或 Edge 113+，并确保 GPU 驱动正常。
+              <br />
+              当前环境可能为虚拟机或无 GPU 环境。
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
-}
-
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-function flushPending(
-  chart: ChartGPUInstance,
-  channelNos: number[],
-  channels: Map<number, number[]>,
-  pushed: Map<number, number>,
-) {
-  channelNos.forEach((chNo, seriesIndex) => {
-    const data = channels.get(chNo);
-    if (!data) return;
-
-    const alreadyPushed = pushed.get(chNo) ?? 0;
-    if (data.length <= alreadyPushed) return;
-
-    const newSamples = data.slice(alreadyPushed);
-    const buf = new Float32Array(newSamples.length * 2);
-    for (let i = 0; i < newSamples.length; i++) {
-      buf[i * 2]     = alreadyPushed + i; // x = absolute sample index
-      buf[i * 2 + 1] = newSamples[i];     // y = value
-    }
-    chart.appendData(seriesIndex, buf);
-    pushed.set(chNo, data.length);
-  });
 }

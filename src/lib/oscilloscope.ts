@@ -39,31 +39,58 @@ export function parseFC04Response(frame: Uint8Array): number | null {
   return (frame[3] << 8) | frame[4];
 }
 
-/** 解析示波数据帧，返回各通道按采样点排列的原始值数组 */
 export interface OscFrame {
   channels: number[][];  // channels[i][sampleIndex]
   rawData: Uint8Array;
 }
 
+/** 解析示波数据帧，返回各通道按采样点排列的原始值数组
+ *
+ * 帧结构（frameLen 字节，不含尾部附加 Modbus）：
+ *   [FF 77 AA 55 - 4B] [payload] [CRC_lo CRC_hi - 2B] [FF 77 AA 55 - 4B]
+ *    head(4)           data(N)    crc(2)                tail(4)
+ *
+ * frameLen = 4 + N + 2 + 4 = N + 10，故 payload 长度 = frameLen - 10
+ * CRC 计算范围：payload 部分
+ */
 export function parseOscDataFrame(
   data: Uint8Array,
   channelWidths: number[], // 每通道占字节数：2/4/8
 ): OscFrame | null {
-  if (data.length < 10) return null;
-  // 验证帧头帧尾
-  const hdr = [0xff, 0x77, 0xaa, 0x55];
-  for (let i = 0; i < 4; i++) {
-    if (data[i] !== hdr[i] || data[data.length - 4 + i] !== hdr[i]) return null;
+  const MAGIC = [0xff, 0x77, 0xaa, 0x55];
+  const HEADER_LEN = 4;
+  const CRC_LEN = 2;
+  const FOOTER_LEN = 4;
+  const OVERHEAD = HEADER_LEN + CRC_LEN + FOOTER_LEN; // 10
+
+  if (data.length < OVERHEAD) return null;
+
+  // 校验头 magic
+  for (let i = 0; i < HEADER_LEN; i++) {
+    if (data[i] !== MAGIC[i]) return null;
   }
-  const dataSection = data.slice(4, data.length - 6); // 去掉头尾和CRC
-  const crcBytes = data.slice(data.length - 6, data.length - 4);
-  const calcCrc = crc16(dataSection);
-  if (crcBytes[0] !== (calcCrc & 0xff) || crcBytes[1] !== ((calcCrc >> 8) & 0xff)) return null;
+
+  // 校验尾 magic
+  for (let i = 0; i < FOOTER_LEN; i++) {
+    if (data[data.length - FOOTER_LEN + i] !== MAGIC[i]) return null;
+  }
+
+  // payload 范围：[4 .. data.length - 6)，CRC 在 [data.length-6 .. data.length-4)
+  const payloadStart = HEADER_LEN;
+  const crcOffset = data.length - FOOTER_LEN - CRC_LEN; // data.length - 6
+  const payload = data.slice(payloadStart, crcOffset);
+
+  // CRC 校验（payload 部分）
+  const crcLo = data[crcOffset];
+  const crcHi = data[crcOffset + 1];
+  const calcCrc = crc16(payload);
+  if (crcLo !== (calcCrc & 0xff) || crcHi !== ((calcCrc >> 8) & 0xff)) return null;
 
   const stridePerSample = channelWidths.reduce((a, b) => a + b, 0);
-  const sampleCount = Math.floor(dataSection.length / stridePerSample);
+  if (stridePerSample === 0) return null;
+  const sampleCount = Math.floor(payload.length / stridePerSample);
   const channels: number[][] = channelWidths.map(() => []);
-  const view = new DataView(dataSection.buffer, dataSection.byteOffset);
+  const view = new DataView(payload.buffer, payload.byteOffset);
 
   for (let s = 0; s < sampleCount; s++) {
     let offset = s * stridePerSample;
@@ -76,5 +103,5 @@ export function parseOscDataFrame(
       offset += w;
     });
   }
-  return { channels, rawData: dataSection };
+  return { channels, rawData: payload };
 }
