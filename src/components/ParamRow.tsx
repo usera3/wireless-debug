@@ -9,6 +9,7 @@ interface ParamRowProps {
 
 export function ParamRow({ param }: ParamRowProps) {
   const currentVal = useParamStore((s) => s.values[param.alias]);
+  const setValue = useParamStore((s) => s.setValue);
   const { readRegister, writeRegister } = useModbusOps();
   const [inputVal, setInputVal] = useState('');
   const [status, setStatus] = useState<'idle' | 'reading' | 'writing' | 'error'>('idle');
@@ -43,6 +44,7 @@ export function ParamRow({ param }: ParamRowProps) {
     setErrMsg('');
     try {
       await writeRegister(param, v);
+      setValue(param.alias, v);
       setStatus('idle');
     } catch (e) {
       setErrMsg(e instanceof Error ? e.message : 'error');
@@ -90,9 +92,11 @@ export function ParamRow({ param }: ParamRowProps) {
               写
             </button>
           )}
-          {status === 'reading' && <span className="text-xs text-yellow-400">读取中…</span>}
-          {status === 'writing' && <span className="text-xs text-yellow-400">写入中…</span>}
-          {status === 'error' && <span className="text-xs text-red-400">{errMsg}</span>}
+          <span className="inline-block w-14 text-xs">
+            {status === 'reading' && <span className="text-yellow-400">读取中…</span>}
+            {status === 'writing' && <span className="text-yellow-400">写入中…</span>}
+            {status === 'error' && <span className="text-red-400 truncate">{errMsg}</span>}
+          </span>
         </div>
       </td>
     </tr>

@@ -1,31 +1,31 @@
 import { useOscStore } from '../store/oscStore';
 import { useConnectionStore } from '../store/connectionStore';
-import { OscChannelConfig } from './OscChannelConfig';
+import { OscChannelConfig, buildChannelConfigs } from './OscChannelConfig';
 import { OscChart } from './OscChart';
 import { useOscController } from '../hooks/useOscController';
-import type { ChannelConfig } from '../store/oscStore';
 
 export function OscilloscoperPage() {
-  const { running, sampleRate, frameLen, waveData, setChannels } = useOscStore();
+  const { running, sampleRate, frameLen, waveData, configRows, numChannels, setChannels } = useOscStore();
   const connected = useConnectionStore((s) => s.connected);
   const { start, stop } = useOscController();
 
-  function handleApplyChannels(channels: ChannelConfig[]) {
+  function handleStart() {
+    const channels = buildChannelConfigs(configRows, numChannels);
     setChannels(channels);
+    start();
   }
 
   return (
     <div className="flex flex-col gap-4 p-4 h-full">
       {/* 通道配置区 */}
-      <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
-        <h2 className="text-sm font-semibold text-slate-300 mb-3">通道配置</h2>
-        <OscChannelConfig onApply={handleApplyChannels} />
+      <div className="bg-slate-800 rounded-lg p-3 border border-slate-700">
+        <OscChannelConfig />
       </div>
 
       {/* 控制栏 */}
       <div className="flex items-center gap-3 flex-wrap">
         <button
-          onClick={() => start()}
+          onClick={handleStart}
           disabled={!connected || running}
           className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed
                      text-white rounded text-sm font-medium transition-colors"

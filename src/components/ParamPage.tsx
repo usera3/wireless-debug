@@ -6,12 +6,10 @@ import { ParamRow } from './ParamRow';
 import { useModbusOps } from '../hooks/useModbusOps';
 
 export function ParamPage() {
-  const { pages, params, loadParams } = useParamStore();
+  const { pages, params, loadParams, activePage, search, setActivePage, setSearch } = useParamStore();
   const connected = useConnectionStore((s) => s.connected);
   const { readRegister } = useModbusOps();
 
-  const [activePage, setActivePage] = useState<string>('');
-  const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -83,7 +81,7 @@ export function ParamPage() {
             onClick={handleReadAll}
             disabled={!connected || bulkProgress !== null}
             className="px-3 py-1.5 bg-green-700 hover:bg-green-600 disabled:opacity-40
-                       text-white rounded text-sm transition-colors"
+                       text-white rounded text-sm transition-colors w-36 text-center"
           >
             {bulkProgress
               ? `读取中 ${bulkProgress.done}/${bulkProgress.total}`

@@ -18,7 +18,7 @@ export function ConnectionPanel() {
             disabled={connected}
             className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-slate-100
                        text-sm focus:outline-none focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-            placeholder="ws://192.168.4.1:8765"
+            placeholder="ws://192.168.4.1/ws"
           />
         </div>
 
@@ -51,7 +51,7 @@ export function ConnectionPanel() {
 
         {/* 说明 */}
         <p className="text-xs text-slate-500">
-          ESP32 默认 IP：192.168.4.1，WebSocket 端口：8765
+          ESP32 默认地址：ws://192.168.4.1/ws
         </p>
       </div>
     </div>

@@ -41,20 +41,15 @@ function buildSeriesData(values: number[]): Float32Array {
   return buf;
 }
 
-export function OscChart({ channels, sampleRate }: OscChartProps) {
+export function OscChart({ channels }: OscChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ChartGPUInstance | null>(null);
   const channelOrderRef = useRef<number[]>([]);
-  // store the options object so setOption can reuse it
   const optionsRef = useRef<ChartGPUOptions | null>(null);
   const initKeyRef = useRef<string>('');
-  // fixed window width in samples — the single source of truth
   const windowSamplesRef = useRef<number>(0);
-  // total samples from the previous render, needed to back-calculate windowSamples from %
   const prevTotalRef = useRef<number>(0);
-  // when true, user has panned away from the right edge — stop auto-scrolling
   const userPannedRef = useRef<boolean>(false);
-  // absolute sample-index range to hold when panned ([startSample, endSample])
   const pausedRangeRef = useRef<[number, number] | null>(null);
 
   const [gpuError, setGpuError] = useState<string | null>(null);
@@ -113,9 +108,8 @@ export function OscChart({ channels, sampleRate }: OscChartProps) {
         chartRef.current = chart;
         optionsRef.current = initialOptions;
 
-        // record initial window size (full data) and jump to end
         const firstValues = effectiveChannels.get(channelNos[0]) ?? [];
-        windowSamplesRef.current = Math.round(firstValues.length * 0.1); // show last 10%
+        windowSamplesRef.current = Math.round(firstValues.length * 0.1);
         prevTotalRef.current = firstValues.length;
         userPannedRef.current = false;
         pausedRangeRef.current = null;
@@ -145,32 +139,25 @@ export function OscChart({ channels, sampleRate }: OscChartProps) {
 
     const channelNos = channelOrderRef.current;
 
-    // If user manually dragged the zoom handles, getZoomRange() will reflect that.
-    // We must convert back to samples using prevTotalRef (the OLD total before this update),
-    // because effectiveChannels already contains the NEW data.
     const zoomRange = chart.getZoomRange();
     if (zoomRange && prevTotalRef.current > 0) {
       const prev = prevTotalRef.current;
       windowSamplesRef.current = Math.round(((zoomRange.end - zoomRange.start) / 100) * prev);
 
-      // Detect if user has panned away from the right edge (gap > 1 sample).
       const samplesFromEnd = Math.round(((100 - zoomRange.end) / 100) * prev);
       const wasPanned = userPannedRef.current;
       userPannedRef.current = samplesFromEnd > 1;
 
       if (userPannedRef.current) {
-        // Convert current % range to absolute sample indices and freeze them.
         pausedRangeRef.current = [
           Math.round((zoomRange.start / 100) * prev),
           Math.round((zoomRange.end   / 100) * prev),
         ];
       } else if (wasPanned && !userPannedRef.current) {
-        // User dragged back to the right edge — resume auto-scroll.
         pausedRangeRef.current = null;
       }
     }
 
-    // Build updated series array (reuse existing series metadata, only replace data)
     const newSeries = (opts.series ?? []).map((s: NonNullable<ChartGPUOptions['series']>[number], i: number) => {
       const chNo = channelNos[i];
       const values = chNo !== undefined ? (effectiveChannels.get(chNo) ?? []) : [];
@@ -181,22 +168,18 @@ export function OscChart({ channels, sampleRate }: OscChartProps) {
     optionsRef.current = newOptions;
     chart.setOption(newOptions);
 
-    // recompute zoom
     const firstCh = channelNos[0];
     const totalSamples = firstCh !== undefined ? (effectiveChannels.get(firstCh) ?? []).length : 0;
     if (totalSamples > 0 && windowSamplesRef.current > 0) {
       if (userPannedRef.current && pausedRangeRef.current) {
-        // Paused: hold the absolute x range by converting sample indices back to %.
         const [s, e] = pausedRangeRef.current;
         chart.setZoomRange((s / totalSamples) * 100, (e / totalSamples) * 100);
       } else if (!userPannedRef.current) {
-        // Auto-scroll: pin the fixed-width window to the right end.
         const spanPct = Math.min((windowSamplesRef.current / totalSamples) * 100, 100);
         chart.setZoomRange(100 - spanPct, 100);
       }
     }
 
-    // update prevTotal AFTER setZoomRange so next render reads the correct old total
     prevTotalRef.current = totalSamples;
   }, [effectiveChannels]);
 
@@ -210,10 +193,6 @@ export function OscChart({ channels, sampleRate }: OscChartProps) {
 
   return (
     <div className="border border-slate-700 rounded bg-slate-900 h-full relative">
-      <div className="absolute top-2 right-3 text-xs text-slate-500 z-10">
-        采样率 {sampleRate} Hz
-        {channels.size === 0 && <span className="ml-2 text-amber-400">（示例数据）</span>}
-      </div>
       <div ref={containerRef} className="w-full h-full" />
       {gpuError && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 rounded z-20">
