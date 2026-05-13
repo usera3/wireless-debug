@@ -56,6 +56,8 @@ export function OscChart({ channels, sampleInterval, labels }: OscChartProps) {
   const pausedRangeRef = useRef<[number, number] | null>(null);
 
   const [gpuError, setGpuError] = useState<string | null>(null);
+  const [yRange, setYRange] = useState<{ min: number; max: number } | null>(null);
+  const yRangeRef = useRef<{ min: number; max: number } | null>(null);
 
   const demoData = useMemo(() => generateDemoData(), []);
   const effectiveChannels = channels.size > 0 ? channels : demoData;
@@ -194,9 +196,88 @@ export function OscChart({ channels, sampleInterval, labels }: OscChartProps) {
     return () => ro.disconnect();
   }, []);
 
+  // ── y-axis zoom helpers ───────────────────────────────────────────────────
+  function applyYRange(range: { min: number; max: number } | null) {
+    const chart = chartRef.current;
+    const opts = optionsRef.current;
+    if (!chart || !opts) return;
+    yRangeRef.current = range;
+    setYRange(range);
+    const yAxis: ChartGPUOptions['yAxis'] = range
+      ? { type: 'value' as const, min: range.min, max: range.max }
+      : { type: 'value' as const };
+    const newOpts: ChartGPUOptions = { ...opts, yAxis };
+    optionsRef.current = newOpts;
+    chart.setOption(newOpts);
+  }
+
+  function getCurrentYRange(): { min: number; max: number } {
+    // 如果已手动设置，直接用
+    if (yRangeRef.current) return yRangeRef.current;
+    // 否则从当前所有通道数据中推算
+    const channelNos = channelOrderRef.current;
+    let globalMin = Infinity;
+    let globalMax = -Infinity;
+    for (const chNo of channelNos) {
+      for (const v of effectiveChannels.get(chNo) ?? []) {
+        if (v < globalMin) globalMin = v;
+        if (v > globalMax) globalMax = v;
+      }
+    }
+    if (!isFinite(globalMin) || !isFinite(globalMax)) return { min: -1, max: 1 };
+    const pad = (globalMax - globalMin) * 0.1 || 0.5;
+    return { min: globalMin - pad, max: globalMax + pad };
+  }
+
+  function handleYZoomIn() {
+    const { min, max } = getCurrentYRange();
+    const center = (min + max) / 2;
+    const half = (max - min) / 2 / 1.5;
+    applyYRange({ min: center - half, max: center + half });
+  }
+
+  function handleYZoomOut() {
+    const { min, max } = getCurrentYRange();
+    const center = (min + max) / 2;
+    const half = (max - min) / 2 * 1.5;
+    applyYRange({ min: center - half, max: center + half });
+  }
+
+  function handleYReset() {
+    applyYRange(null);
+  }
+
   return (
     <div className="border border-slate-700 rounded bg-slate-900 h-full relative">
       <div ref={containerRef} className="w-full h-full" />
+
+      {/* Y 轴缩放按钮 */}
+      <div className="absolute top-2 right-2 z-10 flex flex-col gap-1">
+        <button
+          onClick={handleYZoomIn}
+          title="Y轴放大"
+          className="w-7 h-7 flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm rounded border border-slate-600 leading-none"
+        >
+          Y+
+        </button>
+        <button
+          onClick={handleYZoomOut}
+          title="Y轴缩小"
+          className="w-7 h-7 flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-slate-200 text-sm rounded border border-slate-600 leading-none"
+        >
+          Y-
+        </button>
+        {yRange && (
+          <button
+            onClick={handleYReset}
+            title="重置Y轴"
+            className="w-7 h-7 flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-amber-400 text-xs rounded border border-slate-600 leading-none"
+          >
+            ↺
+          </button>
+        )}
+      </div>
+
       {gpuError && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 rounded z-20">
           <div className="text-center px-6 py-4 max-w-md">
