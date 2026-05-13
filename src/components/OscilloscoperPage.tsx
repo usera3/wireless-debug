@@ -61,7 +61,7 @@ export function OscilloscoperPage() {
 
       {/* 波形图区 */}
       <div className="flex-1 min-h-0">
-        <OscChart channels={waveData} sampleRate={sampleRate} />
+        <OscChart channels={waveData} sampleInterval={sampleRate > 0 ? 1 / sampleRate : 1} />
       </div>
     </div>
   );

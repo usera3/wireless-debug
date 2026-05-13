@@ -28,22 +28,23 @@ function generateDemoData(): Map<number, number[]> {
 
 interface OscChartProps {
   channels: Map<number, number[]>;
-  sampleRate: number;
+  /** 采样间隔（秒），用于 x 轴时间计算 */
+  sampleInterval: number;
   /** 可选：通道号 -> 显示标签（如 alias），未提供时默认 CH{n} */
   labels?: Map<number, string>;
 }
 
 // Build a Float32Array [x0,y0, x1,y1, ...] for a single channel
-function buildSeriesData(values: number[]): Float32Array {
+function buildSeriesData(values: number[], sampleInterval: number): Float32Array {
   const buf = new Float32Array(values.length * 2);
   for (let i = 0; i < values.length; i++) {
-    buf[i * 2]     = i;
+    buf[i * 2]     = i * sampleInterval;
     buf[i * 2 + 1] = values[i];
   }
   return buf;
 }
 
-export function OscChart({ channels, labels }: OscChartProps) {
+export function OscChart({ channels, sampleInterval, labels }: OscChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ChartGPUInstance | null>(null);
   const channelOrderRef = useRef<number[]>([]);
@@ -86,7 +87,7 @@ export function OscChart({ channels, labels }: OscChartProps) {
           theme: 'dark' as const,
           animation: false,
           autoScroll: false,
-          xAxis: { type: 'value' as const, name: 'Sample' },
+          xAxis: { type: 'value' as const, name: 'Time (s)' },
           yAxis: { type: 'value' as const },
           dataZoom: [{ type: 'inside' as const }, { type: 'slider' as const }],
           legend: { show: true },
@@ -94,7 +95,7 @@ export function OscChart({ channels, labels }: OscChartProps) {
             type: 'line' as const,
             name: labels?.get(chNo) ?? `CH${chNo}`,
             color: CHANNEL_COLORS[i % CHANNEL_COLORS.length],
-            data: buildSeriesData(effectiveChannels.get(chNo) ?? []),
+            data: buildSeriesData(effectiveChannels.get(chNo) ?? [], sampleInterval),
             lineStyle: { width: 3 },
             sampling: 'none' as const,
           })),
@@ -111,11 +112,11 @@ export function OscChart({ channels, labels }: OscChartProps) {
         optionsRef.current = initialOptions;
 
         const firstValues = effectiveChannels.get(channelNos[0]) ?? [];
-        windowSamplesRef.current = Math.round(firstValues.length * 0.1);
+        windowSamplesRef.current = firstValues.length;
         prevTotalRef.current = firstValues.length;
         userPannedRef.current = false;
         pausedRangeRef.current = null;
-        chart.setZoomRange(90, 100);
+        chart.setZoomRange(0, 100);
       } catch (err: unknown) {
         if (cancelled) return;
         const msg = err instanceof Error ? err.message : String(err);
@@ -163,7 +164,7 @@ export function OscChart({ channels, labels }: OscChartProps) {
     const newSeries = (opts.series ?? []).map((s: NonNullable<ChartGPUOptions['series']>[number], i: number) => {
       const chNo = channelNos[i];
       const values = chNo !== undefined ? (effectiveChannels.get(chNo) ?? []) : [];
-      return { ...s, data: buildSeriesData(values) };
+      return { ...s, data: buildSeriesData(values, sampleInterval) };
     }) as ChartGPUOptions['series'];
 
     const newOptions: ChartGPUOptions = { ...opts, series: newSeries };

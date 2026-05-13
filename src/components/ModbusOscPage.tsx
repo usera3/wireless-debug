@@ -113,7 +113,7 @@ export function ModbusOscPage() {
       <div className="flex-1 min-h-0">
         <OscChart
           channels={chartChannels}
-          sampleRate={0}
+          sampleInterval={interval > 0 ? interval / 1000 : 1}
           labels={chartLabels}
         />
       </div>
