@@ -9,6 +9,7 @@ interface ParamRowProps {
 
 export function ParamRow({ param }: ParamRowProps) {
   const currentVal = useParamStore((s) => s.values[param.alias]);
+  const flashSeq = useParamStore((s) => s.flashSeq[param.alias] ?? 0);
   const setValue = useParamStore((s) => s.setValue);
   const { readRegister, writeRegister } = useModbusOps();
   const [inputVal, setInputVal] = useState('');
@@ -57,7 +58,7 @@ export function ParamRow({ param }: ParamRowProps) {
       <td className="px-3 py-1.5 font-mono text-xs text-slate-500">{param.id}</td>
       <td className="px-3 py-1.5 font-mono text-xs text-blue-400">{param.alias}</td>
       <td className="px-3 py-1.5 text-slate-500 text-xs">{param.unit}</td>
-      <td className="px-3 py-1.5 font-mono text-green-400">{displayVal}</td>
+      <td key={flashSeq} className="px-3 py-1.5 font-mono text-green-400 value-flash">{displayVal}</td>
       <td className="px-3 py-1.5">
         <input
           type="text"
@@ -101,4 +102,3 @@ export function ParamRow({ param }: ParamRowProps) {
     </tr>
   );
 }
-

@@ -21,7 +21,8 @@ export interface ParamDef {
 interface ParamState {
   pages: string[];
   params: ParamDef[];
-  values: Record<string, number>; // alias -> 已解析值（实际值）
+  values: Record<string, number>;
+  flashSeq: Record<string, number>;
   activePage: string;
   search: string;
   loadParams: (params: ParamDef[], pages: string[]) => void;
@@ -34,11 +35,15 @@ export const useParamStore = create<ParamState>((set) => ({
   pages: [],
   params: [],
   values: {},
+  flashSeq: {},
   activePage: '',
   search: '',
   loadParams: (params, pages) => set({ params, pages }),
   setValue: (alias, val) =>
-    set((s) => ({ values: { ...s.values, [alias]: val } })),
+    set((s) => ({
+      values: { ...s.values, [alias]: val },
+      flashSeq: { ...s.flashSeq, [alias]: (s.flashSeq[alias] ?? 0) + 1 },
+    })),
   setActivePage: (page) => set({ activePage: page }),
   setSearch: (s) => set({ search: s }),
 }));

@@ -12,3 +12,12 @@ body {
   background-color: #0f172a;
   color: #e2e8f0;
 }
+
+@keyframes value-flash {
+  0%   { background-color: rgba(74, 222, 128, 0.35); }
+  100% { background-color: transparent; }
+}
+
+.value-flash {
+  animation: value-flash 0.8s ease-out;
+}

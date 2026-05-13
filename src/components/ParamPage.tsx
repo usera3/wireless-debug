@@ -11,8 +11,9 @@ export function ParamPage() {
   const { readRegister } = useModbusOps();
 
   const [loading, setLoading] = useState(false);
-  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; mode: 'page' | 'all' } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const cancelRef = useRef(false);
 
   // 加载 Excel
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -41,16 +42,41 @@ export function ParamPage() {
   );
 
   // 批量读取
-  async function handleReadAll() {
+  async function handleReadPage() {
     const targets = params.filter((p) => !p.hidden && p.page === activePage);
-    setBulkProgress({ done: 0, total: targets.length });
+    cancelRef.current = false;
+    setBulkProgress({ done: 0, total: targets.length, mode: 'page' });
     for (let i = 0; i < targets.length; i++) {
+      if (cancelRef.current) break;
       try {
         await readRegister(targets[i]);
       } catch {
         // 单条失败继续
       }
-      setBulkProgress({ done: i + 1, total: targets.length });
+      setBulkProgress({ done: i + 1, total: targets.length, mode: 'page' });
+    }
+    setBulkProgress(null);
+  }
+
+  async function handleReadAll() {
+    const targets = params.filter((p) => !p.hidden);
+    cancelRef.current = false;
+    setBulkProgress({ done: 0, total: targets.length, mode: 'all' });
+    let currentPage = activePage;
+    for (let i = 0; i < targets.length; i++) {
+      if (cancelRef.current) break;
+      const target = targets[i];
+      // 自动翻到正在读取的页
+      if (target.page !== currentPage) {
+        currentPage = target.page;
+        setActivePage(currentPage);
+      }
+      try {
+        await readRegister(target);
+      } catch {
+        // 单条失败继续
+      }
+      setBulkProgress({ done: i + 1, total: targets.length, mode: 'all' });
     }
     setBulkProgress(null);
   }
@@ -75,18 +101,35 @@ export function ParamPage() {
         />
         {loading && <span className="text-sm text-yellow-400">解析中…</span>}
 
-        {/* 全部读取 */}
+        {/* 读取按钮组 */}
         {pages.length > 0 && (
-          <button
-            onClick={handleReadAll}
-            disabled={!connected || bulkProgress !== null}
-            className="px-3 py-1.5 bg-green-700 hover:bg-green-600 disabled:opacity-40
-                       text-white rounded text-sm transition-colors w-36 text-center"
-          >
-            {bulkProgress
-              ? `读取中 ${bulkProgress.done}/${bulkProgress.total}`
-              : '↓ 全部读取'}
-          </button>
+          <div className="flex items-center gap-1">
+            <span className="text-sm text-slate-400 mr-1">读取：</span>
+            <button
+              onClick={bulkProgress?.mode === 'page' ? () => { cancelRef.current = true; } : handleReadPage}
+              disabled={!connected || bulkProgress?.mode === 'all'}
+              className={`px-3 py-1.5 text-white rounded text-sm transition-colors text-center disabled:opacity-40
+                ${bulkProgress?.mode === 'page'
+                  ? 'bg-red-700 hover:bg-red-600'
+                  : 'bg-green-700 hover:bg-green-600'}`}
+            >
+              {bulkProgress?.mode === 'page'
+                ? `${bulkProgress.done}/${bulkProgress.total}`
+                : '当前页'}
+            </button>
+            <button
+              onClick={bulkProgress?.mode === 'all' ? () => { cancelRef.current = true; } : handleReadAll}
+              disabled={!connected || bulkProgress?.mode === 'page'}
+              className={`px-3 py-1.5 text-white rounded text-sm transition-colors text-center disabled:opacity-40
+                ${bulkProgress?.mode === 'all'
+                  ? 'bg-red-700 hover:bg-red-600'
+                  : 'bg-green-700 hover:bg-green-600'}`}
+            >
+              {bulkProgress?.mode === 'all'
+                ? `${bulkProgress.done}/${bulkProgress.total}`
+                : '所有页'}
+            </button>
+          </div>
         )}
 
         {/* 搜索 */}
