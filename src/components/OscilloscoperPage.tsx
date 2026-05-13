@@ -1,5 +1,6 @@
 import { useOscStore } from '../store/oscStore';
 import { useConnectionStore } from '../store/connectionStore';
+import { useModbusOscStore } from '../store/modbusOscStore';
 import { OscChannelConfig, buildChannelConfigs } from './OscChannelConfig';
 import { OscChart } from './OscChart';
 import { useOscController } from '../hooks/useOscController';
@@ -7,6 +8,7 @@ import { useOscController } from '../hooks/useOscController';
 export function OscilloscoperPage() {
   const { running, sampleRate, frameLen, waveData, configRows, numChannels, setChannels } = useOscStore();
   const connected = useConnectionStore((s) => s.connected);
+  const modbusOscRunning = useModbusOscStore((s) => s.running);
   const { start, stop } = useOscController();
 
   function handleStart() {
@@ -26,7 +28,7 @@ export function OscilloscoperPage() {
       <div className="flex items-center gap-3 flex-wrap">
         <button
           onClick={handleStart}
-          disabled={!connected || running}
+          disabled={!connected || running || modbusOscRunning}
           className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed
                      text-white rounded text-sm font-medium transition-colors"
         >
@@ -43,6 +45,9 @@ export function OscilloscoperPage() {
 
         {/* 状态栏 */}
         <div className="ml-auto flex items-center gap-4 text-xs text-slate-400">
+          {modbusOscRunning && (
+            <span className="text-amber-400">⚠️ 参数示波器运行中，请先停止</span>
+          )}
           <span>
             状态:{' '}
             <span className={running ? 'text-green-400' : 'text-slate-500'}>

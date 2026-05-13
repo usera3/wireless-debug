@@ -29,6 +29,8 @@ function generateDemoData(): Map<number, number[]> {
 interface OscChartProps {
   channels: Map<number, number[]>;
   sampleRate: number;
+  /** 可选：通道号 -> 显示标签（如 alias），未提供时默认 CH{n} */
+  labels?: Map<number, string>;
 }
 
 // Build a Float32Array [x0,y0, x1,y1, ...] for a single channel
@@ -41,7 +43,7 @@ function buildSeriesData(values: number[]): Float32Array {
   return buf;
 }
 
-export function OscChart({ channels }: OscChartProps) {
+export function OscChart({ channels, labels }: OscChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ChartGPUInstance | null>(null);
   const channelOrderRef = useRef<number[]>([]);
@@ -90,7 +92,7 @@ export function OscChart({ channels }: OscChartProps) {
           legend: { show: true },
           series: channelNos.map((chNo, i) => ({
             type: 'line' as const,
-            name: `CH${chNo}`,
+            name: labels?.get(chNo) ?? `CH${chNo}`,
             color: CHANNEL_COLORS[i % CHANNEL_COLORS.length],
             data: buildSeriesData(effectiveChannels.get(chNo) ?? []),
             lineStyle: { width: 3 },

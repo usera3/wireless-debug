@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useConnectionStore } from '../store/connectionStore';
 
-type Tab = 'osc' | 'params' | 'connection' | 'debug';
+type Tab = 'osc' | 'modbusOsc' | 'params' | 'connection' | 'debug';
 
 interface LayoutProps {
   activeTab: Tab;
@@ -10,7 +10,8 @@ interface LayoutProps {
 }
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'osc', label: '示波器', icon: '📈' },
+  { id: 'osc', label: '地址示波器', icon: '📈' },
+  { id: 'modbusOsc', label: '参数示波器', icon: '📉' },
   { id: 'params', label: '参数编辑', icon: '⚙️' },
   { id: 'connection', label: '连接设置', icon: '🔌' },
   { id: 'debug', label: '调试信息', icon: '🐛' },
@@ -38,7 +39,7 @@ export function Layout({ activeTab, onTabChange, children }: LayoutProps) {
 
       <div className="flex flex-1 overflow-hidden">
         {/* 左侧侧边栏 */}
-        <nav className="w-40 shrink-0 bg-slate-800 border-r border-slate-700 flex flex-col pt-2">
+        <nav className="w-36 shrink-0 bg-slate-800 border-r border-slate-700 flex flex-col pt-2">
           {TABS.map((tab) => (
             <button
               key={tab.id}

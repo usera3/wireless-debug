@@ -4,10 +4,11 @@ import { ConnectionPanel } from './components/ConnectionPanel';
 import { OscilloscoperPage } from './components/OscilloscoperPage';
 import { ParamPage } from './components/ParamPage';
 import { DebugPage } from './components/DebugPage';
+import { ModbusOscPage } from './components/ModbusOscPage';
 import { useConnectionStore } from './store/connectionStore';
 import { wsClient } from './lib/wsClient';
 
-type Tab = 'osc' | 'params' | 'connection' | 'debug';
+type Tab = 'osc' | 'modbusOsc' | 'params' | 'connection' | 'debug';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('osc');
@@ -29,6 +30,7 @@ export default function App() {
 
   const content = {
     osc: <OscilloscoperPage />,
+    modbusOsc: <ModbusOscPage />,
     params: <ParamPage />,
     connection: <ConnectionPanel />,
     debug: <DebugPage />,
