@@ -14,7 +14,7 @@ export function OscilloscoperPage() {
   function handleStart() {
     const channels = buildChannelConfigs(configRows, numChannels);
     setChannels(channels);
-    start();
+    start(channels);
   }
 
   return (

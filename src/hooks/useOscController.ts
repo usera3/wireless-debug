@@ -11,7 +11,7 @@ import {
   parseFC04Response,
   parseOscDataFrame,
 } from '../lib/oscilloscope';
-import { useOscStore } from '../store/oscStore';
+import { useOscStore, ChannelConfig } from '../store/oscStore';
 import { frameRouter } from '../lib/frameRouter';
 
 // 模块级心跳 timer，与组件生命周期无关，切页不会丢失
@@ -19,7 +19,6 @@ let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
 export function useOscController() {
   const {
-    channels,
     setRunning,
     setSampleRate,
     setMaxChannels,
@@ -30,7 +29,7 @@ export function useOscController() {
   } = useOscStore();
 
   /** 依次查询设备信息，再设置通道，最后开始采样 */
-  const start = useCallback(async () => {
+  const start = useCallback(async (channels: ChannelConfig[]) => {
     clearWaveData();
 
     // 单请求-响应辅助：发送帧，等待 Modbus 响应（超时 1000ms）
@@ -95,7 +94,7 @@ export function useOscController() {
     } catch (err) {
       console.error('[osc] start failed', err);
     }
-  }, [channels, clearWaveData, frameLen, pushSamples, setFrameLen, setMaxChannels, setRunning, setSampleRate]);
+  }, [clearWaveData, frameLen, pushSamples, setFrameLen, setMaxChannels, setRunning, setSampleRate]);
 
   const stop = useCallback(() => {
     wsClient.send(buildStopOsc());
