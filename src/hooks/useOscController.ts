@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback } from 'react';
 import { wsClient } from '../lib/wsClient';
 import {
   buildQueryFrameLen,
@@ -14,6 +14,9 @@ import {
 import { useOscStore } from '../store/oscStore';
 import { frameRouter } from '../lib/frameRouter';
 
+// 模块级心跳 timer，与组件生命周期无关，切页不会丢失
+let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
 export function useOscController() {
   const {
     channels,
@@ -25,8 +28,6 @@ export function useOscController() {
     pushSamples,
     clearWaveData,
   } = useOscStore();
-
-  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   /** 依次查询设备信息，再设置通道，最后开始采样 */
   const start = useCallback(async () => {
@@ -86,8 +87,9 @@ export function useOscController() {
         });
       });
 
-      // 6. 心跳 2s
-      heartbeatRef.current = setInterval(() => {
+      // 6. 心跳 2s（模块级，切页不会停）
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+      heartbeatTimer = setInterval(() => {
         wsClient.send(buildHeartbeat());
       }, 2000);
     } catch (err) {
@@ -98,19 +100,12 @@ export function useOscController() {
   const stop = useCallback(() => {
     wsClient.send(buildStopOsc());
     setRunning(false);
-    if (heartbeatRef.current) {
-      clearInterval(heartbeatRef.current);
-      heartbeatRef.current = null;
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
     }
     frameRouter.onOscFrame(() => {}); // 清除示波 handler
   }, [setRunning]);
-
-  // 组件卸载时自动停止
-  useEffect(() => {
-    return () => {
-      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
-    };
-  }, []);
 
   return { start, stop };
 }
