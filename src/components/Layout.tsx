@@ -41,8 +41,8 @@ export function Layout({ activeTab, onTabChange, children }: LayoutProps) {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* 左侧侧边栏 */}
-        <nav className="w-36 shrink-0 bg-slate-800 border-r border-slate-700 flex flex-col pt-2">
+        {/* 左侧侧边栏（桌面） */}
+        <nav className="hidden md:flex w-36 shrink-0 bg-slate-800 border-r border-slate-700 flex-col pt-2">
           {TABS.map((tab) => (
             <button
               key={tab.id}
@@ -59,9 +59,29 @@ export function Layout({ activeTab, onTabChange, children }: LayoutProps) {
           ))}
         </nav>
 
-        {/* 内容区 */}
-        <main className="flex-1 overflow-auto">{children}</main>
+        {/* 内容区（手机底部留出 Tab Bar 的空间） */}
+        <main className="flex-1 overflow-auto min-h-0">
+          {children}
+        </main>
       </div>
+
+      {/* 底部 Tab Bar（手机） */}
+      <nav className="md:hidden shrink-0 flex bg-slate-800 border-t border-slate-700">
+        {TABS.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => onTabChange(tab.id)}
+            className={`flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-xs transition-colors ${
+              activeTab === tab.id
+                ? 'text-blue-400'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <span className="text-lg leading-none">{tab.icon}</span>
+            <span className="leading-tight">{tab.label}</span>
+          </button>
+        ))}
+      </nav>
     </div>
   );
 }

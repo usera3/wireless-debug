@@ -134,13 +134,12 @@ export function ParamPage() {
           <table className="w-full border-collapse">
             <thead className="sticky top-0 bg-slate-800 text-xs text-slate-400 border-b border-slate-700">
               <tr>
-                <th className="px-3 py-2 text-left font-medium">ID</th>
-                <th className="px-3 py-2 text-left font-medium">Alias</th>
-                <th className="px-3 py-2 text-left font-medium">名称</th>
-                <th className="px-3 py-2 text-left font-medium">单位</th>
-                <th className="px-3 py-2 text-left font-medium">当前值</th>
-                <th className="px-3 py-2 text-left font-medium">写入值</th>
-                <th className="px-3 py-2 text-left font-medium">操作</th>
+                <th className="px-3 py-2 text-left font-medium whitespace-nowrap">ID</th>
+                <th className="px-3 py-2 text-left font-medium whitespace-nowrap">名称</th>
+                <th className="px-3 py-2 text-left font-medium whitespace-nowrap">单位</th>
+                <th className="px-3 py-2 text-left font-medium whitespace-nowrap">当前值</th>
+                <th className="px-3 py-2 text-left font-medium whitespace-nowrap">写入值</th>
+                <th className="px-3 py-2 text-left font-medium whitespace-nowrap">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -149,7 +148,7 @@ export function ParamPage() {
               ))}
               {pageParams.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-3 py-8 text-center text-slate-500 text-sm">
+                  <td colSpan={6} className="px-3 py-8 text-center text-slate-500 text-sm">
                     {search ? '未找到匹配参数' : '该页无参数'}
                   </td>
                 </tr>

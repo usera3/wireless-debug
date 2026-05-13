@@ -79,10 +79,10 @@ export function OscChannelConfig() {
         </select>
       </div>
 
-      {/* 双栏布局 */}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+      {/* 手机单栏 / 桌面双栏 */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
         {activeRows.map((row, i) => (
-          <div key={i} className="grid grid-cols-[1.2rem_5.5rem_7rem_1fr] gap-1 items-center">
+          <div key={i} className="grid grid-cols-[1.2rem_1fr_1fr_1.5fr] gap-1 items-center">
             <span className="text-slate-500 text-xs text-right">{i + 1}</span>
             <input
               type="text"

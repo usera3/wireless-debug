@@ -56,7 +56,6 @@ export function ParamRow({ param }: ParamRowProps) {
     <tr className="border-b border-slate-700 hover:bg-slate-800/50 text-sm">
       <td className="px-3 py-1.5 font-mono text-xs text-slate-500">{param.id}</td>
       <td className="px-3 py-1.5 font-mono text-xs text-blue-400">{param.alias}</td>
-      <td className="px-3 py-1.5 text-slate-300">{param.name}</td>
       <td className="px-3 py-1.5 text-slate-500 text-xs">{param.unit}</td>
       <td className="px-3 py-1.5 font-mono text-green-400">{displayVal}</td>
       <td className="px-3 py-1.5">
@@ -67,7 +66,7 @@ export function ParamRow({ param }: ParamRowProps) {
           onKeyDown={(e) => e.key === 'Enter' && !param.readOnly && handleWrite()}
           disabled={param.readOnly}
           placeholder={displayVal}
-          className="w-28 bg-slate-700 border border-slate-600 rounded px-2 py-0.5 text-slate-100
+          className="w-20 bg-slate-700 border border-slate-600 rounded px-2 py-0.5 text-slate-100
                      text-xs font-mono disabled:opacity-40 disabled:cursor-not-allowed
                      focus:outline-none focus:border-blue-500"
         />
@@ -77,7 +76,7 @@ export function ParamRow({ param }: ParamRowProps) {
           <button
             onClick={handleRead}
             disabled={status === 'reading' || status === 'writing'}
-            className="px-2 py-0.5 bg-slate-600 hover:bg-slate-500 disabled:opacity-40
+            className="px-3 py-1.5 sm:px-2 sm:py-0.5 bg-slate-600 hover:bg-slate-500 disabled:opacity-40
                        text-white rounded text-xs transition-colors"
           >
             读
@@ -86,7 +85,7 @@ export function ParamRow({ param }: ParamRowProps) {
             <button
               onClick={handleWrite}
               disabled={status === 'reading' || status === 'writing' || inputVal === ''}
-              className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40
+              className="px-3 py-1.5 sm:px-2 sm:py-0.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40
                          text-white rounded text-xs transition-colors"
             >
               写
@@ -102,3 +101,4 @@ export function ParamRow({ param }: ParamRowProps) {
     </tr>
   );
 }
+
