@@ -1,20 +1,15 @@
-import { useEffect, useRef, useMemo } from 'react';
-import {
-  lightningChart,
-  AxisTickStrategies,
-  emptyFill,
-  SolidLine,
-  SolidFill,
-  ColorHEX,
-  type ChartXY,
-  type PointLineAreaSeries,
-} from '@lightningchart/lcjs';
+import { useEffect, useMemo, useRef } from 'react';
+import uPlot from 'uplot';
+import 'uplot/dist/uPlot.min.css';
 
 const CHANNEL_COLORS = [
   '#4ade80', '#60a5fa', '#f97316', '#e879f9',
   '#facc15', '#34d399', '#f87171', '#a78bfa',
   '#fb923c', '#38bdf8', '#4ade80', '#f472b6',
 ];
+
+type AlignedSeries = number[] | (number | null)[];
+type AlignedData = [number[], ...AlignedSeries[]];
 
 function generateDemoData(): Map<number, number[]> {
   const map = new Map<number, number[]>();
@@ -31,6 +26,50 @@ function generateDemoData(): Map<number, number[]> {
   return map;
 }
 
+function buildAlignedData(channelNos: number[], channels: Map<number, number[]>, sampleInterval: number): AlignedData {
+  const maxLen = channelNos.reduce((max, chNo) => Math.max(max, channels.get(chNo)?.length ?? 0), 0);
+  const xData = Array.from({ length: maxLen }, (_, i) => i * sampleInterval);
+  const seriesData = channelNos.map((chNo) => {
+    const values = channels.get(chNo) ?? [];
+    const aligned = new Array<number | null>(maxLen).fill(null);
+    for (let i = 0; i < values.length; i++) {
+      aligned[i] = values[i];
+    }
+    return aligned;
+  });
+
+  return [xData, ...seriesData];
+}
+
+function getVisibleYRange(data: AlignedData, xMin: number, xMax: number): { min: number; max: number } | null {
+  const xData = data[0];
+  if (xData.length === 0) return null;
+
+  let min = Number.POSITIVE_INFINITY;
+  let max = Number.NEGATIVE_INFINITY;
+
+  for (let seriesIdx = 1; seriesIdx < data.length; seriesIdx++) {
+    const series = data[seriesIdx];
+    for (let i = 0; i < xData.length; i++) {
+      const x = xData[i];
+      if (x < xMin || x > xMax) continue;
+      const value = series[i];
+      if (value == null || Number.isNaN(value)) continue;
+      if (value < min) min = value;
+      if (value > max) max = value;
+    }
+  }
+
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
+  if (min === max) {
+    const pad = min === 0 ? 1 : Math.abs(min) * 0.1;
+    return { min: min - pad, max: max + pad };
+  }
+
+  const pad = (max - min) * 0.1;
+  return { min: min - pad, max: max + pad };
+}
+
 interface OscChartProps {
   channels: Map<number, number[]>;
   /** 采样间隔（秒），用于 x 轴时间计算 */
@@ -41,193 +80,263 @@ interface OscChartProps {
 
 export function OscChart({ channels, sampleInterval, labels }: OscChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<ChartXY | null>(null);
-  const seriesRef = useRef<Map<number, PointLineAreaSeries>>(new Map());
+  const plotRef = useRef<uPlot | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const channelOrderRef = useRef<number[]>([]);
-  const initKeyRef = useRef<string>('');
-  const prevTotalRef = useRef<number>(0);
-  const userPannedRef = useRef<boolean>(false);
-  const pausedRangeRef = useRef<{ start: number; end: number } | null>(null);
   const renderedCountsRef = useRef<Map<number, number>>(new Map());
+  const alignedDataRef = useRef<AlignedData>([[]]);
+  const followLatestRef = useRef(true);
+  const yAutoRef = useRef(true);
+  const syncingScalesRef = useRef(false);
 
   const demoData = useMemo(() => generateDemoData(), []);
   const effectiveChannels = channels.size > 0 ? channels : demoData;
-
   const currentKey = `${sampleInterval}:${Array.from(effectiveChannels.keys()).sort().join(',')}`;
 
-  // ── chart initialization ──────────────────────────────────────────────────
   useEffect(() => {
-    if (!containerRef.current || effectiveChannels.size === 0) return;
-    if (currentKey === initKeyRef.current) return;
-    initKeyRef.current = currentKey;
-
     const container = containerRef.current;
+    if (!container || effectiveChannels.size === 0) return;
+
     const channelNos = Array.from(effectiveChannels.keys()).sort((a, b) => a - b);
     channelOrderRef.current = channelNos;
+    renderedCountsRef.current = new Map(channelNos.map((chNo) => [chNo, effectiveChannels.get(chNo)?.length ?? 0]));
+    alignedDataRef.current = buildAlignedData(channelNos, effectiveChannels, sampleInterval);
+    followLatestRef.current = true;
+    yAutoRef.current = true;
 
-    // Dispose previous chart
-    if (chartRef.current) {
-      chartRef.current.dispose();
-      chartRef.current = null;
-      seriesRef.current.clear();
-      renderedCountsRef.current.clear();
-    }
+    plotRef.current?.destroy();
+    resizeObserverRef.current?.disconnect();
 
-    const chart = lightningChart().ChartXY({
+    const initialWidth = Math.max(container.clientWidth, 320);
+    const initialHeight = Math.max(container.clientHeight, 240);
+
+    const plot = new uPlot(
+      {
+        width: initialWidth,
+        height: initialHeight,
+        padding: [8, 16, 8, 8],
+        class: 'osc-uplot',
+        cursor: {
+          drag: {
+            setScale: true,
+            x: true,
+            y: true,
+          },
+          bind: {
+            dblclick: (self, _target, handler) => (event) => {
+              event.preventDefault();
+              handler(event);
+
+              const xScale = self.scales.x;
+              if (xScale.min == null || xScale.max == null) return null;
+
+              const yRange = getVisibleYRange(alignedDataRef.current, xScale.min, xScale.max);
+              if (yRange) {
+                yAutoRef.current = true;
+                syncingScalesRef.current = true;
+                self.setScale('y', yRange);
+                syncingScalesRef.current = false;
+              }
+              return null;
+            },
+          },
+        },
+        legend: {
+          show: true,
+          live: true,
+        },
+        scales: {
+          x: {
+            time: false,
+          },
+          y: {
+            auto: false,
+          },
+        },
+        axes: [
+          {
+            stroke: '#94a3b8',
+            grid: { stroke: 'rgba(148, 163, 184, 0.12)' },
+            ticks: { stroke: '#475569' },
+            label: 'Time (s)',
+          },
+          {
+            stroke: '#94a3b8',
+            grid: { stroke: 'rgba(148, 163, 184, 0.12)' },
+            ticks: { stroke: '#475569' },
+          },
+        ],
+        series: [
+          {
+            label: 'Time',
+            value: (_self, rawValue) => `${Number(rawValue).toFixed(6)} s`,
+          },
+          ...channelNos.map((chNo, i) => ({
+            label: labels?.get(chNo) ?? `CH${chNo}`,
+            stroke: CHANNEL_COLORS[i % CHANNEL_COLORS.length],
+            width: 2,
+            spanGaps: false,
+            points: { show: false },
+          })),
+        ],
+        hooks: {
+          setScale: [
+            (self, scaleKey) => {
+              if (syncingScalesRef.current) return;
+
+              if (scaleKey === 'x') {
+                const xScale = self.scales.x;
+                const maxX = alignedDataRef.current[0][alignedDataRef.current[0].length - 1] ?? 0;
+                if (xScale.max != null) {
+                  followLatestRef.current = maxX - xScale.max <= sampleInterval * 2;
+                }
+              }
+
+              if (scaleKey === 'y') {
+                yAutoRef.current = false;
+              }
+            },
+          ],
+          ready: [
+            (self) => {
+              const xData = alignedDataRef.current[0];
+              if (xData.length === 0) return;
+              const xMin = xData[0];
+              const xMax = xData[xData.length - 1];
+              const yRange = getVisibleYRange(alignedDataRef.current, xMin, xMax);
+
+              syncingScalesRef.current = true;
+              self.batch(() => {
+                self.setScale('x', { min: xMin, max: xMax });
+                if (yRange) {
+                  self.setScale('y', yRange);
+                }
+              });
+              syncingScalesRef.current = false;
+            },
+          ],
+        },
+      },
+      alignedDataRef.current,
       container,
-    })
-      .setTitle('')
-      .setBackgroundFillStyle(emptyFill)
-      .setSeriesBackgroundFillStyle(emptyFill)
-      .setPadding({ left: 8, right: 16, top: 8, bottom: 8 });
+    );
 
-    // Configure axes for dark theme
-    chart.getDefaultAxisX()
-      .setTitle('Time (s)')
-      .setTickStrategy(AxisTickStrategies.Numeric)
-      .setStrokeStyle(new SolidLine({
-        thickness: 1,
-        fillStyle: new SolidFill({ color: ColorHEX('#64748b') }),
-      }));
+    plotRef.current = plot;
 
-    chart.getDefaultAxisY()
-      .setTitle('')
-      .setTickStrategy(AxisTickStrategies.Numeric)
-      .setStrokeStyle(new SolidLine({
-        thickness: 1,
-        fillStyle: new SolidFill({ color: ColorHEX('#64748b') }),
-      }));
-
-    // Create series for each channel
-    channelNos.forEach((chNo, i) => {
-      const values = effectiveChannels.get(chNo) ?? [];
-      const series = chart.addLineSeries()
-        .setName(labels?.get(chNo) ?? `CH${chNo}`)
-        .setStrokeStyle(new SolidLine({
-          thickness: 2,
-          fillStyle: new SolidFill({ color: ColorHEX(CHANNEL_COLORS[i % CHANNEL_COLORS.length]) }),
-        }));
-
-      // Add data points
-      if (values.length > 0) {
-        series.appendSamples({
-          xValues: values.map((_, j) => j * sampleInterval),
-          yValues: values,
-        });
-      }
-
-      renderedCountsRef.current.set(chNo, values.length);
-      seriesRef.current.set(chNo, series);
+    const resizeObserver = new ResizeObserver(() => {
+      if (!containerRef.current || !plotRef.current) return;
+      plotRef.current.setSize({
+        width: Math.max(containerRef.current.clientWidth, 320),
+        height: Math.max(containerRef.current.clientHeight, 240),
+      });
     });
-
-    chartRef.current = chart;
-    prevTotalRef.current = effectiveChannels.get(channelNos[0])?.length ?? 0;
-    userPannedRef.current = false;
-    pausedRangeRef.current = null;
-
-    // Auto-fit to show all data initially
-    chart.getDefaultAxisX().fit(false);
-    chart.getDefaultAxisY().fit(false);
+    resizeObserver.observe(container);
+    resizeObserverRef.current = resizeObserver;
 
     return () => {
-      chart.dispose();
-      chartRef.current = null;
-      seriesRef.current.clear();
-      renderedCountsRef.current.clear();
-      initKeyRef.current = '';
+      resizeObserver.disconnect();
+      resizeObserverRef.current = null;
+      plot.destroy();
+      if (plotRef.current === plot) {
+        plotRef.current = null;
+      }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentKey]);
+  }, [currentKey, effectiveChannels, labels, sampleInterval]);
 
-  // ── incremental data update ───────────────────────────────────────────────
   useEffect(() => {
-    const chart = chartRef.current;
-    if (!chart) return;
+    const plot = plotRef.current;
+    if (!plot) return;
 
     const channelNos = channelOrderRef.current;
+    const currentData = alignedDataRef.current;
+    const xData = currentData[0];
+    let needsFullRebuild = xData.length === 0 && channelNos.some((chNo) => (effectiveChannels.get(chNo)?.length ?? 0) > 0);
 
-    // Check if user has panned away from the end
-    const axisX = chart.getDefaultAxisX();
-    const interval = axisX.getInterval();
-    const firstCh = channelNos[0];
-    const totalSamples = firstCh !== undefined ? (effectiveChannels.get(firstCh)?.length ?? 0) : 0;
-
-    if (totalSamples > 0 && prevTotalRef.current > 0) {
-      const maxX = totalSamples * sampleInterval;
-      const viewEnd = interval.end;
-      const wasPanned = userPannedRef.current;
-      userPannedRef.current = maxX - viewEnd > sampleInterval * 2;
-
-      if (userPannedRef.current) {
-        pausedRangeRef.current = { start: interval.start, end: interval.end };
-      } else if (wasPanned && !userPannedRef.current) {
-        pausedRangeRef.current = null;
-      }
-    }
-
-    // Update each series with new data
-    channelNos.forEach((chNo) => {
-      const series = seriesRef.current.get(chNo);
-      if (!series) return;
+    for (const chNo of channelNos) {
       const values = effectiveChannels.get(chNo) ?? [];
       const renderedCount = renderedCountsRef.current.get(chNo) ?? 0;
-
       if (values.length < renderedCount) {
-        series.clear();
-        if (values.length > 0) {
-          series.appendSamples({
-            xValues: values.map((_, j) => j * sampleInterval),
-            yValues: values,
-          });
-        }
-        renderedCountsRef.current.set(chNo, values.length);
-        return;
-      }
-
-      if (values.length === renderedCount) return;
-
-      const appendedValues = values.slice(renderedCount);
-      if (appendedValues.length > 0) {
-        series.appendSamples({
-          xValues: appendedValues.map((_, j) => (renderedCount + j) * sampleInterval),
-          yValues: appendedValues,
-        });
-      }
-      renderedCountsRef.current.set(chNo, values.length);
-    });
-
-    // Handle auto-scroll
-    if (totalSamples > 0) {
-      if (userPannedRef.current && pausedRangeRef.current) {
-        axisX.setInterval({
-          start: pausedRangeRef.current.start,
-          end: pausedRangeRef.current.end,
-        });
-      } else if (!userPannedRef.current) {
-        const maxX = totalSamples * sampleInterval;
-        const windowSize = prevTotalRef.current > 0
-          ? (prevTotalRef.current * sampleInterval)
-          : maxX;
-        const span = Math.min(windowSize, maxX);
-        axisX.setInterval({ start: maxX - span, end: maxX });
+        needsFullRebuild = true;
+        break;
       }
     }
 
-    prevTotalRef.current = totalSamples;
+    if (needsFullRebuild) {
+      alignedDataRef.current = buildAlignedData(channelNos, effectiveChannels, sampleInterval);
+      renderedCountsRef.current = new Map(channelNos.map((chNo) => [chNo, effectiveChannels.get(chNo)?.length ?? 0]));
+    } else {
+      let maxLen = xData.length;
+      channelNos.forEach((chNo) => {
+        const values = effectiveChannels.get(chNo) ?? [];
+        const renderedCount = renderedCountsRef.current.get(chNo) ?? 0;
+        if (values.length > maxLen) {
+          maxLen = values.length;
+        }
+        if (values.length === renderedCount) return;
+
+        const seriesIndex = channelNos.indexOf(chNo) + 1;
+        const seriesData = alignedDataRef.current[seriesIndex] as (number | null)[];
+        for (let i = renderedCount; i < values.length; i++) {
+          seriesData[i] = values[i];
+        }
+        renderedCountsRef.current.set(chNo, values.length);
+      });
+
+      if (maxLen > xData.length) {
+        for (let i = xData.length; i < maxLen; i++) {
+          xData[i] = i * sampleInterval;
+        }
+      }
+
+      channelNos.forEach((chNo, channelIdx) => {
+        const values = effectiveChannels.get(chNo) ?? [];
+        const seriesData = alignedDataRef.current[channelIdx + 1] as (number | null)[];
+        if (seriesData.length < maxLen) {
+          for (let i = seriesData.length; i < maxLen; i++) {
+            seriesData[i] = i < values.length ? values[i] : null;
+          }
+        }
+        for (let i = values.length; i < maxLen; i++) {
+          if (seriesData[i] === undefined) {
+            seriesData[i] = null;
+          }
+        }
+      });
+    }
+
+    const nextData = alignedDataRef.current;
+    const nextXData = nextData[0];
+    const nextMaxX = nextXData[nextXData.length - 1] ?? 0;
+    const currentXScale = plot.scales.x;
+    const currentSpan = currentXScale.max != null && currentXScale.min != null
+      ? currentXScale.max - currentXScale.min
+      : nextMaxX - (nextXData[0] ?? 0);
+
+    syncingScalesRef.current = true;
+    plot.batch(() => {
+      plot.setData(nextData, false);
+
+      if (followLatestRef.current && nextXData.length > 0) {
+        const span = currentSpan > 0 ? Math.min(currentSpan, nextMaxX - (nextXData[0] ?? 0)) : nextMaxX - (nextXData[0] ?? 0);
+        plot.setScale('x', {
+          min: Math.max((nextXData[0] ?? 0), nextMaxX - span),
+          max: nextMaxX,
+        });
+      }
+
+      if (yAutoRef.current) {
+        const xScale = plot.scales.x;
+        const yRange = getVisibleYRange(nextData, xScale.min ?? 0, xScale.max ?? nextMaxX);
+        if (yRange) {
+          plot.setScale('y', yRange);
+        }
+      }
+    });
+    syncingScalesRef.current = false;
   }, [effectiveChannels, sampleInterval]);
 
-  // ── resize ────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const ro = new ResizeObserver(() => {
-      // LightningChart handles container resize internally once attached.
-    });
-    ro.observe(containerRef.current);
-    return () => ro.disconnect();
-  }, []);
-
   return (
-    <div className="border border-slate-700 rounded bg-slate-900 h-full relative">
+    <div className="border border-slate-700 rounded bg-slate-900 h-full relative overflow-hidden">
       <div ref={containerRef} className="w-full h-full" />
     </div>
   );
