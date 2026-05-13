@@ -88,9 +88,8 @@ export class FrameRouter {
       }
 
       // ── buf 开头即为 osc 帧头 ─────────────────────────────────────────────
-      // 最短需要：frameLen + 1（mbLen 字节）
-      const minNeeded = this.frameLen + 1;
-      if (this.buf.length < minNeeded) {
+      // 最少需要 frameLen 字节才能读到完整的 osc 帧（含尾部 magic）
+      if (this.buf.length < this.frameLen) {
         // 数据不够，等待更多数据
         break;
       }
@@ -103,11 +102,15 @@ export class FrameRouter {
         continue;
       }
 
-      // 读 mbLen
-      const mbLen = this.buf[this.frameLen];
+      // mbLen 可选：紧跟帧尾之后若存在且首字节不是 0xFF（新帧头），则视为 mbLen 字节
+      // 若下一字节是 0xFF 或 buffer 已无更多字节，则本帧无附加 Modbus 数据
+      const hasMbLen =
+        this.buf.length > this.frameLen &&
+        this.buf[this.frameLen] !== 0xff;
+      const mbLen = hasMbLen ? this.buf[this.frameLen] : 0;
 
-      // 完整帧所需字节 = frameLen + 1(mbLen) + mbLen
-      const totalNeeded = this.frameLen + 1 + mbLen;
+      // 完整帧所需字节 = frameLen + (hasMbLen ? 1 + mbLen : 0)
+      const totalNeeded = this.frameLen + (hasMbLen ? 1 + mbLen : 0);
       if (this.buf.length < totalNeeded) {
         // 附加 Modbus 数据还没到齐，等待
         break;
@@ -132,7 +135,7 @@ export class FrameRouter {
       this.rxLogHooks.forEach((h) => h(oscFrame, 'osc'));
 
       // 分发附加 Modbus 数据（若有）
-      if (mbLen > 0) {
+      if (hasMbLen && mbLen > 0) {
         const mbData = this.buf.slice(this.frameLen + 1, this.frameLen + 1 + mbLen);
         this.dispatchModbus(mbData);
       }
