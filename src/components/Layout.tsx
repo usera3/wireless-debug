@@ -19,6 +19,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 
 export function Layout({ activeTab, onTabChange, children }: LayoutProps) {
   const connected = useConnectionStore((s) => s.connected);
+  const connecting = useConnectionStore((s) => s.connecting);
 
   return (
     <div className="flex flex-col h-screen bg-slate-900 text-slate-100">
@@ -30,10 +31,12 @@ export function Layout({ activeTab, onTabChange, children }: LayoutProps) {
         <div className="flex items-center gap-2 text-sm">
           <span
             className={`inline-block w-2 h-2 rounded-full ${
-              connected ? 'bg-green-400' : 'bg-red-500'
+              connected ? 'bg-green-400' : connecting ? 'bg-yellow-400 animate-pulse' : 'bg-red-500'
             }`}
           />
-          <span className="text-slate-400">{connected ? '已连接' : '未连接'}</span>
+          <span className="text-slate-400">
+            {connected ? '已连接' : connecting ? '连接中...' : '未连接'}
+          </span>
         </div>
       </header>
 

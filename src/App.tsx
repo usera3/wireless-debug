@@ -12,21 +12,31 @@ type Tab = 'osc' | 'modbusOsc' | 'params' | 'connection' | 'debug';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('osc');
-  const { connected, disconnect } = useConnectionStore();
+  const { connected, connect } = useConnectionStore();
   const [toast, setToast] = useState<string | null>(null);
 
-  // 监听 WebSocket 意外断开
+  // 页面加载 3s 后自动尝试连接默认地址
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (!useConnectionStore.getState().connected) {
+        connect();
+      }
+    }, 3000);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 监听 WebSocket 意外断开（状态已由 wsClient.onClose 自动更新，此处仅弹 toast）
   useEffect(() => {
     function checkDisconnect() {
       if (connected && wsClient.readyState !== WebSocket.OPEN) {
-        disconnect();
         setToast('WebSocket 连接已断开');
         setTimeout(() => setToast(null), 3000);
       }
     }
     const timer = setInterval(checkDisconnect, 2000);
     return () => clearInterval(timer);
-  }, [connected, disconnect]);
+  }, [connected]);
 
   const content = {
     osc: <OscilloscoperPage />,

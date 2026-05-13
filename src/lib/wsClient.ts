@@ -1,15 +1,21 @@
 type FrameHandler = (frame: Uint8Array) => void;
 type RawHook = (data: Uint8Array) => void;
+type StateHook = () => void;
 
 export class WsClient {
   private ws: WebSocket | null = null;
   private handlers: FrameHandler[] = [];
   private rawSendHooks: RawHook[] = [];
+  private openHook: StateHook = () => {};
+  private closeHook: StateHook = () => {};
 
   connect(url: string) {
     if (this.ws) this.disconnect();
     this.ws = new WebSocket(url);
     this.ws.binaryType = 'arraybuffer';
+    this.ws.onopen = () => this.openHook();
+    this.ws.onclose = () => this.closeHook();
+    this.ws.onerror = () => this.closeHook();
     this.ws.onmessage = (e) => this.onData(new Uint8Array(e.data as ArrayBuffer));
   }
 
@@ -37,6 +43,9 @@ export class WsClient {
   get readyState(): number {
     return this.ws?.readyState ?? WebSocket.CLOSED;
   }
+
+  onOpen(hook: StateHook) { this.openHook = hook; }
+  onClose(hook: StateHook) { this.closeHook = hook; }
 
   private onData(chunk: Uint8Array) {
     // 直接把每个 WS 消息分发给所有 handler，由 frameRouter 自行维护跨消息 buffer

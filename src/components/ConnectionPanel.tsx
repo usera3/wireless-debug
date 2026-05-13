@@ -1,7 +1,7 @@
 import { useConnectionStore } from '../store/connectionStore';
 
 export function ConnectionPanel() {
-  const { url, connected, setUrl, connect, disconnect } = useConnectionStore();
+  const { url, connected, connecting, setUrl, connect, disconnect } = useConnectionStore();
 
   return (
     <div className="p-6 max-w-lg">
@@ -28,24 +28,25 @@ export function ConnectionPanel() {
           <div className="flex items-center gap-2">
             <span
               className={`inline-block w-2.5 h-2.5 rounded-full ${
-                connected ? 'bg-green-400' : 'bg-red-500'
+                connected ? 'bg-green-400' : connecting ? 'bg-yellow-400 animate-pulse' : 'bg-red-500'
               }`}
             />
             <span className="text-sm text-slate-300">
-              {connected ? '已连接' : '未连接'}
+              {connected ? '已连接' : connecting ? '连接中...' : '未连接'}
             </span>
           </div>
 
           {/* 连接/断开按钮 */}
           <button
             onClick={connected ? disconnect : connect}
-            className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
+            disabled={connecting}
+            className={`px-4 py-2 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
               connected
                 ? 'bg-red-600 hover:bg-red-700 text-white'
                 : 'bg-blue-600 hover:bg-blue-700 text-white'
             }`}
           >
-            {connected ? '断开' : '连接'}
+            {connected ? '断开' : connecting ? '连接中...' : '连接'}
           </button>
         </div>
 
