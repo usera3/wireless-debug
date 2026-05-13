@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import { wsClient } from '../lib/wsClient';
 import { buildReadHolding, parseReadResponse } from '../lib/modbus';
 import { useParamStore } from '../store/paramStore';
@@ -21,12 +21,14 @@ function waitModbusFrame(timeoutMs: number): Promise<Uint8Array> {
   });
 }
 
+// 模块级 timer，切页不会丢失，stop 始终能清掉
+let modbusOscTimer: ReturnType<typeof setInterval> | null = null;
+let modbusOscBusy = false;
+
 export function useModbusOscController() {
   const { running, interval, selectedPage, setRunning, pushSamples, clearWaveData } =
     useModbusOscStore();
   const params = useParamStore((s) => s.params);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const busyRef = useRef(false);
 
   const start = useCallback(() => {
     const pageParams = params.filter((p) => p.page === selectedPage);
@@ -40,9 +42,10 @@ export function useModbusOscController() {
     const maxAddr = Math.max(...addrs);
     const count = maxAddr - minAddr + 1; // 无 float，每参数 1 个寄存器
 
-    timerRef.current = setInterval(async () => {
-      if (busyRef.current) return; // 上一次轮询尚未结束，跳过
-      busyRef.current = true;
+    if (modbusOscTimer) clearInterval(modbusOscTimer);
+    modbusOscTimer = setInterval(async () => {
+      if (modbusOscBusy) return;
+      modbusOscBusy = true;
       try {
         const frame = buildReadHolding(minAddr, count);
         const waitP = waitModbusFrame(interval);
@@ -64,18 +67,18 @@ export function useModbusOscController() {
       } catch {
         // 超时或通信错误，本次跳过
       } finally {
-        busyRef.current = false;
+        modbusOscBusy = false;
       }
     }, interval);
   }, [params, selectedPage, interval, clearWaveData, setRunning, pushSamples]);
 
   const stop = useCallback(() => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
+    if (modbusOscTimer) {
+      clearInterval(modbusOscTimer);
+      modbusOscTimer = null;
     }
     frameRouter.onModbusFrame(() => {}); // 释放 handler
-    busyRef.current = false;
+    modbusOscBusy = false;
     setRunning(false);
   }, [setRunning]);
 
