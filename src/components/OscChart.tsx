@@ -147,10 +147,10 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
     plot.setScale('x', computeXView());
   };
 
-  const getAxisRegion = (plot: uPlot, event: WheelEvent): 'x' | 'y' | null => {
+  const getAxisRegion = (plot: uPlot, clientX: number, clientY: number): 'x' | 'y' | null => {
     const rect = plot.root.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
     const plotLeft = plot.bbox.left / uPlot.pxRatio;
     const plotTop = plot.bbox.top / uPlot.pxRatio;
     const plotWidth = plot.bbox.width / uPlot.pxRatio;
@@ -164,11 +164,29 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
     return null;
   };
 
+  /** 严格坐标轴条带（不包含绘图区内部），用于平移拖拽 */
+  const getAxisStripRegion = (plot: uPlot, clientX: number, clientY: number): 'x' | 'y' | null => {
+    const rect = plot.root.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const plotLeft = plot.bbox.left / uPlot.pxRatio;
+    const plotTop = plot.bbox.top / uPlot.pxRatio;
+    const plotWidth = plot.bbox.width / uPlot.pxRatio;
+    const plotHeight = plot.bbox.height / uPlot.pxRatio;
+    const overPlotX = x >= plotLeft && x <= plotLeft + plotWidth;
+    const overPlotY = y >= plotTop && y <= plotTop + plotHeight;
+
+    // 仅 Y 轴左侧条带（不在绘图区内）
+    if (x < plotLeft && overPlotY) return 'y';
+    // 仅 X 轴下方条带（不在绘图区内）
+    if (overPlotX && !overPlotY && y > plotTop + plotHeight) return 'x';
+    return null;
+  };
+
   const zoomRange = (min: number, max: number, anchor: number, scaleFactor: number) => {
     const span = Math.max(max - min, sampleInterval);
     const nextSpan = Math.max(span * scaleFactor, sampleInterval);
     const ratio = span === 0 ? 0.5 : (anchor - min) / span;
-
     return {
       min: anchor - nextSpan * ratio,
       max: anchor + nextSpan * (1 - ratio),
@@ -179,7 +197,7 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
     const plot = plotRef.current;
     if (!plot) return;
 
-    const axis = getAxisRegion(plot, event);
+    const axis = getAxisRegion(plot, event.clientX, event.clientY);
     if (!axis) return;
 
     event.preventDefault();
@@ -219,6 +237,69 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
       }
     });
     syncingScalesRef.current = false;
+  };
+
+  // 拖拽平移状态（不需要 ref，只在 handler 闭包内用）
+  const panStateRef = useRef<{
+    axis: 'x' | 'y';
+    startClient: number;   // mousedown 时的 clientX 或 clientY
+    startMin: number;
+    startMax: number;
+  } | null>(null);
+
+  const handlePanStart = (event: MouseEvent) => {
+    const plot = plotRef.current;
+    if (!plot || event.button !== 0) return;
+
+    const axis = getAxisStripRegion(plot, event.clientX, event.clientY);
+    if (!axis) return;
+
+    const scale = plot.scales[axis === 'x' ? 'x' : 'y'];
+    if (scale.min == null || scale.max == null) return;
+
+    panStateRef.current = {
+      axis,
+      startClient: axis === 'x' ? event.clientX : event.clientY,
+      startMin: scale.min,
+      startMax: scale.max,
+    };
+    event.preventDefault();
+    // 阻止 uPlot 自身的 mousedown handler，避免在轴条带上触发框选
+    event.stopPropagation();
+  };
+
+  const handlePanMove = (event: MouseEvent) => {
+    const pan = panStateRef.current;
+    const plot = plotRef.current;
+    if (!pan || !plot) return;
+
+    const { axis, startClient, startMin, startMax } = pan;
+    const span = startMax - startMin;
+
+    if (axis === 'x') {
+      const plotWidth = plot.bbox.width / uPlot.pxRatio;
+      if (plotWidth === 0) return;
+      const deltaClient = event.clientX - startClient;
+      const deltaVal = -(deltaClient / plotWidth) * span;
+      xModeRef.current = 'manual';
+      syncingScalesRef.current = true;
+      plot.setScale('x', { min: startMin + deltaVal, max: startMax + deltaVal });
+      syncingScalesRef.current = false;
+    } else {
+      const plotHeight = plot.bbox.height / uPlot.pxRatio;
+      if (plotHeight === 0) return;
+      const deltaClient = event.clientY - startClient;
+      // Y 轴：向上拖（deltaClient 为负）应该增大值
+      const deltaVal = (deltaClient / plotHeight) * span;
+      yModeRef.current = 'manual';
+      syncingScalesRef.current = true;
+      plot.setScale('y', { min: startMin + deltaVal, max: startMax + deltaVal });
+      syncingScalesRef.current = false;
+    }
+  };
+
+  const handlePanEnd = () => {
+    panStateRef.current = null;
   };
 
   useEffect(() => {
@@ -329,6 +410,9 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
               self.setScale('x', { min: 0, max: xSpanRef.current });
               self.setScale('y', getDefaultYRange());
               self.root.addEventListener('wheel', handleWheelZoom, { passive: false });
+              self.root.addEventListener('mousedown', handlePanStart);
+              window.addEventListener('mousemove', handlePanMove);
+              window.addEventListener('mouseup', handlePanEnd);
             },
           ],
         },
@@ -351,6 +435,9 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
 
     return () => {
       plot.root.removeEventListener('wheel', handleWheelZoom);
+      plot.root.removeEventListener('mousedown', handlePanStart);
+      window.removeEventListener('mousemove', handlePanMove);
+      window.removeEventListener('mouseup', handlePanEnd);
       resizeObserver.disconnect();
       resizeObserverRef.current = null;
       plot.destroy();
