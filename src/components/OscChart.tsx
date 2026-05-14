@@ -41,18 +41,34 @@ function buildAlignedData(channelNos: number[], channels: Map<number, number[]>,
   return [xData, ...seriesData];
 }
 
+function lowerBound(xData: number[], target: number): number {
+  let lo = 0;
+  let hi = xData.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (xData[mid] < target) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 function getVisibleYRange(data: AlignedData, xMin: number, xMax: number): { min: number; max: number } | null {
   const xData = data[0];
   if (xData.length === 0) return null;
+
+  const startIdx = lowerBound(xData, xMin);
+  const endIdx = lowerBound(xData, xMax);
+  // endIdx 是第一个 > xMax 的位置，需包含 xMax 本身
+  const inclusiveEnd = endIdx < xData.length && xData[endIdx] === xMax ? endIdx : endIdx - 1;
+
+  if (startIdx > inclusiveEnd) return null;
 
   let min = Number.POSITIVE_INFINITY;
   let max = Number.NEGATIVE_INFINITY;
 
   for (let seriesIdx = 1; seriesIdx < data.length; seriesIdx++) {
     const series = data[seriesIdx];
-    for (let i = 0; i < xData.length; i++) {
-      const x = xData[i];
-      if (x < xMin || x > xMax) continue;
+    for (let i = startIdx; i <= inclusiveEnd; i++) {
       const value = series[i];
       if (value == null || Number.isNaN(value)) continue;
       if (value < min) min = value;
@@ -157,10 +173,11 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
     const plotHeight = plot.bbox.height / uPlot.pxRatio;
     const overPlotX = x >= plotLeft && x <= plotLeft + plotWidth;
     const overPlotY = y >= plotTop && y <= plotTop + plotHeight;
+    const overPlotXOrY = overPlotX || overPlotY;
 
     if (x < plotLeft && overPlotY) return 'y';
     // 绘图区内部或 X 轴区域均触发 X 轴缩放
-    if (overPlotX && (overPlotY || y > plotTop + plotHeight)) return 'x';
+    if (overPlotXOrY && (overPlotY || y > plotTop + plotHeight)) return 'x';
     return null;
   };
 
@@ -302,6 +319,241 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
     panStateRef.current = null;
   };
 
+  // ─── Touch 手势状态 ────────────────────────────────────────────────────────
+  const touchStateRef = useRef<{
+    // 单指平移
+    pan: {
+      zone: 'plot' | 'x' | 'y';       // 触摸起始区域
+      startX: number;                   // 起始 clientX（单指）
+      startY: number;                   // 起始 clientY（单指）
+      startXMin: number;
+      startXMax: number;
+      startYMin: number;
+      startYMax: number;
+    } | null;
+    // 双指捏合
+    pinch: {
+      zone: 'plot' | 'x' | 'y';
+      startDist: number;                // 两指初始距离
+      startMidX: number;                // 两指中心 clientX
+      startMidY: number;                // 两指中心 clientY
+      startXMin: number;
+      startXMax: number;
+      startYMin: number;
+      startYMax: number;
+    } | null;
+    // 双击检测
+    lastTapTime: number;
+    lastTapX: number;
+    lastTapY: number;
+  }>({
+    pan: null,
+    pinch: null,
+    lastTapTime: 0,
+    lastTapX: 0,
+    lastTapY: 0,
+  });
+
+  /** 判断触摸点所在区域：plot 绘图区 / x 轴条带 / y 轴条带 */
+  const getTouchZone = (plot: uPlot, clientX: number, clientY: number): 'plot' | 'x' | 'y' | null => {
+    const rect = plot.root.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    const plotLeft = plot.bbox.left / uPlot.pxRatio;
+    const plotTop = plot.bbox.top / uPlot.pxRatio;
+    const plotWidth = plot.bbox.width / uPlot.pxRatio;
+    const plotHeight = plot.bbox.height / uPlot.pxRatio;
+    const inPlotX = x >= plotLeft && x <= plotLeft + plotWidth;
+    const inPlotY = y >= plotTop && y <= plotTop + plotHeight;
+
+    if (inPlotX && inPlotY) return 'plot';
+    if (x < plotLeft && inPlotY) return 'y';
+    if (inPlotX && y > plotTop + plotHeight) return 'x';
+    return null;
+  };
+
+  const handleTouchStart = (event: TouchEvent) => {
+    const plot = plotRef.current;
+    if (!plot) return;
+
+    const ts = touchStateRef.current;
+
+    if (event.touches.length === 1) {
+      const t = event.touches[0];
+      const zone = getTouchZone(plot, t.clientX, t.clientY);
+      if (!zone) return;
+
+      event.preventDefault();
+
+      const xScale = plot.scales.x;
+      const yScale = plot.scales.y;
+      if (xScale.min == null || xScale.max == null || yScale.min == null || yScale.max == null) return;
+
+      // 双击检测
+      const now = Date.now();
+      const DOUBLE_TAP_MS = 300;
+      const DOUBLE_TAP_PX = 30;
+      const dx = t.clientX - ts.lastTapX;
+      const dy = t.clientY - ts.lastTapY;
+      if (now - ts.lastTapTime < DOUBLE_TAP_MS && Math.sqrt(dx * dx + dy * dy) < DOUBLE_TAP_PX) {
+        // 触发双击复位
+        syncingScalesRef.current = true;
+        plot.batch(() => {
+          if (xModeRef.current === 'manual') {
+            xModeRef.current = 'following';
+            yModeRef.current = 'default';
+            moveToLatestView(plot);
+            applyDefaultYForCurrentX(plot);
+          } else {
+            xModeRef.current = 'manual';
+          }
+        });
+        syncingScalesRef.current = false;
+        ts.lastTapTime = 0;
+        return;
+      }
+      ts.lastTapTime = now;
+      ts.lastTapX = t.clientX;
+      ts.lastTapY = t.clientY;
+
+      ts.pinch = null;
+      ts.pan = {
+        zone,
+        startX: t.clientX,
+        startY: t.clientY,
+        startXMin: xScale.min,
+        startXMax: xScale.max,
+        startYMin: yScale.min,
+        startYMax: yScale.max,
+      };
+    } else if (event.touches.length === 2) {
+      const t0 = event.touches[0];
+      const t1 = event.touches[1];
+      const midX = (t0.clientX + t1.clientX) / 2;
+      const midY = (t0.clientY + t1.clientY) / 2;
+      const zone = getTouchZone(plot, midX, midY) ?? 'plot';
+
+      event.preventDefault();
+
+      const xScale = plot.scales.x;
+      const yScale = plot.scales.y;
+      if (xScale.min == null || xScale.max == null || yScale.min == null || yScale.max == null) return;
+
+      const dx = t1.clientX - t0.clientX;
+      const dy = t1.clientY - t0.clientY;
+      ts.pan = null;
+      ts.pinch = {
+        zone,
+        startDist: Math.sqrt(dx * dx + dy * dy),
+        startMidX: midX,
+        startMidY: midY,
+        startXMin: xScale.min,
+        startXMax: xScale.max,
+        startYMin: yScale.min,
+        startYMax: yScale.max,
+      };
+    }
+  };
+
+  const handleTouchMove = (event: TouchEvent) => {
+    const plot = plotRef.current;
+    if (!plot) return;
+
+    const ts = touchStateRef.current;
+
+    if (event.touches.length === 1 && ts.pan) {
+      event.preventDefault();
+      const t = event.touches[0];
+      const { zone, startX, startY, startXMin, startXMax, startYMin, startYMax } = ts.pan;
+      const xSpan = startXMax - startXMin;
+      const ySpan = startYMax - startYMin;
+      const plotWidth = plot.bbox.width / uPlot.pxRatio;
+      const plotHeight = plot.bbox.height / uPlot.pxRatio;
+
+      syncingScalesRef.current = true;
+      plot.batch(() => {
+        if ((zone === 'plot' || zone === 'x') && plotWidth > 0) {
+          const deltaX = -((t.clientX - startX) / plotWidth) * xSpan;
+          xModeRef.current = 'manual';
+          plot.setScale('x', { min: startXMin + deltaX, max: startXMax + deltaX });
+        }
+        if ((zone === 'plot' || zone === 'y') && plotHeight > 0) {
+          const deltaY = ((t.clientY - startY) / plotHeight) * ySpan;
+          yModeRef.current = 'manual';
+          plot.setScale('y', { min: startYMin + deltaY, max: startYMax + deltaY });
+        }
+      });
+      syncingScalesRef.current = false;
+    } else if (event.touches.length === 2 && ts.pinch) {
+      event.preventDefault();
+      const t0 = event.touches[0];
+      const t1 = event.touches[1];
+      const { zone, startDist, startMidX, startMidY, startXMin, startXMax, startYMin, startYMax } = ts.pinch;
+
+      const dx = t1.clientX - t0.clientX;
+      const dy = t1.clientY - t0.clientY;
+      const currentDist = Math.sqrt(dx * dx + dy * dy);
+      if (startDist === 0) return;
+
+      const scaleFactor = startDist / currentDist; // >1 缩小，<1 放大
+      const plotLeft = plot.bbox.left / uPlot.pxRatio;
+      const plotTop = plot.bbox.top / uPlot.pxRatio;
+      const rect = plot.root.getBoundingClientRect();
+
+      syncingScalesRef.current = true;
+      plot.batch(() => {
+        if (zone === 'plot' || zone === 'x') {
+          const anchorX = plot.posToVal(startMidX - rect.left - plotLeft, 'x');
+          const next = zoomRange(startXMin, startXMax, anchorX, scaleFactor);
+          xSpanRef.current = Math.max(next.max - next.min, sampleInterval);
+          xModeRef.current = 'manual';
+          plot.setScale('x', next);
+        }
+        if (zone === 'plot' || zone === 'y') {
+          const anchorY = plot.posToVal(startMidY - rect.top - plotTop, 'y');
+          const next = zoomRange(startYMin, startYMax, anchorY, scaleFactor);
+          yModeRef.current = 'manual';
+          plot.setScale('y', next);
+        }
+      });
+      syncingScalesRef.current = false;
+    }
+  };
+
+  const handleTouchEnd = (event: TouchEvent) => {
+    const ts = touchStateRef.current;
+    if (event.touches.length === 0) {
+      ts.pan = null;
+      ts.pinch = null;
+    } else if (event.touches.length === 1 && ts.pinch) {
+      // 从双指切换回单指：重置为单指平移状态
+      const plot = plotRef.current;
+      ts.pinch = null;
+      if (plot) {
+        const t = event.touches[0];
+        const xScale = plot.scales.x;
+        const yScale = plot.scales.y;
+        if (xScale.min != null && xScale.max != null && yScale.min != null && yScale.max != null) {
+          const zone = getTouchZone(plot, t.clientX, t.clientY) ?? 'plot';
+          ts.pan = {
+            zone,
+            startX: t.clientX,
+            startY: t.clientY,
+            startXMin: xScale.min,
+            startXMax: xScale.max,
+            startYMin: yScale.min,
+            startYMax: yScale.max,
+          };
+        }
+      }
+    }
+  };
+
+  // ─── 注册/注销 touch 事件 ──────────────────────────────────────────────────
+  // 将 handler 存入 ref，避免 effect 依赖变化导致重复注册
+  const touchHandlersRef = useRef({ handleTouchStart, handleTouchMove, handleTouchEnd });
+  touchHandlersRef.current = { handleTouchStart, handleTouchMove, handleTouchEnd };
+
   useEffect(() => {
     const container = containerRef.current;
     const effectiveChannels = effectiveChannelsRef.current;
@@ -413,6 +665,15 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
               self.root.addEventListener('mousedown', handlePanStart);
               window.addEventListener('mousemove', handlePanMove);
               window.addEventListener('mouseup', handlePanEnd);
+              // 用稳定的 wrapper 代理到最新 handler，保证 remove 时引用一致
+              const onTouchStart = (e: TouchEvent) => touchHandlersRef.current.handleTouchStart(e);
+              const onTouchMove = (e: TouchEvent) => touchHandlersRef.current.handleTouchMove(e);
+              const onTouchEnd = (e: TouchEvent) => touchHandlersRef.current.handleTouchEnd(e);
+              self.root.addEventListener('touchstart', onTouchStart, { passive: false });
+              self.root.addEventListener('touchmove', onTouchMove, { passive: false });
+              self.root.addEventListener('touchend', onTouchEnd);
+              // 将 wrapper 挂到 root 上，供 cleanup 取用
+              (self.root as HTMLElement & { _touchHandlers?: { onTouchStart: (e: TouchEvent) => void; onTouchMove: (e: TouchEvent) => void; onTouchEnd: (e: TouchEvent) => void } })._touchHandlers = { onTouchStart, onTouchMove, onTouchEnd };
             },
           ],
         },
@@ -438,6 +699,12 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
       plot.root.removeEventListener('mousedown', handlePanStart);
       window.removeEventListener('mousemove', handlePanMove);
       window.removeEventListener('mouseup', handlePanEnd);
+      const th = (plot.root as HTMLElement & { _touchHandlers?: { onTouchStart: (e: TouchEvent) => void; onTouchMove: (e: TouchEvent) => void; onTouchEnd: (e: TouchEvent) => void } })._touchHandlers;
+      if (th) {
+        plot.root.removeEventListener('touchstart', th.onTouchStart);
+        plot.root.removeEventListener('touchmove', th.onTouchMove);
+        plot.root.removeEventListener('touchend', th.onTouchEnd);
+      }
       resizeObserver.disconnect();
       resizeObserverRef.current = null;
       plot.destroy();
