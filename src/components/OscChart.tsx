@@ -119,6 +119,10 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
   const effectiveChannelsRef = useRef(effectiveChannels);
   effectiveChannelsRef.current = effectiveChannels;
 
+  // 始终持有最新的 running，供事件 handler 闭包内读取
+  const runningRef = useRef(running);
+  runningRef.current = running;
+
   const getLatestX = () => alignedDataRef.current[0][alignedDataRef.current[0].length - 1] ?? 0;
 
   const getDefaultYRange = () => defaultYRangeRef.current;
@@ -403,6 +407,8 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
       const dx = t.clientX - ts.lastTapX;
       const dy = t.clientY - ts.lastTapY;
       if (now - ts.lastTapTime < DOUBLE_TAP_MS && Math.sqrt(dx * dx + dy * dy) < DOUBLE_TAP_PX) {
+        ts.lastTapTime = 0;
+        if (!runningRef.current) return;
         // 触发双击复位
         syncingScalesRef.current = true;
         plot.batch(() => {
@@ -417,7 +423,6 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
           }
         });
         syncingScalesRef.current = false;
-        ts.lastTapTime = 0;
         return;
       }
       ts.lastTapTime = now;
@@ -600,7 +605,7 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
               syncingScalesRef.current = true;
               self.batch(() => {
                 if (xModeRef.current === 'manual') {
-                  xModeRef.current = 'following';
+                  if (runningRef.current) xModeRef.current = 'following';
                   yModeRef.current = 'default';
                   autoYRangeRef.current = null;
                   moveToLatestView(self);
