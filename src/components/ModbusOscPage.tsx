@@ -7,7 +7,7 @@ import { OscChart } from './OscChart';
 import { useMemo } from 'react';
 
 export function ModbusOscPage() {
-  const { running, interval, selectedPage, waveData, setInterval, setSelectedPage } =
+  const { running, interval, selectedPage, readChunkSize, waveData, setInterval, setSelectedPage, setReadChunkSize } =
     useModbusOscStore();
   const pages = useParamStore((s) => s.pages);
   const params = useParamStore((s) => s.params);
@@ -69,6 +69,21 @@ export function ModbusOscPage() {
             onChange={(e) => setInterval(Number(e.target.value))}
             disabled={running}
             className="w-20 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-slate-100 text-xs disabled:opacity-50"
+          />
+        </div>
+
+        {/* 分组大小 */}
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-slate-400 whitespace-nowrap">分组大小</label>
+          <input
+            type="number"
+            min={0}
+            step={1}
+            value={readChunkSize}
+            onChange={(e) => setReadChunkSize(Number(e.target.value))}
+            disabled={running}
+            className="w-16 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-slate-100 text-xs disabled:opacity-50"
+            placeholder="0"
           />
         </div>
 
