@@ -189,10 +189,17 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
     syncingScalesRef.current = true;
     plot.batch(() => {
       if (axis === 'x') {
-        // 只改 xSpan，然后重新对齐视口
         xSpanRef.current = Math.max(xSpanRef.current * scaleFactor, sampleInterval);
         if (xModeRef.current === 'following') {
           moveToLatestView(plot);
+        } else {
+          // manual 模式：以鼠标在 X 轴的位置为锚点缩放当前视口
+          const { min, max } = plot.scales.x;
+          if (min != null && max != null) {
+            const plotLeft = plot.bbox.left / uPlot.pxRatio;
+            const anchor = plot.posToVal(event.clientX - plot.rect.left - plotLeft, 'x');
+            plot.setScale('x', zoomRange(min, max, anchor, scaleFactor));
+          }
         }
 
         if (yModeRef.current === 'default') {

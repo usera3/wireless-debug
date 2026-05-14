@@ -17,6 +17,10 @@ import { frameRouter } from '../lib/frameRouter';
 // 模块级心跳 timer，与组件生命周期无关，切页不会丢失
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
+// RAF 限流：缓冲区 + 动画帧句柄
+let oscBuffer: Map<number, number[]> = new Map();
+let rafHandle: number | null = null;
+
 export function useOscController() {
   const {
     setRunning,
@@ -24,7 +28,7 @@ export function useOscController() {
     setMaxChannels,
     setFrameLen,
     frameLen,
-    pushSamples,
+    batchPushSamples,
     clearWaveData,
   } = useOscStore();
 
@@ -76,25 +80,41 @@ export function useOscController() {
       wsClient.send(buildStartOsc());
       setRunning(true);
 
-      // 注册示波数据帧 handler
+      // 注册示波数据帧 handler：只写 buffer，不触发 store
+      oscBuffer = new Map();
       const channelWidths = channels.map((c) => c.byteWidth);
       frameRouter.onOscFrame((frame) => {
         const osc = parseOscDataFrame(frame, channelWidths);
         if (!osc) return;
         osc.channels.forEach((samples, idx) => {
-          if (channels[idx]) pushSamples(channels[idx].channelNo, samples);
+          if (!channels[idx]) return;
+          const chNo = channels[idx].channelNo;
+          const existing = oscBuffer.get(chNo) ?? [];
+          existing.push(...samples);
+          oscBuffer.set(chNo, existing);
         });
       });
+
+      // RAF flush：每个动画帧把 buffer 一次性写入 store
+      if (rafHandle !== null) cancelAnimationFrame(rafHandle);
+      const flush = () => {
+        if (oscBuffer.size > 0) {
+          batchPushSamples(oscBuffer);
+          oscBuffer = new Map();
+        }
+        rafHandle = requestAnimationFrame(flush);
+      };
+      rafHandle = requestAnimationFrame(flush);
 
       // 6. 心跳 2s（模块级，切页不会停）
       if (heartbeatTimer) clearInterval(heartbeatTimer);
       heartbeatTimer = setInterval(() => {
         wsClient.send(buildHeartbeat());
-      }, 2000);
+      }, 1000);
     } catch (err) {
       console.error('[osc] start failed', err);
     }
-  }, [clearWaveData, frameLen, pushSamples, setFrameLen, setMaxChannels, setRunning, setSampleRate]);
+  }, [clearWaveData, frameLen, batchPushSamples, setFrameLen, setMaxChannels, setRunning, setSampleRate]);
 
   const stop = useCallback(() => {
     wsClient.send(buildStopOsc());
@@ -103,6 +123,11 @@ export function useOscController() {
       clearInterval(heartbeatTimer);
       heartbeatTimer = null;
     }
+    if (rafHandle !== null) {
+      cancelAnimationFrame(rafHandle);
+      rafHandle = null;
+    }
+    oscBuffer = new Map();
     frameRouter.onOscFrame(() => {}); // 清除示波 handler
   }, [setRunning]);
 

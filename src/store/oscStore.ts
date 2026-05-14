@@ -34,6 +34,7 @@ interface OscState {
   setFrameLen: (v: number) => void;
   setChannels: (v: ChannelConfig[]) => void;
   pushSamples: (channelNo: number, samples: number[]) => void;
+  batchPushSamples: (batch: Map<number, number[]>) => void;
   clearWaveData: () => void;
   setConfigRows: (rows: ChannelRowState[]) => void;
   setNumChannels: (n: number) => void;
@@ -58,6 +59,15 @@ export const useOscStore = create<OscState>((set) => ({
       const map = new Map(s.waveData);
       const existing = map.get(channelNo) ?? [];
       map.set(channelNo, [...existing, ...samples]);
+      return { waveData: map };
+    }),
+  batchPushSamples: (batch) =>
+    set((s) => {
+      const map = new Map(s.waveData);
+      batch.forEach((samples, channelNo) => {
+        const existing = map.get(channelNo) ?? [];
+        map.set(channelNo, [...existing, ...samples]);
+      });
       return { waveData: map };
     }),
   clearWaveData: () => set({ waveData: new Map() }),
