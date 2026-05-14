@@ -93,9 +93,9 @@ export function useOscController() {
 
       // 注册示波数据帧 handler：只写 buffer，不触发 store
       oscBuffer = new Map();
-      const channelWidths = channels.map((c) => c.byteWidth);
+      const channelDescs = channels.map((c) => ({ byteWidth: c.byteWidth, paramType: c.paramType }));
       frameRouter.onOscFrame((frame) => {
-        const osc = parseOscDataFrame(frame, channelWidths);
+        const osc = parseOscDataFrame(frame, channelDescs);
         if (!osc) return;
         osc.channels.forEach((samples, idx) => {
           if (!channels[idx]) return;

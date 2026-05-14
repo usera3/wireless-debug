@@ -47,7 +47,7 @@
 
 #define LWMB_OSC_HEARTBEAT_TIMEOUT 3 // 示波心跳超时时间，单位:秒
 
-#define LWMB_TX_MAX_LENGTH 20 // 最大发送长度
+#define LWMB_TX_MAX_LENGTH 32 // 最大发送长度
 #define LWMB_RX_MAX_LENGTH 20 // 最大接收长度
 // 内部状态定义
 typedef enum
@@ -181,6 +181,13 @@ typedef enum
     LWMB_OSC_PARA_TYPE_ABS_INT16        = 2, // 16位整型
     LWMB_OSC_PARA_TYPE_ABS_INT32_FLOAT  = 3, // 32位整型/浮点型
     LWMB_OSC_PARA_TYPE_ABS_INT64_DOUBLE = 4, // 64位整型/浮点型
+#ifdef SYS_MONITOR_OSC_FLOAT_SUPPORT
+    LWMB_OSC_PARA_TYPE_ABS_FLOAT_TO_Q14 = 5, // 32位浮点型转换为16位整形(Q14)
+    LWMB_OSC_PARA_TYPE_ABS_FLOAT_X_1000 = 6, // 32位浮点型转换为16位整形(x1000)
+    LWMB_OSC_PARA_TYPE_ABS_DOUBLE_TO_FLOAT = 7, // 64位浮点型转换为32位
+    LWMB_OSC_PARA_TYPE_ABS_DOUBLE_TO_Q14 = 8, // 64位浮点型转换为16位整形(Q14)
+    LWMB_OSC_PARA_TYPE_ABS_DOUBLE_TO_1000 = 9, // 64位浮点型转换为16位整形(Q14)
+#endif
 } lwmb_osc_para_type_t;
 
 typedef struct

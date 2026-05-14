@@ -8,10 +8,16 @@ const PARAM_TYPES = [
   { value: 0x02, label: '0x02 int32' },
   { value: 0x03, label: '0x03 float32' },
   { value: 0x04, label: '0x04 float64' },
+  { value: 0x05, label: '0x05 float→Q14' },
+  { value: 0x06, label: '0x06 float×1000' },
+  { value: 0x07, label: '0x07 double→float' },
+  { value: 0x08, label: '0x08 double→Q14' },
+  { value: 0x09, label: '0x09 double×1000' },
 ];
 
 const BYTE_WIDTH_MAP: Record<number, number> = {
   0x00: 2, 0x01: 2, 0x02: 4, 0x03: 4, 0x04: 8,
+  0x05: 2, 0x06: 2, 0x07: 4, 0x08: 2, 0x09: 2,
 };
 
 const MAX_CHANNELS = 12;

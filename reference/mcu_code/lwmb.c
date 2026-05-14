@@ -187,6 +187,7 @@ void lwmb_osc_sample()
     uint16_t u16_temp;
     uint32_t u32_temp;
     uint64_t u64_temp;
+    int32_t  s32_tmp;
     if (ctx.osc_mode)
     {
         ctx.osc_sample_tick += 1; // 增加采样间隔计数
@@ -216,6 +217,26 @@ void lwmb_osc_sample()
                     lwmb_osc_sample_buf[index * 2 + 1] = u16_temp & 0xFF;        // 低字节
                     index += 1;
                     break;
+#ifdef SYS_MONITOR_OSC_FLOAT_SUPPORT
+                case LWMB_OSC_PARA_TYPE_ABS_FLOAT_TO_Q14:
+                    abs_addr = ((uint32_t)osc_channels[channel].page << 16) | osc_channels[channel].index;
+                    // 处理无符号16位整数
+                    s32_tmp                            = *((float *)abs_addr) * 16384;
+                    u16_temp                           = s32_tmp;
+                    lwmb_osc_sample_buf[index * 2]     = (u16_temp >> 8) & 0xFF; // 高字节
+                    lwmb_osc_sample_buf[index * 2 + 1] = u16_temp & 0xFF;        // 低字节
+                    index += 1;
+                    break;
+                case LWMB_OSC_PARA_TYPE_ABS_FLOAT_X_1000:
+                    abs_addr = ((uint32_t)osc_channels[channel].page << 16) | osc_channels[channel].index;
+                    // 处理无符号16位整数
+                    s32_tmp                            = *((float *)abs_addr) * 1000;
+                    u16_temp                           = s32_tmp;
+                    lwmb_osc_sample_buf[index * 2]     = (u16_temp >> 8) & 0xFF; // 高字节
+                    lwmb_osc_sample_buf[index * 2 + 1] = u16_temp & 0xFF;        // 低字节
+                    index += 1;
+                    break;
+#endif
                 case LWMB_OSC_PARA_TYPE_ABS_INT32_FLOAT:
                     abs_addr = ((uint32_t)osc_channels[channel].page << 16) | osc_channels[channel].index;
                     // 处理无符号32位整数
@@ -575,7 +596,7 @@ lwmb_err_t lwmb_read_holding_regs(uint8_t addr, uint16_t reg_addr, uint16_t reg_
     {
         for (int i = 0; i < reg_count; i++)
         {
-            res = SysParaRead(SysParaPageId2Index(page), para, &paraValue); // 读取系统参数
+            res = SysParaRead(SysParaPageId2Index(page), para + i, &paraValue); // 读取系统参数
             if (res != Success)
             {
                 return LWMB_ERR_FUNC; // 如果读取失败，返回错误
@@ -614,8 +635,29 @@ lwmb_err_t lwmb_write_single_reg(uint8_t addr, uint16_t reg_addr, uint16_t value
     uint8_t page = reg_addr >> 8;
     uint8_t para = reg_addr & 0xFF;
 
-    uint32_t           paraValue = value;
-    SYS_PARA_WR_RESULT res       = SysParaWrite(SysParaPageId2Index(page), para, &paraValue);
+    uint32_t           paraValue;
+    SYS_PARA_ATTR      paraAttr;
+    SYS_PARA_WR_RESULT res;
+    SysParaAttrRead(SysParaPageId2Index(page), para, &paraAttr.word);
+
+    if (paraAttr.bit.Float == 0)
+    {
+        if (paraAttr.bit.Signed == 1)
+        {
+            int16_t value_real = *(int16_t *)&value;
+            paraValue          = value_real;
+        }
+        else
+        {
+            paraValue = value;
+        }
+        res = SysParaWrite(SysParaPageId2Index(page), para, &paraValue);
+    }
+    else
+    {
+        res = WriteNotAllowed;
+    }
+
     if (res != Success)
     {
         return LWMB_ERR_FUNC; // 如果写入失败，返回错误
@@ -740,6 +782,10 @@ lwmb_err_t lwmb_osc_setchn(uint8_t addr, uint8_t *raw_data, uint16_t len, uint8_
     case LWMB_OSC_PARA_TYPE_DEFAULT:
     case LWMB_OSC_PARA_TYPE_ABS_INT16:
     case LWMB_OSC_PARA_TYPE_ABS_INT8: // 8bit数据仍然占用一个通道，按16bit数据处理
+#ifdef SYS_MONITOR_OSC_FLOAT_SUPPORT
+    case LWMB_OSC_PARA_TYPE_ABS_FLOAT_TO_Q14:
+    case LWMB_OSC_PARA_TYPE_ABS_FLOAT_X_1000:
+#endif
         ctx.osc_occupied_channel += 1;
         ctx.osc_real_channel += 1;
         break;
@@ -768,6 +814,10 @@ lwmb_err_t lwmb_osc_setchn(uint8_t addr, uint8_t *raw_data, uint16_t len, uint8_
             addr_valid = 1;
             break;
         case LWMB_OSC_PARA_TYPE_ABS_INT32_FLOAT:
+#ifdef SYS_MONITOR_OSC_FLOAT_SUPPORT
+        case LWMB_OSC_PARA_TYPE_ABS_FLOAT_TO_Q14:
+        case LWMB_OSC_PARA_TYPE_ABS_FLOAT_X_1000:
+#endif
             if ((para_addr & 0x01) == 0)
                 addr_valid = 1;
             break;
@@ -788,6 +838,10 @@ lwmb_err_t lwmb_osc_setchn(uint8_t addr, uint8_t *raw_data, uint16_t len, uint8_
                 addr_valid = 1;
             break;
         case LWMB_OSC_PARA_TYPE_ABS_INT32_FLOAT:
+#ifdef SYS_MONITOR_OSC_FLOAT_SUPPORT
+        case LWMB_OSC_PARA_TYPE_ABS_FLOAT_TO_Q14:
+        case LWMB_OSC_PARA_TYPE_ABS_FLOAT_X_1000:
+#endif
             if ((para_addr & 0x03) == 0)
                 addr_valid = 1;
             break;
@@ -840,8 +894,8 @@ lwmb_err_t lwmb_osc_set_rate(uint8_t addr, uint8_t *raw_data, uint16_t len, uint
 
     if (bits_per_sec > 0)
     {
-        // 串口每字节 10 bit（1 起始位 + 8 数据位 + 1 停止位），换算为 bytes/s
-        uint32_t bytes_per_sec = bits_per_sec / 10;
+        // 串口每字节 10 bit（1 起始位 + 8 数据位 + 1 停止位），换算为 bytes/s，负载50%
+        uint32_t bytes_per_sec = bits_per_sec / 10 / 2;
         ctx.osc_sample_tick_max = lwmb_osc_calc_sample_tick(ctx.osc_occupied_channel, bytes_per_sec);
     }
 

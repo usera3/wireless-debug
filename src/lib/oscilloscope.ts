@@ -44,6 +44,9 @@ export interface OscFrame {
   rawData: Uint8Array;
 }
 
+// float32 解析的 paramType 集合：0x03=float32, 0x07=double→float(4B)
+const FLOAT32_TYPES = new Set([0x03, 0x07]);
+
 /** 解析示波数据帧，返回各通道按采样点排列的原始值数组
  *
  * 帧结构（frameLen 字节，不含尾部附加 Modbus）：
@@ -55,7 +58,7 @@ export interface OscFrame {
  */
 export function parseOscDataFrame(
   data: Uint8Array,
-  channelWidths: number[], // 每通道占字节数：2/4/8
+  channels: { byteWidth: number; paramType: number }[],
 ): OscFrame | null {
   const MAGIC = [0xff, 0x77, 0xaa, 0x55];
   const HEADER_LEN = 4;
@@ -86,22 +89,28 @@ export function parseOscDataFrame(
   const calcCrc = crc16(payload);
   if (crcLo !== (calcCrc & 0xff) || crcHi !== ((calcCrc >> 8) & 0xff)) return null;
 
-  const stridePerSample = channelWidths.reduce((a, b) => a + b, 0);
+  const stridePerSample = channels.reduce((a, c) => a + c.byteWidth, 0);
   if (stridePerSample === 0) return null;
   const sampleCount = Math.floor(payload.length / stridePerSample);
-  const channels: number[][] = channelWidths.map(() => []);
+  const channelData: number[][] = channels.map(() => []);
   const view = new DataView(payload.buffer, payload.byteOffset);
 
   for (let s = 0; s < sampleCount; s++) {
     let offset = s * stridePerSample;
-    channelWidths.forEach((w, ci) => {
-      const val =
-        w === 2 ? view.getInt16(offset, false)
-        : w === 4 ? view.getFloat32(offset, false)
-        : view.getFloat64(offset, false);
-      channels[ci].push(val);
+    channels.forEach(({ byteWidth: w, paramType }, ci) => {
+      let val: number;
+      if (w === 2) {
+        val = view.getInt16(offset, false);
+      } else if (w === 4) {
+        val = FLOAT32_TYPES.has(paramType)
+          ? view.getFloat32(offset, false)
+          : view.getInt32(offset, false);
+      } else {
+        val = view.getFloat64(offset, false);
+      }
+      channelData[ci].push(val);
       offset += w;
     });
   }
-  return { channels, rawData: payload };
+  return { channels: channelData, rawData: payload };
 }
