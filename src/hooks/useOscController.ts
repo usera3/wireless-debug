@@ -4,6 +4,7 @@ import {
   buildQueryFrameLen,
   buildQueryMaxChannels,
   buildQuerySampleRate,
+  buildSetBaudRate,
   buildSetChannel,
   buildStartOsc,
   buildStopOsc,
@@ -30,6 +31,7 @@ export function useOscController() {
     frameLen,
     batchPushSamples,
     clearWaveData,
+    commRateLimit,
   } = useOscStore();
 
   /** 依次查询设备信息，再设置通道，最后开始采样 */
@@ -69,6 +71,15 @@ export function useOscController() {
       // 3. 设置各通道
       for (const ch of channels) {
         await sendAndWait(buildSetChannel(ch.channelNo, ch.paramType, ch.varAddr));
+      }
+
+      // 3.5 若设置了通讯速率限制，发送 0x73；部分设备不支持该功能码，允许超时/错误
+      if (commRateLimit !== 0) {
+        try {
+          await sendAndWait(buildSetBaudRate(commRateLimit));
+        } catch {
+          console.warn('[osc] 0x73 not supported by device, ignored');
+        }
       }
 
       // 4. 查询采样率
@@ -114,7 +125,7 @@ export function useOscController() {
     } catch (err) {
       console.error('[osc] start failed', err);
     }
-  }, [clearWaveData, frameLen, batchPushSamples, setFrameLen, setMaxChannels, setRunning, setSampleRate]);
+  }, [clearWaveData, frameLen, batchPushSamples, setFrameLen, setMaxChannels, setRunning, setSampleRate, commRateLimit]);
 
   const stop = useCallback(() => {
     wsClient.send(buildStopOsc());

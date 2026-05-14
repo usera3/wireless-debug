@@ -111,10 +111,14 @@ static void lwmb_start_tx_osc()
     }
 }
 
-static uint8_t lwmb_osc_calc_sample_tick(uint8_t chn)
+static uint8_t lwmb_osc_calc_sample_tick(uint8_t chn, uint32_t comm_trans_speed)
 {
-    // 计算示波采样间隔
-    return ((chn * 2 * LWMB_OSC_SAMPLE_RATE) / LWMB_COMM_TRANS_SPEED) + 1; // 每个通道2字节数据
+    // 计算示波采样间隔；comm_trans_speed 为 0 时使用默认波特率换算值
+    if (comm_trans_speed == 0)
+    {
+        comm_trans_speed = LWMB_COMM_TRANS_SPEED;
+    }
+    return ((chn * 2 * LWMB_OSC_SAMPLE_RATE) / comm_trans_speed) + 1; // 每个通道2字节数据
 }
 
 static void lwmb_osc_fill_data(uint8_t *data, uint16_t len)
@@ -341,6 +345,10 @@ static void check_complete_frame(void)
         case LWMB_FUNC_OSC_SETCHN:
             data = proc_buffer + 2; // 跳过地址和功能码;
             res  = lwmb_osc_setchn(addr, data, proc_len - 4, mb_send_buf, &ctx.tx_idx);
+            break;
+        case LWMB_FUNC_OSC_SET_RATE:
+            data = proc_buffer + 2; // 跳过地址和功能码;
+            res  = lwmb_osc_set_rate(addr, data, proc_len - 4, mb_send_buf, &ctx.tx_idx);
             break;
         case LWMB_FUNC_OSC_HEART:
             data = proc_buffer + 2; // 跳过地址和功能码;
@@ -806,13 +814,42 @@ lwmb_err_t lwmb_osc_setchn(uint8_t addr, uint8_t *raw_data, uint16_t len, uint8_
         return LWMB_ERR_FUNC; // 返回错误
     }
 
-    ctx.osc_sample_tick_max = lwmb_osc_calc_sample_tick(ctx.osc_occupied_channel); // 计算新的采样间隔
+    ctx.osc_sample_tick_max = lwmb_osc_calc_sample_tick(ctx.osc_occupied_channel, 0); // 计算新的采样间隔
 
     *reply_len    = len + 2;               // 1字节地址 + 1字节功能码 + 原始数据长度
     reply_data[0] = addr;                  // 从地址
     reply_data[1] = LWMB_FUNC_OSC_SETCHN;  // 功能码
     memcpy(&reply_data[2], raw_data, len); // 复制原始数据到回复数据
     // 假设通道设置成功
+    return LWMB_OK;
+}
+
+lwmb_err_t lwmb_osc_set_rate(uint8_t addr, uint8_t *raw_data, uint16_t len, uint8_t *reply_data, uint16_t *reply_len)
+{
+    // 0x73帧：[addr, 0x73, bitsPerSec(4字节 big-endian), CRC]
+    // 上位机用该命令限制示波数据传输速率，MCU据此调整采样间隔
+    if (len < 4)
+    {
+        return LWMB_ERR_FRAME; // 数据长度不足
+    }
+
+    uint32_t bits_per_sec = ((uint32_t)raw_data[0] << 24) |
+                             ((uint32_t)raw_data[1] << 16) |
+                             ((uint32_t)raw_data[2] << 8)  |
+                             (uint32_t)raw_data[3];
+
+    if (bits_per_sec > 0)
+    {
+        // 串口每字节 10 bit（1 起始位 + 8 数据位 + 1 停止位），换算为 bytes/s
+        uint32_t bytes_per_sec = bits_per_sec / 10;
+        ctx.osc_sample_tick_max = lwmb_osc_calc_sample_tick(ctx.osc_occupied_channel, bytes_per_sec);
+    }
+
+    // 回复：回显原始数据（同 setchn 风格）
+    *reply_len    = len + 2;                   // addr + func + raw_data
+    reply_data[0] = addr;                      // 从地址
+    reply_data[1] = LWMB_FUNC_OSC_SET_RATE;    // 功能码
+    memcpy(&reply_data[2], raw_data, len);     // 回显数据
     return LWMB_OK;
 }
 

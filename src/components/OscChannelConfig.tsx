@@ -16,6 +16,18 @@ const BYTE_WIDTH_MAP: Record<number, number> = {
 
 const MAX_CHANNELS = 12;
 
+const COMM_RATE_OPTIONS = [
+  { value: 0,         label: '不限制' },
+  { value: 10_000,    label: '10 kbps' },
+  { value: 20_000,    label: '20 kbps' },
+  { value: 50_000,    label: '50 kbps' },
+  { value: 100_000,   label: '100 kbps' },
+  { value: 200_000,   label: '200 kbps' },
+  { value: 500_000,   label: '500 kbps' },
+  { value: 1_000_000, label: '1 Mbps' },
+  { value: 2_000_000, label: '2 Mbps' },
+];
+
 export function buildChannelConfigs(rows: ChannelRowState[], numChannels: number): ChannelConfig[] {
   return rows.slice(0, numChannels).map((r, i) => ({
     channelNo: i + 1,
@@ -27,7 +39,7 @@ export function buildChannelConfigs(rows: ChannelRowState[], numChannels: number
 }
 
 export function OscChannelConfig() {
-  const { maxChannels, configRows, numChannels, setConfigRows, setNumChannels } = useOscStore();
+  const { maxChannels, configRows, numChannels, setConfigRows, setNumChannels, commRateLimit, setCommRateLimit } = useOscStore();
   const params = useParamStore((s) => s.params);
   const count = Math.min(maxChannels, MAX_CHANNELS);
 
@@ -65,7 +77,7 @@ export function OscChannelConfig() {
   return (
     <div className="space-y-2">
       {/* 标题 + 通道数同行 */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <span className="text-xs font-semibold text-slate-400">通道配置</span>
         <label className="text-slate-500 text-xs">通道数</label>
         <select
@@ -75,6 +87,16 @@ export function OscChannelConfig() {
         >
           {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
             <option key={n} value={n}>{n}</option>
+          ))}
+        </select>
+        <label className="text-slate-500 text-xs">通讯速率</label>
+        <select
+          value={commRateLimit}
+          onChange={(e) => setCommRateLimit(Number(e.target.value))}
+          className="bg-slate-700 border border-slate-600 rounded px-2 py-0.5 text-slate-100 text-xs"
+        >
+          {COMM_RATE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
       </div>

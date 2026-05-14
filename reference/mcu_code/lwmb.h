@@ -124,11 +124,12 @@ typedef enum
 #define LWMB_FUNC_WRITE_SINGLE_REGS   0x06
 #define LWMB_FUNC_WRITE_MULTIPLE_REGS 0x10
 
-#define LWMB_FUNC_OSC_HANDSHAKE 0x70
-#define LWMB_FUNC_OSC_START     0x71
-#define LWMB_FUNC_OSC_STOP      0x72
-#define LWMB_FUNC_OSC_SETCHN    0x75
-#define LWMB_FUNC_OSC_HEART     0x08
+#define LWMB_FUNC_OSC_HANDSHAKE  0x70
+#define LWMB_FUNC_OSC_START      0x71
+#define LWMB_FUNC_OSC_STOP       0x72
+#define LWMB_FUNC_OSC_SET_RATE   0x73
+#define LWMB_FUNC_OSC_SETCHN     0x75
+#define LWMB_FUNC_OSC_HEART      0x08
 
 // 用于OSC的特殊INPUT寄存器地址
 #define LWMB_OSC_FRAME_LEN_ADDR         0x0000 // 示波帧长度寄存器地址
@@ -154,6 +155,8 @@ lwmb_err_t lwmb_osc_start(uint8_t addr, uint8_t *raw_data, uint16_t len, uint8_t
 lwmb_err_t lwmb_osc_stop(uint8_t addr, uint8_t *raw_data, uint16_t len, uint8_t *reply_data, uint16_t *reply_len);
 
 lwmb_err_t lwmb_osc_setchn(uint8_t addr, uint8_t *raw_data, uint16_t len, uint8_t *reply_data, uint16_t *reply_len);
+
+lwmb_err_t lwmb_osc_set_rate(uint8_t addr, uint8_t *raw_data, uint16_t len, uint8_t *reply_data, uint16_t *reply_len);
 
 lwmb_err_t lwmb_osc_heart(uint8_t addr, uint8_t *raw_data, uint16_t len, uint8_t *reply_data, uint16_t *reply_len);
 

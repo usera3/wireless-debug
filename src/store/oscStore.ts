@@ -28,6 +28,8 @@ interface OscState {
   // channel config form state (persisted across tab switches)
   configRows: ChannelRowState[];
   numChannels: number;
+  /** 通讯速率限制（bit/s），0 = 不限制 */
+  commRateLimit: number;
   setRunning: (v: boolean) => void;
   setSampleRate: (v: number) => void;
   setMaxChannels: (v: number) => void;
@@ -38,6 +40,7 @@ interface OscState {
   clearWaveData: () => void;
   setConfigRows: (rows: ChannelRowState[]) => void;
   setNumChannels: (n: number) => void;
+  setCommRateLimit: (v: number) => void;
 }
 
 export const useOscStore = create<OscState>((set) => ({
@@ -49,6 +52,7 @@ export const useOscStore = create<OscState>((set) => ({
   waveData: new Map(),
   configRows: Array.from({ length: 4 }, (_, i) => defaultRow(i + 1)),
   numChannels: 4,
+  commRateLimit: 0,
   setRunning: (v) => set({ running: v }),
   setSampleRate: (v) => set({ sampleRate: v }),
   setMaxChannels: (v) => set({ maxChannels: v }),
@@ -73,4 +77,5 @@ export const useOscStore = create<OscState>((set) => ({
   clearWaveData: () => set({ waveData: new Map() }),
   setConfigRows: (rows) => set({ configRows: rows }),
   setNumChannels: (n) => set({ numChannels: n }),
+  setCommRateLimit: (v) => set({ commRateLimit: v }),
 }));
