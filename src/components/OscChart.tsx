@@ -108,6 +108,8 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
   const syncingScalesRef = useRef(false);
   const xSpanRef = useRef(1); // 当前显示窗口宽度（秒），默认1s
   const defaultYRangeRef = useRef({ min: -5000, max: 5000 });
+  // 自动模式下已应用的 Y 范围（只增不减）
+  const autoYRangeRef = useRef<{ min: number; max: number } | null>(null);
 
   const demoData = useMemo(() => generateDemoData(), []);
   const effectiveChannels = channels.size > 0 ? channels : demoData;
@@ -146,17 +148,22 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
     const defaultRange = getDefaultYRange();
     const visibleRange = getVisibleYRange(alignedDataRef.current, min, max);
 
-    if (!visibleRange) {
-      plot.setScale('y', defaultRange);
-      return;
-    }
+    // 计算本次目标范围
+    const targetRange = !visibleRange
+      ? defaultRange
+      : {
+          min: Math.min(visibleRange.min, defaultRange.min),
+          max: Math.max(visibleRange.max, defaultRange.max),
+        };
 
-    if (visibleRange.min >= defaultRange.min && visibleRange.max <= defaultRange.max) {
-      plot.setScale('y', defaultRange);
-      return;
-    }
+    // 与历史累积范围取并集（只增不减）
+    const prev = autoYRangeRef.current;
+    const nextRange = prev
+      ? { min: Math.min(targetRange.min, prev.min), max: Math.max(targetRange.max, prev.max) }
+      : targetRange;
 
-    plot.setScale('y', visibleRange);
+    autoYRangeRef.current = nextRange;
+    plot.setScale('y', nextRange);
   };
 
   const moveToLatestView = (plot: uPlot) => {
@@ -402,6 +409,7 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
           if (xModeRef.current === 'manual') {
             xModeRef.current = 'following';
             yModeRef.current = 'default';
+            autoYRangeRef.current = null;
             moveToLatestView(plot);
             applyDefaultYForCurrentX(plot);
           } else {
@@ -565,6 +573,7 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
     alignedDataRef.current = buildAlignedData(channelNos, effectiveChannels, sampleInterval);
     xModeRef.current = 'following';
     yModeRef.current = 'default';
+    autoYRangeRef.current = null;
 
     plotRef.current?.destroy();
     resizeObserverRef.current?.disconnect();
@@ -586,13 +595,14 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
           },
           bind: {
             dblclick: (self, _target) => (event) => {
-              event.preventDefault();
+              void event;
 
               syncingScalesRef.current = true;
               self.batch(() => {
                 if (xModeRef.current === 'manual') {
                   xModeRef.current = 'following';
                   yModeRef.current = 'default';
+                  autoYRangeRef.current = null;
                   moveToLatestView(self);
                   applyDefaultYForCurrentX(self);
                 } else {
