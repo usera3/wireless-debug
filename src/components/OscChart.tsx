@@ -74,35 +74,157 @@ interface OscChartProps {
   channels: Map<number, number[]>;
   /** 采样间隔（秒），用于 x 轴时间计算 */
   sampleInterval: number;
+  /** 当前示波是否仍在运行，用于同步跟随状态 */
+  running?: boolean;
   /** 可选：通道号 -> 显示标签（如 alias），未提供时默认 CH{n} */
   labels?: Map<number, string>;
 }
 
-export function OscChart({ channels, sampleInterval, labels }: OscChartProps) {
+export function OscChart({ channels, sampleInterval, running = true, labels }: OscChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const channelOrderRef = useRef<number[]>([]);
   const renderedCountsRef = useRef<Map<number, number>>(new Map());
   const alignedDataRef = useRef<AlignedData>([[]]);
-  const followLatestRef = useRef(true);
-  const yAutoRef = useRef(true);
+  const xModeRef = useRef<'following' | 'manual'>('following');
+  const yModeRef = useRef<'default' | 'manual'>('default');
   const syncingScalesRef = useRef(false);
+  const xSpanRef = useRef(1); // 当前显示窗口宽度（秒），默认1s
+  const defaultYRangeRef = useRef({ min: -5000, max: 5000 });
 
   const demoData = useMemo(() => generateDemoData(), []);
   const effectiveChannels = channels.size > 0 ? channels : demoData;
   const currentKey = `${sampleInterval}:${Array.from(effectiveChannels.keys()).sort().join(',')}`;
 
+  // 始终持有最新的 effectiveChannels，供 effect 内部读取而不触发重建
+  const effectiveChannelsRef = useRef(effectiveChannels);
+  effectiveChannelsRef.current = effectiveChannels;
+
+  const getLatestX = () => alignedDataRef.current[0][alignedDataRef.current[0].length - 1] ?? 0;
+
+  const getDefaultYRange = () => defaultYRangeRef.current;
+
+  const getXWindow = (plot: uPlot) => {
+    const { min, max } = plot.scales.x;
+    if (min == null || max == null) {
+      return { min: 0, max: xSpanRef.current, span: xSpanRef.current };
+    }
+    return { min, max, span: Math.max(max - min, sampleInterval) };
+  };
+
+  // 根据当前数据量和 xSpan 计算应显示的视口范围
+  const computeXView = () => {
+    const latestX = getLatestX();
+    const span = xSpanRef.current;
+    if (latestX < span) {
+      // 数据未填满窗口：左对齐，显示 0 ~ span
+      return { min: 0, max: span };
+    }
+    // 数据超过窗口：右对齐，显示最新数据
+    return { min: latestX - span, max: latestX };
+  };
+
+  const applyDefaultYForCurrentX = (plot: uPlot) => {
+    const { min, max } = getXWindow(plot);
+    const defaultRange = getDefaultYRange();
+    const visibleRange = getVisibleYRange(alignedDataRef.current, min, max);
+
+    if (!visibleRange) {
+      plot.setScale('y', defaultRange);
+      return;
+    }
+
+    if (visibleRange.min >= defaultRange.min && visibleRange.max <= defaultRange.max) {
+      plot.setScale('y', defaultRange);
+      return;
+    }
+
+    plot.setScale('y', visibleRange);
+  };
+
+  const moveToLatestView = (plot: uPlot) => {
+    plot.setScale('x', computeXView());
+  };
+
+  const getAxisRegion = (plot: uPlot, event: WheelEvent): 'x' | 'y' | null => {
+    const rect = plot.root.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const plotLeft = plot.bbox.left / uPlot.pxRatio;
+    const plotTop = plot.bbox.top / uPlot.pxRatio;
+    const plotWidth = plot.bbox.width / uPlot.pxRatio;
+    const plotHeight = plot.bbox.height / uPlot.pxRatio;
+    const overPlotX = x >= plotLeft && x <= plotLeft + plotWidth;
+    const overPlotY = y >= plotTop && y <= plotTop + plotHeight;
+
+    if (x < plotLeft && overPlotY) return 'y';
+    // 绘图区内部或 X 轴区域均触发 X 轴缩放
+    if (overPlotX && (overPlotY || y > plotTop + plotHeight)) return 'x';
+    return null;
+  };
+
+  const zoomRange = (min: number, max: number, anchor: number, scaleFactor: number) => {
+    const span = Math.max(max - min, sampleInterval);
+    const nextSpan = Math.max(span * scaleFactor, sampleInterval);
+    const ratio = span === 0 ? 0.5 : (anchor - min) / span;
+
+    return {
+      min: anchor - nextSpan * ratio,
+      max: anchor + nextSpan * (1 - ratio),
+    };
+  };
+
+  const handleWheelZoom = (event: WheelEvent) => {
+    const plot = plotRef.current;
+    if (!plot) return;
+
+    const axis = getAxisRegion(plot, event);
+    if (!axis) return;
+
+    event.preventDefault();
+
+    const scaleFactor = event.deltaY < 0 ? 0.85 : 1 / 0.85;
+
+    syncingScalesRef.current = true;
+    plot.batch(() => {
+      if (axis === 'x') {
+        // 只改 xSpan，然后重新对齐视口
+        xSpanRef.current = Math.max(xSpanRef.current * scaleFactor, sampleInterval);
+        if (xModeRef.current === 'following') {
+          moveToLatestView(plot);
+        }
+
+        if (yModeRef.current === 'default') {
+          applyDefaultYForCurrentX(plot);
+        }
+      }
+
+      if (axis === 'y') {
+        const { min, max } = plot.scales.y;
+        if (min == null || max == null) return;
+
+        const plotTop = plot.bbox.top / uPlot.pxRatio;
+        const anchor = plot.posToVal(event.clientY - plot.rect.top - plotTop, 'y');
+        const next = zoomRange(min, max, anchor, scaleFactor);
+        plot.setScale('y', next);
+        yModeRef.current = 'manual';
+      }
+    });
+    syncingScalesRef.current = false;
+  };
+
   useEffect(() => {
     const container = containerRef.current;
+    const effectiveChannels = effectiveChannelsRef.current;
     if (!container || effectiveChannels.size === 0) return;
 
     const channelNos = Array.from(effectiveChannels.keys()).sort((a, b) => a - b);
     channelOrderRef.current = channelNos;
     renderedCountsRef.current = new Map(channelNos.map((chNo) => [chNo, effectiveChannels.get(chNo)?.length ?? 0]));
     alignedDataRef.current = buildAlignedData(channelNos, effectiveChannels, sampleInterval);
-    followLatestRef.current = true;
-    yAutoRef.current = true;
+    xModeRef.current = 'following';
+    yModeRef.current = 'default';
 
     plotRef.current?.destroy();
     resizeObserverRef.current?.disconnect();
@@ -123,21 +245,28 @@ export function OscChart({ channels, sampleInterval, labels }: OscChartProps) {
             y: true,
           },
           bind: {
-            dblclick: (self, _target, handler) => (event) => {
+            dblclick: (self, _target) => (event) => {
               event.preventDefault();
-              handler(event);
 
-              const xScale = self.scales.x;
-              if (xScale.min == null || xScale.max == null) return null;
-
-              const yRange = getVisibleYRange(alignedDataRef.current, xScale.min, xScale.max);
-              if (yRange) {
-                yAutoRef.current = true;
-                syncingScalesRef.current = true;
-                self.setScale('y', yRange);
-                syncingScalesRef.current = false;
-              }
+              syncingScalesRef.current = true;
+              self.batch(() => {
+                if (xModeRef.current === 'manual') {
+                  xModeRef.current = 'following';
+                  yModeRef.current = 'default';
+                  moveToLatestView(self);
+                  applyDefaultYForCurrentX(self);
+                } else {
+                  xModeRef.current = 'manual';
+                }
+              });
+              syncingScalesRef.current = false;
               return null;
+            },
+            mousedown: (_self, _target, handler) => (event) => {
+              if (xModeRef.current !== 'manual') {
+                return null;
+              }
+              return handler(event);
             },
           },
         },
@@ -181,38 +310,18 @@ export function OscChart({ channels, sampleInterval, labels }: OscChartProps) {
         ],
         hooks: {
           setScale: [
-            (self, scaleKey) => {
+            (_self, scaleKey) => {
               if (syncingScalesRef.current) return;
-
-              if (scaleKey === 'x') {
-                const xScale = self.scales.x;
-                const maxX = alignedDataRef.current[0][alignedDataRef.current[0].length - 1] ?? 0;
-                if (xScale.max != null) {
-                  followLatestRef.current = maxX - xScale.max <= sampleInterval * 2;
-                }
-              }
-
               if (scaleKey === 'y') {
-                yAutoRef.current = false;
+                yModeRef.current = 'manual';
               }
             },
           ],
           ready: [
             (self) => {
-              const xData = alignedDataRef.current[0];
-              if (xData.length === 0) return;
-              const xMin = xData[0];
-              const xMax = xData[xData.length - 1];
-              const yRange = getVisibleYRange(alignedDataRef.current, xMin, xMax);
-
-              syncingScalesRef.current = true;
-              self.batch(() => {
-                self.setScale('x', { min: xMin, max: xMax });
-                if (yRange) {
-                  self.setScale('y', yRange);
-                }
-              });
-              syncingScalesRef.current = false;
+              self.setScale('x', { min: 0, max: xSpanRef.current });
+              self.setScale('y', getDefaultYRange());
+              self.root.addEventListener('wheel', handleWheelZoom, { passive: false });
             },
           ],
         },
@@ -234,6 +343,7 @@ export function OscChart({ channels, sampleInterval, labels }: OscChartProps) {
     resizeObserverRef.current = resizeObserver;
 
     return () => {
+      plot.root.removeEventListener('wheel', handleWheelZoom);
       resizeObserver.disconnect();
       resizeObserverRef.current = null;
       plot.destroy();
@@ -241,11 +351,16 @@ export function OscChart({ channels, sampleInterval, labels }: OscChartProps) {
         plotRef.current = null;
       }
     };
-  }, [currentKey, effectiveChannels, labels, sampleInterval]);
+  }, [currentKey, labels, sampleInterval]);
 
   useEffect(() => {
     const plot = plotRef.current;
     if (!plot) return;
+
+    if (!running) {
+      xModeRef.current = 'manual';
+      return;
+    }
 
     const channelNos = channelOrderRef.current;
     const currentData = alignedDataRef.current;
@@ -266,7 +381,7 @@ export function OscChart({ channels, sampleInterval, labels }: OscChartProps) {
       renderedCountsRef.current = new Map(channelNos.map((chNo) => [chNo, effectiveChannels.get(chNo)?.length ?? 0]));
     } else {
       let maxLen = xData.length;
-      channelNos.forEach((chNo) => {
+      channelNos.forEach((chNo, channelIdx) => {
         const values = effectiveChannels.get(chNo) ?? [];
         const renderedCount = renderedCountsRef.current.get(chNo) ?? 0;
         if (values.length > maxLen) {
@@ -274,8 +389,7 @@ export function OscChart({ channels, sampleInterval, labels }: OscChartProps) {
         }
         if (values.length === renderedCount) return;
 
-        const seriesIndex = channelNos.indexOf(chNo) + 1;
-        const seriesData = alignedDataRef.current[seriesIndex] as (number | null)[];
+        const seriesData = alignedDataRef.current[channelIdx + 1] as (number | null)[];
         for (let i = renderedCount; i < values.length; i++) {
           seriesData[i] = values[i];
         }
@@ -306,34 +420,21 @@ export function OscChart({ channels, sampleInterval, labels }: OscChartProps) {
 
     const nextData = alignedDataRef.current;
     const nextXData = nextData[0];
-    const nextMaxX = nextXData[nextXData.length - 1] ?? 0;
-    const currentXScale = plot.scales.x;
-    const currentSpan = currentXScale.max != null && currentXScale.min != null
-      ? currentXScale.max - currentXScale.min
-      : nextMaxX - (nextXData[0] ?? 0);
 
     syncingScalesRef.current = true;
     plot.batch(() => {
       plot.setData(nextData, false);
 
-      if (followLatestRef.current && nextXData.length > 0) {
-        const span = currentSpan > 0 ? Math.min(currentSpan, nextMaxX - (nextXData[0] ?? 0)) : nextMaxX - (nextXData[0] ?? 0);
-        plot.setScale('x', {
-          min: Math.max((nextXData[0] ?? 0), nextMaxX - span),
-          max: nextMaxX,
-        });
+      if (nextXData.length > 0 && xModeRef.current !== 'manual') {
+        moveToLatestView(plot);
       }
 
-      if (yAutoRef.current) {
-        const xScale = plot.scales.x;
-        const yRange = getVisibleYRange(nextData, xScale.min ?? 0, xScale.max ?? nextMaxX);
-        if (yRange) {
-          plot.setScale('y', yRange);
-        }
+      if (yModeRef.current === 'default' && xModeRef.current !== 'manual') {
+        applyDefaultYForCurrentX(plot);
       }
     });
     syncingScalesRef.current = false;
-  }, [effectiveChannels, sampleInterval]);
+  }, [effectiveChannels, running, sampleInterval]);
 
   return (
     <div className="border border-slate-700 rounded bg-slate-900 h-full relative overflow-hidden">

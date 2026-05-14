@@ -114,6 +114,7 @@ export function ModbusOscPage() {
         <OscChart
           channels={chartChannels}
           sampleInterval={interval > 0 ? interval / 1000 : 1}
+          running={running}
           labels={chartLabels}
         />
       </div>
