@@ -7,11 +7,8 @@ import { frameRouter } from '../lib/frameRouter';
 const POLL_INTERVAL_MS = 1000;
 const TIMEOUT_MS = 500;
 
-// 需要轮询的 alias 列表（含写入控件）
+// 需要轮询的 alias 列表（仅状态显示）
 export const DASHBOARD_ALIASES = [
-  'CmdMode',
-  'CmdSpd',
-  'CmdTorq',
   'MotorSpd',
   'MotorIq',
   'Vdc',
