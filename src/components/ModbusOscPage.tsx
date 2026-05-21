@@ -56,7 +56,6 @@ export function ModbusOscPage() {
       const { labels, columns } = await importCsv(file);
       clearWaveData();
       // 逐列用 alias 写入 store
-      const batch: Record<string, number> = {};
       const maxLen = columns.reduce((m, c) => Math.max(m, c.length), 0);
       for (let i = 0; i < maxLen; i++) {
         const row: Record<string, number> = {};
