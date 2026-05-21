@@ -96,7 +96,7 @@ export function ParamPage() {
           onClick={() => fileRef.current?.click()}
           className="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white rounded text-sm transition-colors"
         >
-          📂 加载 ParameterTable.xlsx
+          📂 加载参数表
         </button>
         <input
           ref={fileRef}
@@ -111,7 +111,7 @@ export function ParamPage() {
           onClick={() => setShowEspPicker(true)}
           className="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white rounded text-sm transition-colors"
         >
-          📡 从ESP32加载
+          📡 远程加载
         </button>
 
         {loading && <span className="text-sm text-yellow-400">解析中…</span>}

@@ -91,7 +91,7 @@ export function OscilloscoperPage() {
           className="px-4 py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed
                      text-white rounded text-sm font-medium transition-colors"
         >
-          ⬇ 导出 CSV
+          ⬇ 导出
         </button>
 
         {/* 导入 CSV */}
@@ -101,7 +101,7 @@ export function OscilloscoperPage() {
           className="px-4 py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed
                      text-white rounded text-sm font-medium transition-colors"
         >
-          ⬆ 导入 CSV
+          ⬆ 导入
         </button>
         <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={handleImport} />
 
