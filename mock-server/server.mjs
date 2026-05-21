@@ -1,9 +1,19 @@
 import { WebSocketServer } from 'ws';
 import { appendCrc, verifyCrc, crc16 } from './crc16.mjs';
+import http from 'http';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 
 const PORT     = 8765;
+const HTTP_PORT = 8766;
 const SLAVE    = 0xff;
 const REG_SIZE = 512; // 16-bit Modbus holding registers
+
+// ── HTTP mock state ───────────────────────────────────────────────────────────
+const EXCEL_DIR = path.join(os.tmpdir(), 'mock_excel');
+fs.mkdirSync(EXCEL_DIR, { recursive: true });
+let currentBaud = 115200;
 
 const FRAME_HEADER = Buffer.from([0xff, 0x77, 0xaa, 0x55]);
 const FRAME_FOOTER = Buffer.from([0xff, 0x77, 0xaa, 0x55]);
@@ -180,4 +190,94 @@ wss.on('connection', (ws) => {
   ws.on('error', (err) => {
     console.error('[ws error]', err.message);
   });
+});
+
+// ── HTTP server ───────────────────────────────────────────────────────────────
+function sendJson(res, status, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(body);
+}
+
+const httpServer = http.createServer((req, res) => {
+  const url = new URL(req.url, `http://localhost`);
+
+  // GET /api/excel/list
+  if (req.method === 'GET' && url.pathname === '/api/excel/list') {
+    const files = fs.readdirSync(EXCEL_DIR);
+    return sendJson(res, 200, files);
+  }
+
+  // POST /api/excel/upload  (body = raw file bytes, X-Filename header)
+  if (req.method === 'POST' && url.pathname === '/api/excel/upload') {
+    const encoded = req.headers['x-filename'];
+    if (!encoded) { res.writeHead(400); return res.end('missing X-Filename'); }
+    const filename = decodeURIComponent(encoded);
+    const dest = path.join(EXCEL_DIR, path.basename(filename));
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      fs.writeFileSync(dest, Buffer.concat(chunks));
+      console.log(`[http] uploaded: ${filename} → ${dest}`);
+      res.writeHead(200); res.end('ok');
+    });
+    return;
+  }
+
+  // DELETE /api/excel/delete?name=...
+  if (req.method === 'DELETE' && url.pathname === '/api/excel/delete') {
+    const name = url.searchParams.get('name');
+    if (!name) { res.writeHead(400); return res.end('missing name'); }
+    const target = path.join(EXCEL_DIR, path.basename(name));
+    if (!fs.existsSync(target)) { res.writeHead(404); return res.end('not found'); }
+    fs.unlinkSync(target);
+    console.log(`[http] deleted: ${name}`);
+    res.writeHead(200); res.end('ok');
+    return;
+  }
+
+  // GET /excel/:filename
+  if (req.method === 'GET' && url.pathname.startsWith('/excel/')) {
+    const filename = decodeURIComponent(url.pathname.slice('/excel/'.length));
+    const target = path.join(EXCEL_DIR, path.basename(filename));
+    if (!fs.existsSync(target)) { res.writeHead(404); return res.end('not found'); }
+    const data = fs.readFileSync(target);
+    res.writeHead(200, {
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Length': data.length,
+    });
+    return res.end(data);
+  }
+
+  // GET /api/uart/baud
+  if (req.method === 'GET' && url.pathname === '/api/uart/baud') {
+    return sendJson(res, 200, { baud: currentBaud });
+  }
+
+  // POST /api/uart/baud  { baud: number }
+  if (req.method === 'POST' && url.pathname === '/api/uart/baud') {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      try {
+        const { baud } = JSON.parse(Buffer.concat(chunks).toString());
+        if (!baud || baud < 1200 || baud > 5000000) {
+          return sendJson(res, 400, { ok: false, msg: '无效波特率' });
+        }
+        currentBaud = baud;
+        console.log(`[http] baud rate set to ${baud}`);
+        sendJson(res, 200, { ok: true, baud: currentBaud });
+      } catch {
+        sendJson(res, 400, { ok: false, msg: '无效请求体' });
+      }
+    });
+    return;
+  }
+
+  res.writeHead(404); res.end('not found');
+});
+
+httpServer.listen(HTTP_PORT, () => {
+  console.log(`Mock ESP32 HTTP server listening on http://0.0.0.0:${HTTP_PORT}`);
+  console.log(`  Excel files stored in: ${EXCEL_DIR}`);
 });

@@ -4,6 +4,7 @@ import { useConnectionStore } from '../store/connectionStore';
 import { parseParameterTable } from '../lib/paramParser';
 import { ParamRow } from './ParamRow';
 import { useModbusOps } from '../hooks/useModbusOps';
+import { EspFilePicker } from './EspFilePicker';
 
 export function ParamPage() {
   const { pages, params, loadParams, activePage, search, setActivePage, setSearch } = useParamStore();
@@ -12,13 +13,12 @@ export function ParamPage() {
 
   const [loading, setLoading] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; mode: 'page' | 'all' } | null>(null);
+  const [showEspPicker, setShowEspPicker] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef(false);
 
-  // 加载 Excel
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // 加载 Excel（本地文件 or ESP32 下载后传入）
+  async function loadFile(file: File) {
     setLoading(true);
     try {
       const { params: p, pages: pg } = await parseParameterTable(file);
@@ -29,6 +29,12 @@ export function ParamPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await loadFile(file);
   }
 
   // 当前页参数（过滤 hidden，支持搜索）
@@ -99,6 +105,15 @@ export function ParamPage() {
           onChange={handleFileChange}
           className="hidden"
         />
+
+        {/* 从 ESP32 加载 */}
+        <button
+          onClick={() => setShowEspPicker(true)}
+          className="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white rounded text-sm transition-colors"
+        >
+          📡 从ESP32加载
+        </button>
+
         {loading && <span className="text-sm text-yellow-400">解析中…</span>}
 
         {/* 读取按钮组 */}
@@ -200,6 +215,15 @@ export function ParamPage() {
           </table>
         </div>
       )}
+
+      {/* ESP32 Excel 文件选择弹窗 */}
+      {showEspPicker && (
+        <EspFilePicker
+          onFileReady={(file) => loadFile(file)}
+          onClose={() => setShowEspPicker(false)}
+        />
+      )}
+
     </div>
   );
 }

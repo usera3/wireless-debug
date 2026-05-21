@@ -1,7 +1,10 @@
+import { useState } from 'react';
 import { useConnectionStore } from '../store/connectionStore';
+import { BaudPicker } from './BaudPicker';
 
 export function ConnectionPanel() {
   const { url, connected, connecting, setUrl, connect, disconnect } = useConnectionStore();
+  const [showBaudPicker, setShowBaudPicker] = useState(false);
 
   return (
     <div className="p-6 max-w-lg">
@@ -48,6 +51,14 @@ export function ConnectionPanel() {
           >
             {connected ? '断开' : connecting ? '连接中...' : '连接'}
           </button>
+
+          {/* 波特率设置 */}
+          <button
+            onClick={() => setShowBaudPicker(true)}
+            className="px-4 py-2 rounded text-sm font-medium transition-colors bg-slate-600 hover:bg-slate-500 text-white"
+          >
+            ⚙️ 波特率
+          </button>
         </div>
 
         {/* 说明 */}
@@ -55,6 +66,8 @@ export function ConnectionPanel() {
           ESP32 默认地址：ws://192.168.4.1/ws
         </p>
       </div>
+
+      {showBaudPicker && <BaudPicker onClose={() => setShowBaudPicker(false)} />}
     </div>
   );
 }
