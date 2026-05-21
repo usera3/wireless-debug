@@ -22,7 +22,7 @@ let _id = 0;
 
 export const useDebugStore = create<DebugState>((set) => ({
   entries: [],
-  paused: false,
+  paused: true,
   addEntry: (entry) =>
     set((s) => {
       if (s.paused) return s;
