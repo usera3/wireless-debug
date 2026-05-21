@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react';
 import { useModbusOscStore } from '../store/modbusOscStore';
 import { useParamStore } from '../store/paramStore';
 import { useConnectionStore } from '../store/connectionStore';
@@ -5,15 +6,19 @@ import { useOscStore } from '../store/oscStore';
 import { useModbusOscController } from '../hooks/useModbusOscController';
 import { OscChart } from './OscChart';
 import { useMemo } from 'react';
+import { exportCsv, importCsv } from '../lib/csvWave';
 
 export function ModbusOscPage() {
-  const { running, interval, selectedPage, readChunkSize, waveData, setInterval, setSelectedPage, setReadChunkSize } =
+  const { running, interval, selectedPage, readChunkSize, waveData, setInterval, setSelectedPage, setReadChunkSize, pushSamples, clearWaveData } =
     useModbusOscStore();
   const pages = useParamStore((s) => s.pages);
   const params = useParamStore((s) => s.params);
   const connected = useConnectionStore((s) => s.connected);
   const oscRunning = useOscStore((s) => s.running);
   const { start, stop } = useModbusOscController();
+
+  const [csvError, setCsvError] = useState<string | null>(null);
+  const importRef = useRef<HTMLInputElement>(null);
 
   const pageParams = params.filter((p) => p.page === selectedPage);
 
@@ -31,6 +36,40 @@ export function ModbusOscPage() {
   }, [pageParams, waveData]);
 
   const canStart = connected && !oscRunning && selectedPage !== '' && !running;
+
+  function handleExport() {
+    if (waveData.size === 0) return;
+    const aliases = Array.from(waveData.keys());
+    const columns = aliases.map((a) => waveData.get(a) ?? []);
+    const sampleIntervalSec = interval > 0 ? interval / 1000 : 1;
+    const now = new Date();
+    const stamp = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
+    exportCsv(aliases, columns, sampleIntervalSec, `modbus_osc_${stamp}.csv`);
+  }
+
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setCsvError(null);
+    try {
+      const { labels, columns } = await importCsv(file);
+      clearWaveData();
+      // 逐列用 alias 写入 store
+      const batch: Record<string, number> = {};
+      const maxLen = columns.reduce((m, c) => Math.max(m, c.length), 0);
+      for (let i = 0; i < maxLen; i++) {
+        const row: Record<string, number> = {};
+        labels.forEach((alias, ci) => {
+          if (i < columns[ci].length) row[alias] = columns[ci][i];
+        });
+        pushSamples(row);
+      }
+    } catch (err) {
+      setCsvError((err as Error).message);
+      setTimeout(() => setCsvError(null), 4000);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4 p-4 h-full">
@@ -105,8 +144,30 @@ export function ModbusOscPage() {
           ■ 停止
         </button>
 
+        {/* 导出 CSV */}
+        <button
+          onClick={handleExport}
+          disabled={running || waveData.size === 0}
+          className="px-4 py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed
+                     text-white rounded text-sm font-medium transition-colors"
+        >
+          ⬇ 导出 CSV
+        </button>
+
+        {/* 导入 CSV */}
+        <button
+          onClick={() => importRef.current?.click()}
+          disabled={running}
+          className="px-4 py-2 bg-slate-600 hover:bg-slate-500 disabled:opacity-40 disabled:cursor-not-allowed
+                     text-white rounded text-sm font-medium transition-colors"
+        >
+          ⬆ 导入 CSV
+        </button>
+        <input ref={importRef} type="file" accept=".csv" className="hidden" onChange={handleImport} />
+
         {/* 状态 */}
         <div className="ml-auto flex items-center gap-4 text-xs text-slate-400">
+          {csvError && <span className="text-red-400">❌ {csvError}</span>}
           {oscRunning && (
             <span className="text-amber-400">⚠️ 地址示波器运行中，请先停止</span>
           )}
