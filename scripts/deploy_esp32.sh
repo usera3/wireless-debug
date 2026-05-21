@@ -10,13 +10,6 @@ echo "==> 构建前端产物..."
 npm run build
 
 echo ""
-echo "==> 预 gzip 所有静态文件..."
-find dist -type f ! -name "*.gz" | while read -r f; do
-  gzip -9 -k "$f"
-  echo "    压缩: $f -> $f.gz"
-done
-
-echo ""
 echo "==> 产物大小："
 du -sh dist/
 echo ""
