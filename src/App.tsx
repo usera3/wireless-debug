@@ -5,13 +5,14 @@ import { OscilloscoperPage } from './components/OscilloscoperPage';
 import { ParamPage } from './components/ParamPage';
 import { DebugPage } from './components/DebugPage';
 import { ModbusOscPage } from './components/ModbusOscPage';
+import { DashboardPage } from './components/DashboardPage';
 import { useConnectionStore } from './store/connectionStore';
 import { wsClient } from './lib/wsClient';
 
-type Tab = 'osc' | 'modbusOsc' | 'params' | 'connection' | 'debug';
+type Tab = 'dashboard' | 'osc' | 'modbusOsc' | 'params' | 'connection' | 'debug';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>('osc');
+  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const { connected, connect } = useConnectionStore();
   const [toast, setToast] = useState<string | null>(null);
 
@@ -39,6 +40,7 @@ export default function App() {
   }, [connected]);
 
   const content = {
+    dashboard: <DashboardPage />,
     osc: <OscilloscoperPage />,
     modbusOsc: <ModbusOscPage />,
     params: <ParamPage />,

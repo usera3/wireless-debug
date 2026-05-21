@@ -9,7 +9,7 @@ export default defineConfig({
     compression({ algorithms: ['gzip'], exclude: /\.(gz|br)$/ }),
   ],
   server: {
-    port: 5679,
+    port: 5678,
     proxy: {
       '/ws': {
         target: 'ws://localhost:8765',

@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react';
+import { useState } from 'react';
 import { useConnectionStore } from '../store/connectionStore';
 
-type Tab = 'osc' | 'modbusOsc' | 'params' | 'connection' | 'debug';
+type Tab = 'dashboard' | 'osc' | 'modbusOsc' | 'params' | 'connection' | 'debug';
 
 interface LayoutProps {
   activeTab: Tab;
@@ -10,6 +11,7 @@ interface LayoutProps {
 }
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
+  { id: 'dashboard', label: '仪表盘', icon: '🎛️' },
   { id: 'osc', label: '地址示波器', icon: '📈' },
   { id: 'modbusOsc', label: '参数示波器', icon: '📉' },
   { id: 'params', label: '参数编辑', icon: '⚙️' },
@@ -20,12 +22,18 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 export function Layout({ activeTab, onTabChange, children }: LayoutProps) {
   const connected = useConnectionStore((s) => s.connected);
   const connecting = useConnectionStore((s) => s.connecting);
+  const [showDebug, setShowDebug] = useState(false);
+
+  const visibleTabs = showDebug ? TABS : TABS.filter((t) => t.id !== 'debug');
 
   return (
     <div className="flex flex-col h-screen bg-slate-900 text-slate-100">
       {/* 顶部 Header */}
       <header className="flex items-center justify-between px-4 py-2 bg-slate-800 border-b border-slate-700 shrink-0">
-        <h1 className="text-base font-bold tracking-wide text-blue-400">
+        <h1
+          className="text-base font-bold tracking-wide text-blue-400 select-none cursor-default"
+          onDoubleClick={() => setShowDebug((v) => !v)}
+        >
           Wireless Debug
         </h1>
         <div className="flex items-center gap-2 text-sm">
@@ -43,7 +51,7 @@ export function Layout({ activeTab, onTabChange, children }: LayoutProps) {
       <div className="flex flex-1 overflow-hidden">
         {/* 左侧侧边栏（桌面） */}
         <nav className="hidden md:flex w-36 shrink-0 bg-slate-800 border-r border-slate-700 flex-col pt-2">
-          {TABS.map((tab) => (
+          {visibleTabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => onTabChange(tab.id)}
@@ -67,7 +75,7 @@ export function Layout({ activeTab, onTabChange, children }: LayoutProps) {
 
       {/* 底部 Tab Bar（手机） */}
       <nav className="md:hidden shrink-0 flex bg-slate-800 border-t border-slate-700">
-        {TABS.map((tab) => (
+        {visibleTabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => onTabChange(tab.id)}

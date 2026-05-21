@@ -25,10 +25,12 @@ interface ParamState {
   flashSeq: Record<string, number>;
   activePage: string;
   search: string;
+  dashboardEnabled: boolean;
   loadParams: (params: ParamDef[], pages: string[]) => void;
   setValue: (alias: string, val: number) => void;
   setActivePage: (page: string) => void;
   setSearch: (s: string) => void;
+  setDashboardEnabled: (enabled: boolean) => void;
 }
 
 export const useParamStore = create<ParamState>((set) => ({
@@ -38,6 +40,7 @@ export const useParamStore = create<ParamState>((set) => ({
   flashSeq: {},
   activePage: '',
   search: '',
+  dashboardEnabled: false,
   loadParams: (params, pages) => set({ params, pages }),
   setValue: (alias, val) =>
     set((s) => ({
@@ -46,4 +49,5 @@ export const useParamStore = create<ParamState>((set) => ({
     })),
   setActivePage: (page) => set({ activePage: page }),
   setSearch: (s) => set({ search: s }),
+  setDashboardEnabled: (enabled) => set({ dashboardEnabled: enabled }),
 }));
