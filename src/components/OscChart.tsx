@@ -104,11 +104,11 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
   const renderedCountsRef = useRef<Map<number, number>>(new Map());
   const alignedDataRef = useRef<AlignedData>([[]]);
   const xModeRef = useRef<'following' | 'manual'>('following');
-  const yModeRef = useRef<'default' | 'manual'>('default');
+  const yModeRef = useRef<'auto' | 'manual'>('auto');
   const syncingScalesRef = useRef(false);
   const xSpanRef = useRef(1); // 当前显示窗口宽度（秒），默认1s
   const defaultYRangeRef = useRef({ min: -5000, max: 5000 });
-  // 自动模式下已应用的 Y 范围（只增不减）
+  // 自动模式下已应用的 Y 范围（只增不减），null 表示从数据重新计算（无兜底）
   const autoYRangeRef = useRef<{ min: number; max: number } | null>(null);
 
   const demoData = useMemo(() => generateDemoData(), []);
@@ -147,24 +147,21 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
     return { min: latestX - span, max: latestX };
   };
 
-  const applyDefaultYForCurrentX = (plot: uPlot) => {
+  const applyAutoY = (plot: uPlot) => {
     const { min, max } = getXWindow(plot);
-    const defaultRange = getDefaultYRange();
     const visibleRange = getVisibleYRange(alignedDataRef.current, min, max);
 
-    // 计算本次目标范围
-    const targetRange = !visibleRange
-      ? defaultRange
-      : {
-          min: Math.min(visibleRange.min, defaultRange.min),
-          max: Math.max(visibleRange.max, defaultRange.max),
-        };
-
-    // 与历史累积范围取并集（只增不减）
     const prev = autoYRangeRef.current;
-    const nextRange = prev
-      ? { min: Math.min(targetRange.min, prev.min), max: Math.max(targetRange.max, prev.max) }
-      : targetRange;
+    let nextRange: { min: number; max: number };
+    if (!visibleRange) {
+      if (!prev) return; // 既无历史也无数据，不改变 Y 轴
+      nextRange = prev;
+    } else if (!prev) {
+      nextRange = visibleRange; // 双击后首次：纯数据，无兜底
+    } else {
+      // 只增不减
+      nextRange = { min: Math.min(visibleRange.min, prev.min), max: Math.max(visibleRange.max, prev.max) };
+    }
 
     autoYRangeRef.current = nextRange;
     plot.setScale('y', nextRange);
@@ -248,8 +245,8 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
           }
         }
 
-        if (yModeRef.current === 'default') {
-          applyDefaultYForCurrentX(plot);
+        if (yModeRef.current === 'auto') {
+          applyAutoY(plot);
         }
       }
 
@@ -414,10 +411,9 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
         plot.batch(() => {
           if (xModeRef.current === 'manual') {
             xModeRef.current = 'following';
-            yModeRef.current = 'default';
-            autoYRangeRef.current = null;
+            yModeRef.current = 'auto';
             moveToLatestView(plot);
-            applyDefaultYForCurrentX(plot);
+            applyAutoY(plot);
           } else {
             xModeRef.current = 'manual';
           }
@@ -577,8 +573,8 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
     renderedCountsRef.current = new Map(channelNos.map((chNo) => [chNo, effectiveChannels.get(chNo)?.length ?? 0]));
     alignedDataRef.current = buildAlignedData(channelNos, effectiveChannels, sampleInterval);
     xModeRef.current = 'following';
-    yModeRef.current = 'default';
-    autoYRangeRef.current = null;
+    yModeRef.current = 'auto';
+    autoYRangeRef.current = getDefaultYRange(); // 启动时以 ±5000 为初始累积基准
 
     plotRef.current?.destroy();
     resizeObserverRef.current?.disconnect();
@@ -606,10 +602,10 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
               self.batch(() => {
                 if (xModeRef.current === 'manual') {
                   if (runningRef.current) xModeRef.current = 'following';
-                  yModeRef.current = 'default';
-                  autoYRangeRef.current = null;
+                  yModeRef.current = 'auto';
+                  autoYRangeRef.current = null; // 清除历史，双击后纯数据范围，无 ±5000 兜底
                   moveToLatestView(self);
-                  applyDefaultYForCurrentX(self);
+                  applyAutoY(self);
                 } else {
                   xModeRef.current = 'manual';
                 }
@@ -805,8 +801,8 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
         moveToLatestView(plot);
       }
 
-      if (yModeRef.current === 'default' && xModeRef.current !== 'manual') {
-        applyDefaultYForCurrentX(plot);
+      if (yModeRef.current === 'auto' && xModeRef.current !== 'manual') {
+        applyAutoY(plot);
       }
     });
     syncingScalesRef.current = false;
