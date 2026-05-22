@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
 
@@ -11,20 +11,7 @@ const CHANNEL_COLORS = [
 type AlignedSeries = number[] | (number | null)[];
 type AlignedData = [number[], ...AlignedSeries[]];
 
-function generateDemoData(): Map<number, number[]> {
-  const map = new Map<number, number[]>();
-  const N = 5000;
-  const ch1: number[] = [];
-  const ch2: number[] = [];
-  for (let i = 0; i < N; i++) {
-    const t = i / 100;
-    ch1.push(Math.sin(t * 2 * Math.PI));
-    ch2.push(Math.cos(t * 2 * Math.PI) * 0.5);
-  }
-  map.set(1, ch1);
-  map.set(2, ch2);
-  return map;
-}
+
 
 function buildAlignedData(channelNos: number[], channels: Map<number, number[]>, sampleInterval: number): AlignedData {
   const maxLen = channelNos.reduce((max, chNo) => Math.max(max, channels.get(chNo)?.length ?? 0), 0);
@@ -111,13 +98,11 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
   // 自动模式下已应用的 Y 范围（只增不减），null 表示从数据重新计算（无兜底）
   const autoYRangeRef = useRef<{ min: number; max: number } | null>(null);
 
-  const demoData = useMemo(() => generateDemoData(), []);
-  const effectiveChannels = channels.size > 0 ? channels : demoData;
-  const currentKey = `${sampleInterval}:${Array.from(effectiveChannels.keys()).sort().join(',')}`;
+  const currentKey = `${sampleInterval}:${Array.from(channels.keys()).sort().join(',')}`;
 
   // 始终持有最新的 effectiveChannels，供 effect 内部读取而不触发重建
-  const effectiveChannelsRef = useRef(effectiveChannels);
-  effectiveChannelsRef.current = effectiveChannels;
+  const effectiveChannelsRef = useRef(channels);
+  effectiveChannelsRef.current = channels;
 
   // 始终持有最新的 running，供事件 handler 闭包内读取
   const runningRef = useRef(running);
@@ -154,12 +139,14 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
   const applyAutoY = (plot: uPlot) => {
     const { min, max } = getXWindow(plot);
     const visibleRange = getVisibleYRange(alignedDataRef.current, min, max);
-
     const prev = autoYRangeRef.current;
+
     let nextRange: { min: number; max: number };
     if (!visibleRange) {
-      if (!prev) return; // 既无历史也无数据，不改变 Y 轴
-      nextRange = prev;
+      if (!prev) {
+        return; // 既无历史也无数据，不改变 Y 轴
+      }
+      nextRange = { min: prev.min, max: prev.max }; // 拷贝，避免同一引用被后续 mutate 污染
     } else if (!prev) {
       nextRange = visibleRange; // 双击后首次：纯数据，无兜底
     } else {
@@ -675,7 +662,8 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
           ready: [
             (self) => {
               self.setScale('x', { min: 0, max: xSpanRef.current });
-              self.setScale('y', getDefaultYRange());
+              const defY = getDefaultYRange();
+              self.setScale('y', { min: defY.min, max: defY.max });
               self.root.addEventListener('wheel', handleWheelZoom, { passive: false });
               self.root.addEventListener('mousedown', handlePanStart);
               window.addEventListener('mousemove', handlePanMove);
@@ -738,6 +726,7 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
       return;
     }
 
+    const effectiveChannels = effectiveChannelsRef.current;
     const channelNos = channelOrderRef.current;
     const currentData = alignedDataRef.current;
     const xData = currentData[0];
@@ -810,7 +799,7 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
       }
     });
     syncingScalesRef.current = false;
-  }, [effectiveChannels, running, sampleInterval]);
+  }, [channels, running, sampleInterval]);
 
   return (
     <div className="border border-slate-700 rounded bg-slate-900 h-full relative overflow-hidden">

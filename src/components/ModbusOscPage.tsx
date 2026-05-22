@@ -47,6 +47,7 @@ export function ModbusOscPage() {
   }
 
   function handleStart() {
+    clearWaveData(); // 先清旧数据，避免图表重建时读到上一轮的旧值
     setChartKey((k) => k + 1);
     setInterval(Math.max(100, pendingInterval));
     start(pendingPage);
