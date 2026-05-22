@@ -123,6 +123,10 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
   const runningRef = useRef(running);
   runningRef.current = running;
 
+  // 始终持有最新的 labels，供图表构建时读取，避免 labels 引用变化触发图表重建
+  const labelsRef = useRef(labels);
+  labelsRef.current = labels;
+
   const getLatestX = () => alignedDataRef.current[0][alignedDataRef.current[0].length - 1] ?? 0;
 
   const getDefaultYRange = () => defaultYRangeRef.current;
@@ -652,7 +656,7 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
             value: (_self, rawValue) => `${Number(rawValue).toFixed(6)} s`,
           },
           ...channelNos.map((chNo, i) => ({
-            label: labels?.get(chNo) ?? `CH${chNo}`,
+            label: labelsRef.current?.get(chNo) ?? `CH${chNo}`,
             stroke: CHANNEL_COLORS[i % CHANNEL_COLORS.length],
             width: 2,
             spanGaps: false,
@@ -723,7 +727,7 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
         plotRef.current = null;
       }
     };
-  }, [currentKey, labels, sampleInterval]);
+  }, [currentKey, sampleInterval]);
 
   useEffect(() => {
     const plot = plotRef.current;

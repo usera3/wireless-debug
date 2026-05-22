@@ -28,20 +28,27 @@ let modbusOscBusy = false;
 const MODBUS_TIMEOUT_MS = 500; // 单次 Modbus 响应超时，与采样间隔无关
 
 export function useModbusOscController() {
-  const { running, interval, selectedPage, readChunkSize, setRunning, pushSamples, clearWaveData } =
+  const { running, selectedPage, setRunning, pushSamples, clearWaveData } =
     useModbusOscStore();
   const params = useParamStore((s) => s.params);
 
-  const start = useCallback(() => {
-    const pageParams = params.filter((p) => p.page === selectedPage);
+  const start = useCallback((overridePage?: string) => {
+    const page = overridePage ?? selectedPage;
+    const pageParams = params.filter((p) => p.page === page);
     if (pageParams.length === 0) return;
 
+    if (overridePage && overridePage !== selectedPage) {
+      useModbusOscStore.getState().setSelectedPage(overridePage);
+    }
     clearWaveData();
     setRunning(true);
 
+    // 从 store 直接读最新值，避免闭包拿到旧值
+    const { interval: currentInterval, readChunkSize: currentChunkSize } = useModbusOscStore.getState();
+
     // 将参数按地址排序后分组；readChunkSize=0 表示不分组（整页一次读）
     const sorted = [...pageParams].sort((a, b) => a.regAddr - b.regAddr);
-    const chunkSize = readChunkSize > 0 ? readChunkSize : sorted.length;
+    const chunkSize = currentChunkSize > 0 ? currentChunkSize : sorted.length;
     const chunks: typeof pageParams[] = [];
     for (let i = 0; i < sorted.length; i += chunkSize) {
       chunks.push(sorted.slice(i, i + chunkSize));
@@ -82,8 +89,8 @@ export function useModbusOscController() {
       } finally {
         modbusOscBusy = false;
       }
-    }, interval);
-  }, [params, selectedPage, interval, readChunkSize, clearWaveData, setRunning, pushSamples]);
+    }, currentInterval);
+  }, [params, selectedPage, clearWaveData, setRunning, pushSamples]);
 
   const stop = useCallback(() => {
     if (modbusOscTimer) {

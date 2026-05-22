@@ -9,7 +9,7 @@ import { useMemo } from 'react';
 import { exportCsv, importCsv } from '../lib/csvWave';
 
 export function ModbusOscPage() {
-  const { running, interval, selectedPage, readChunkSize, waveData, setInterval, setSelectedPage, setReadChunkSize, pushSamples, clearWaveData } =
+  const { running, interval, selectedPage, readChunkSize, waveData, setInterval, setReadChunkSize, pushSamples, clearWaveData } =
     useModbusOscStore();
   const pages = useParamStore((s) => s.pages);
   const params = useParamStore((s) => s.params);
@@ -18,12 +18,17 @@ export function ModbusOscPage() {
   const { start, stop } = useModbusOscController();
 
   const [csvError, setCsvError] = useState<string | null>(null);
+  const [chartKey, setChartKey] = useState(0);
   const importRef = useRef<HTMLInputElement>(null);
+  // 下拉框本地待选页，只在点击启动时才同步到 store
+  const [pendingPage, setPendingPage] = useState<string>(selectedPage);
+  const [pendingInterval, setPendingInterval] = useState<number>(interval);
 
-  const pageParams = params.filter((p) => p.page === selectedPage);
+  const pageParams = useMemo(
+    () => params.filter((p) => p.page === selectedPage),
+    [params, selectedPage],
+  );
 
-  // 将 alias->[] 的 Map 转换为 OscChart 所需的 Map<number, number[]>
-  // 用参数在页内的顺序作为通道号 key（1-based）
   const { chartChannels, chartLabels } = useMemo(() => {
     const channels = new Map<number, number[]>();
     const labels = new Map<number, string>();
@@ -35,7 +40,17 @@ export function ModbusOscPage() {
     return { chartChannels: channels, chartLabels: labels };
   }, [pageParams, waveData]);
 
-  const canStart = connected && !oscRunning && selectedPage !== '' && !running;
+  const canStart = connected && !oscRunning && pendingPage !== '' && !running;
+
+  function handlePageChange(page: string) {
+    setPendingPage(page);
+  }
+
+  function handleStart() {
+    setChartKey((k) => k + 1);
+    setInterval(Math.max(100, pendingInterval));
+    start(pendingPage);
+  }
 
   function handleExport() {
     if (waveData.size === 0) return;
@@ -81,8 +96,8 @@ export function ModbusOscPage() {
             <span className="text-xs text-slate-500 italic">请先在「参数编辑」页加载参数表</span>
           ) : (
             <select
-              value={selectedPage}
-              onChange={(e) => setSelectedPage(e.target.value)}
+              value={pendingPage}
+              onChange={(e) => handlePageChange(e.target.value)}
               disabled={running}
               className="bg-slate-700 border border-slate-600 rounded px-2 py-1 text-slate-100 text-xs disabled:opacity-50"
             >
@@ -103,8 +118,8 @@ export function ModbusOscPage() {
             type="number"
             min={100}
             step={100}
-            value={interval}
-            onChange={(e) => setInterval(Number(e.target.value))}
+            value={pendingInterval}
+            onChange={(e) => setPendingInterval(Number(e.target.value))}
             disabled={running}
             className="w-20 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-slate-100 text-xs disabled:opacity-50"
           />
@@ -127,7 +142,7 @@ export function ModbusOscPage() {
 
         {/* 开始 / 停止 */}
         <button
-          onClick={start}
+          onClick={handleStart}
           disabled={!canStart}
           className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed
                      text-white rounded text-sm font-medium transition-colors"
@@ -187,7 +202,8 @@ export function ModbusOscPage() {
       {/* 波形图区 */}
       <div className="flex-1 min-h-0">
         <OscChart
-          channels={chartChannels}
+          key={chartKey}
+          channels={running || waveData.size > 0 ? chartChannels : new Map()}
           sampleInterval={interval > 0 ? interval / 1000 : 1}
           running={running}
           labels={chartLabels}
