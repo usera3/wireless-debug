@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { useConnectionStore } from '../store/connectionStore';
 
-type Tab = 'dashboard' | 'osc' | 'modbusOsc' | 'params' | 'connection' | 'debug';
+type Tab = 'dashboard' | 'osc' | 'modbusOsc' | 'params' | 'connection' | 'debug' | 'bootloader';
 
 interface LayoutProps {
   activeTab: Tab;
@@ -17,6 +17,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'params', label: '参数编辑', icon: '⚙️' },
   { id: 'connection', label: '连接设置', icon: '🔌' },
   { id: 'debug', label: '调试信息', icon: '🐛' },
+  { id: 'bootloader', label: '固件烧录', icon: '🚀' },
 ];
 
 export function Layout({ activeTab, onTabChange, children }: LayoutProps) {

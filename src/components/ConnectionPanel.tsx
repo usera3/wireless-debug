@@ -1,10 +1,13 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useConnectionStore } from '../store/connectionStore';
 import { BaudPicker } from './BaudPicker';
+import { useBootloaderStore } from '../store/bootloaderStore';
 
 export function ConnectionPanel() {
   const { url, connected, connecting, setUrl, connect, disconnect } = useConnectionStore();
   const [showBaudPicker, setShowBaudPicker] = useState(false);
+  const { guiConfig, loadGuiConfig, exportGuiConfig } = useBootloaderStore();
+  const configInputRef = useRef<HTMLInputElement>(null);
 
   return (
     <div className="p-6 max-w-lg">
@@ -65,6 +68,39 @@ export function ConnectionPanel() {
         <p className="text-xs text-slate-500">
           ESP32 默认地址：ws://192.168.4.1/ws
         </p>
+
+        {/* 烧录配置 */}
+        <div>
+          <h3 className="text-sm font-semibold text-slate-300 mb-2">烧录配置</h3>
+          <p className="text-xs text-slate-500 mb-2">
+            当前目标：{guiConfig.targets.map((t) => t.displayName).join(' / ')}
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="file"
+              accept=".json"
+              className="hidden"
+              ref={configInputRef}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) loadGuiConfig(f);
+                e.target.value = '';
+              }}
+            />
+            <button
+              onClick={() => configInputRef.current?.click()}
+              className="px-3 py-1.5 rounded text-xs font-medium bg-slate-600 hover:bg-slate-500 text-white transition-colors"
+            >
+              导入 gui-config.json
+            </button>
+            <button
+              onClick={exportGuiConfig}
+              className="px-3 py-1.5 rounded text-xs font-medium bg-slate-600 hover:bg-slate-500 text-white transition-colors"
+            >
+              导出
+            </button>
+          </div>
+        </div>
       </div>
 
       {showBaudPicker && <BaudPicker onClose={() => setShowBaudPicker(false)} />}
