@@ -22,7 +22,7 @@ const RESPONSE_LEN: Record<number, number> = {
   0x75: 5,  // resetDevice
 };
 
-const noop = (_: Uint8Array) => {};
+const noop = (_unused: Uint8Array) => { void _unused; };
 
 export class BlModbusClient {
   constructor(public slaveId: number = 1) {}

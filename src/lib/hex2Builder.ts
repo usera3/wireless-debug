@@ -49,7 +49,6 @@ function parseHexLine(line: string): { recordType: number; line: string } {
   }
   if (bytes.length < 5) throw new Error(`Intel HEX 记录过短: ${line}`);
 
-  const byteCount = bytes[0];
   let checksum = 0;
   for (let i = 0; i < bytes.length - 1; i++) checksum += bytes[i];
   checksum = (~checksum + 1) & 0xff;
