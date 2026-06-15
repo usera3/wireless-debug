@@ -12,7 +12,9 @@ const REG_SIZE = 512; // 16-bit Modbus holding registers
 
 // ── HTTP mock state ───────────────────────────────────────────────────────────
 const EXCEL_DIR = path.join(os.tmpdir(), 'mock_excel');
+const FLASH_DIR = path.join(os.tmpdir(), 'mock_flash');
 fs.mkdirSync(EXCEL_DIR, { recursive: true });
+fs.mkdirSync(FLASH_DIR, { recursive: true });
 let currentBaud = 115200;
 
 const FRAME_HEADER = Buffer.from([0xff, 0x77, 0xaa, 0x55]);
@@ -21,14 +23,21 @@ const FRAME_FOOTER = Buffer.from([0xff, 0x77, 0xaa, 0x55]);
 // ── per-connection state ──────────────────────────────────────────────────────
 function makeState() {
   return {
-    regs:        new Uint16Array(REG_SIZE), // Modbus register bank (all zero)
-    oscChannels: [],                         // [{ch, type, addr}, ...]
+    regs:        new Uint16Array(REG_SIZE),
+    oscChannels: [],
     oscRunning:  false,
     oscTimer:    null,
-    frameLen:    130,   // 4-header + 120-data + 2-crc + 4-footer
+    frameLen:    130,
     dataAreaLen: 120,
-    sampleRate:  6000,  // Hz
-    t:           0,     // sample counter used for sine generation
+    sampleRate:  6000,
+    t:           0,
+    // ── flash state ──
+    flash: {
+      inBootloader: false,
+      currentTarget: 0,                   // 0=cpu1, 1=cm, 2=cpu2
+      buffers: new Map(),                 // Map<targetCode, Map<addr, Buffer>>
+      appInfo: { validFlag: 0, totalBytes: 0, crc32: 0 },
+    },
   };
 }
 
@@ -59,6 +68,107 @@ function buildOscFrame(state) {
   const crcVal = crc16(dataArea);
   const crcBuf = Buffer.from([crcVal & 0xff, (crcVal >> 8) & 0xff]);
   return Buffer.concat([FRAME_HEADER, dataArea, crcBuf, FRAME_FOOTER]);
+}
+
+// ── flash helpers ─────────────────────────────────────────────────────────────
+const TARGET_NAMES = { 0: 'cpu1', 1: 'cm', 2: 'cpu2' };
+
+function flushFlashToDisk(flash) {
+  const targetCode = flash.currentTarget;
+  const addrMap = flash.buffers.get(targetCode);
+  if (!addrMap || addrMap.size === 0) {
+    console.log('[flash] nothing to flush');
+    return;
+  }
+
+  // Sort by address and concatenate into one flat binary
+  const sorted = Array.from(addrMap.entries()).sort(([a], [b]) => a - b);
+  const total = sorted.reduce((s, [, buf]) => s + buf.length, 0);
+  const flat = Buffer.alloc(total);
+  let offset = 0;
+  for (const [, buf] of sorted) {
+    buf.copy(flat, offset);
+    offset += buf.length;
+  }
+
+  const targetName = TARGET_NAMES[targetCode] ?? `target${targetCode}`;
+  const ts = Date.now();
+  const filename = `${targetName}_${ts}.bin`;
+  const dest = path.join(FLASH_DIR, filename);
+  fs.writeFileSync(dest, flat);
+  console.log(`[flash] flushed ${flat.length} bytes → ${dest}`);
+
+  // Update virtual AppInfo
+  flash.appInfo.validFlag   = 0xaa55;
+  flash.appInfo.totalBytes  = flat.length;
+  // Simple XOR checksum as placeholder CRC32
+  let xor = 0;
+  for (const b of flat) xor ^= b;
+  flash.appInfo.crc32 = xor >>> 0;
+}
+
+// ── flash frame handler ───────────────────────────────────────────────────────
+function handleFlashFrame(ws, state, frame) {
+  const fc   = frame[1];
+  const fl   = state.flash;
+
+  // 0x65 — Enter Bootloader Mode
+  if (fc === 0x65) {
+    fl.inBootloader = true;
+    console.log('[flash] entered bootloader mode');
+    const resp = Buffer.from([frame[0], 0x65, 0x00]);
+    ws.send(appendCrc(resp));
+
+  // 0x70 — Set Session Target
+  } else if (fc === 0x70) {
+    fl.currentTarget = frame[2];
+    console.log(`[flash] session target = ${fl.currentTarget}`);
+    const resp = Buffer.from([frame[0], 0x70, 0x00]);
+    ws.send(appendCrc(resp));
+
+  // 0x66 — Erase Flash
+  } else if (fc === 0x66) {
+    const startAddr = frame.readUInt32BE(2);
+    const length    = frame.readUInt32BE(6);
+    fl.buffers.set(fl.currentTarget, new Map());
+    console.log(`[flash] erase: addr=0x${startAddr.toString(16)}, len=${length}`);
+    const resp = Buffer.alloc(11);
+    resp[0] = frame[0]; resp[1] = 0x66; resp[2] = 0x00;
+    resp.writeUInt32BE(startAddr, 3);
+    resp.writeUInt32BE(length,    7);
+    ws.send(appendCrc(resp));
+
+  // 0x67 — Write Flash
+  } else if (fc === 0x67) {
+    const addr      = frame.readUInt32BE(2);
+    const chunkLen  = frame.readUInt16BE(6);
+    const chunk     = frame.slice(8, 8 + chunkLen);
+    if (!fl.buffers.has(fl.currentTarget)) fl.buffers.set(fl.currentTarget, new Map());
+    fl.buffers.get(fl.currentTarget).set(addr, Buffer.from(chunk));
+    const resp = Buffer.alloc(5);
+    resp[0] = frame[0]; resp[1] = 0x67; resp[2] = 0x00;
+    resp.writeUInt16BE(chunkLen, 3);
+    ws.send(appendCrc(resp));
+
+  // 0x68 — Flush Flash Cache → flush to disk here
+  } else if (fc === 0x68) {
+    flushFlashToDisk(fl);
+    const resp = Buffer.from([frame[0], 0x68, 0x00]);
+    ws.send(appendCrc(resp));
+
+  // 0x6A — Complete App Write
+  } else if (fc === 0x6a) {
+    console.log('[flash] complete app write');
+    const resp = Buffer.from([frame[0], 0x6a, 0x00]);
+    ws.send(appendCrc(resp));
+
+  // 0x69 — Jump to Application
+  } else if (fc === 0x69) {
+    fl.inBootloader = false;
+    console.log('[flash] jump to application');
+    const resp = Buffer.from([frame[0], 0x69, 0x00]);
+    ws.send(appendCrc(resp));
+  }
 }
 
 // ── request dispatcher ────────────────────────────────────────────────────────
@@ -97,24 +207,104 @@ function handleFrame(ws, state, frame) {
     }
     const resp = Buffer.alloc(7);
     resp[0] = SLAVE; resp[1] = 0x10;
-    resp[2] = frame[2]; resp[3] = frame[3]; // echo startAddr
-    resp[4] = frame[4]; resp[5] = frame[5]; // echo regCount
+    resp[2] = frame[2]; resp[3] = frame[3];
+    resp[4] = frame[4]; resp[5] = frame[5];
     resp[6] = byteCount;
     ws.send(appendCrc(resp));
 
-  // 0x04 — Read input register (oscilloscope config queries)
+  // 0x04 — Read input register (oscilloscope config + bootloader info)
   } else if (fc === 0x04) {
     const regAddr = (frame[2] << 8) | frame[3];
+    const count   = (frame[4] << 8) | frame[5];
+
+    // ── Bootloader info registers ──────────────────────────────────────────
+    // 0xF000: bootloaderInfo (5 regs): magic, version, state, capability, errorCode
+    if (regAddr === 0xf000) {
+      const fl   = state.flash;
+      const regs = [
+        0xbeef,                         // magic
+        0x0101,                         // version (major=1, minor=1)
+        fl.inBootloader ? 2 : 1,        // state: 2=bootloader, 1=app
+        0x0001,                         // capability
+        0x0000,                         // errorCode
+      ];
+      const byteCount = regs.length * 2;
+      const resp = Buffer.alloc(3 + byteCount);
+      resp[0] = frame[0]; resp[1] = 0x04; resp[2] = byteCount;
+      for (let i = 0; i < regs.length; i++) {
+        resp[3 + i * 2] = (regs[i] >> 8) & 0xff;
+        resp[4 + i * 2] = regs[i] & 0xff;
+      }
+      return ws.send(appendCrc(resp));
+    }
+
+    // 0xF100: flashInfo (6 regs): sizeHi, sizeLo, appStartHi, appStartLo, appMaxSzHi, appMaxSzLo
+    if (regAddr === 0xf100) {
+      const regs = [
+        0x0008, 0x0000,   // size = 0x00080000 = 512 KB
+        0x0000, 0x8000,   // appStart = 0x00008000
+        0x0007, 0x8000,   // appMaxSize = 0x00078000
+      ];
+      const byteCount = regs.length * 2;
+      const resp = Buffer.alloc(3 + byteCount);
+      resp[0] = frame[0]; resp[1] = 0x04; resp[2] = byteCount;
+      for (let i = 0; i < regs.length; i++) {
+        resp[3 + i * 2] = (regs[i] >> 8) & 0xff;
+        resp[4 + i * 2] = regs[i] & 0xff;
+      }
+      return ws.send(appendCrc(resp));
+    }
+
+    // 0xF300: appInfo (32 regs)
+    if (regAddr === 0xf300) {
+      const ai  = state.flash.appInfo;
+      const tb  = ai.totalBytes;
+      const cr  = ai.crc32;
+      // Build 32 registers matching flasher.ts readSystemInfo parsing
+      const regs = new Array(32).fill(0);
+      regs[0]  = ai.validFlag & 0xffff;           // validFlag
+      regs[1]  = 0x0000;                          // entryAddrHi
+      regs[2]  = 0x8000;                          // entryAddrLo  (0x00008000)
+      regs[3]  = 0x0001;                          // majorVersion
+      regs[4]  = 0x0000;                          // minorVersion
+      regs[5]  = 0x0000;                          // appStartAddrHi
+      regs[6]  = 0x8000;                          // appStartAddrLo
+      regs[7]  = (tb >>> 16) & 0xffff;            // appLengthHi
+      regs[8]  = tb & 0xffff;                     // appLengthLo
+      regs[9]  = (cr >>> 16) & 0xffff;            // crc32Hi
+      regs[10] = cr & 0xffff;                     // crc32Lo
+      regs[11] = 0x0000;                          // timestampHi
+      regs[12] = 0x0000;                          // timestampLo
+      regs[13] = 0x0000;                          // gitCommitIdHi
+      regs[14] = 0x0000;                          // gitCommitIdLo
+      regs[15] = 0x0004;                          // gitTagLength = 4
+      // regs[16..19] = "mock" ASCII (one char per register, low byte)
+      ['m','o','c','k'].forEach((c, i) => { regs[16 + i] = c.charCodeAt(0); });
+      const byteCount = regs.length * 2;
+      const resp = Buffer.alloc(3 + byteCount);
+      resp[0] = frame[0]; resp[1] = 0x04; resp[2] = byteCount;
+      for (let i = 0; i < regs.length; i++) {
+        resp[3 + i * 2] = (regs[i] >> 8) & 0xff;
+        resp[4 + i * 2] = regs[i] & 0xff;
+      }
+      return ws.send(appendCrc(resp));
+    }
+
+    // ── Oscilloscope config registers (legacy single-reg reads) ───────────
     let value;
-    if      (regAddr === 0x0000) value = state.frameLen;   // 130
-    else if (regAddr === 0x0001) value = 12;                // max channels
-    else if (regAddr === 0x0002) value = state.sampleRate;  // 6000 Hz
+    if      (regAddr === 0x0000) value = state.frameLen;
+    else if (regAddr === 0x0001) value = 12;
+    else if (regAddr === 0x0002) value = state.sampleRate;
     else {
       console.warn(`[rx] FC04 unknown regAddr 0x${regAddr.toString(16)}`);
       return;
     }
     const resp = Buffer.from([SLAVE, 0x04, 0x02, (value >> 8) & 0xff, value & 0xff]);
     ws.send(appendCrc(resp));
+
+  // 0x65/0x70/0x66/0x67/0x68/0x6A/0x69 — Flash commands
+  } else if ([0x65, 0x70, 0x66, 0x67, 0x68, 0x6a, 0x69].includes(fc)) {
+    handleFlashFrame(ws, state, frame);
 
   // 0x75 — Set oscilloscope channel
   } else if (fc === 0x75) {
@@ -131,7 +321,7 @@ function handleFrame(ws, state, frame) {
     if (!state.oscRunning) {
       state.oscRunning = true;
       const chCount        = state.oscChannels.length || 1;
-      const bytesPerSample = chCount * 2; // assume INT16 for timing estimate
+      const bytesPerSample = chCount * 2;
       const samplesPerFrame = Math.floor(state.dataAreaLen / bytesPerSample);
       const fps             = state.sampleRate / samplesPerFrame;
       const intervalMs      = Math.max(16, Math.round(1000 / fps));
