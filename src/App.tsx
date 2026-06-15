@@ -6,10 +6,11 @@ import { ParamPage } from './components/ParamPage';
 import { DebugPage } from './components/DebugPage';
 import { ModbusOscPage } from './components/ModbusOscPage';
 import { DashboardPage } from './components/DashboardPage';
+import { BootloaderPage } from './components/BootloaderPage';
 import { useConnectionStore } from './store/connectionStore';
 import { wsClient } from './lib/wsClient';
 
-type Tab = 'dashboard' | 'osc' | 'modbusOsc' | 'params' | 'connection' | 'debug';
+type Tab = 'dashboard' | 'osc' | 'modbusOsc' | 'params' | 'connection' | 'debug' | 'bootloader';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
@@ -46,6 +47,7 @@ export default function App() {
     params: <ParamPage />,
     connection: <ConnectionPanel />,
     debug: <DebugPage />,
+    bootloader: <BootloaderPage />,
   }[activeTab];
 
   return (
