@@ -51,28 +51,6 @@ export const DEFAULT_GUI_CONFIG: GuiConfig = {
         editable: true,
       },
     },
-    {
-      id: 'cm',
-      firmwareTarget: 'cm',
-      label: 'CM核',
-      displayName: 'CM',
-      bitWidth: 8,
-      protocolTargetCode: 1,
-      flashPriority: 2,
-      legacySupported: true,
-      bootloaderErase: null,
-    },
-    {
-      id: 'cpu2',
-      firmwareTarget: 'cpu2',
-      label: 'CPU2',
-      displayName: 'CPU2',
-      bitWidth: 16,
-      protocolTargetCode: 2,
-      flashPriority: 3,
-      legacySupported: true,
-      bootloaderErase: null,
-    },
   ],
 };
 
@@ -142,7 +120,7 @@ function normalizeTarget(target: unknown, index: number): GuiTarget {
 }
 
 export function normalizeGuiConfig(raw: unknown): GuiConfig {
-  const base = DEFAULT_GUI_CONFIG as Record<string, unknown>;
+  const base = DEFAULT_GUI_CONFIG as unknown as Record<string, unknown>;
   const input = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const merged = { ...base, ...input };
 

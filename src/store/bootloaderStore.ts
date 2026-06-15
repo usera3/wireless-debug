@@ -54,6 +54,7 @@ interface BootloaderState {
   // Actions
   loadGuiConfig: (file: File) => Promise<void>;
   exportGuiConfig: () => void;
+  applyGuiConfigText: (text: string) => void;
   setSlaveId: (id: number) => void;
   setFirmwareFormat: (fmt: 'hex2' | 'legacy') => void;
   setHex2File: (file: File | null) => void;
@@ -119,6 +120,21 @@ export const useBootloaderStore = create<BootloaderState>((set, get) => ({
     a.download = 'gui-config.json';
     a.click();
     URL.revokeObjectURL(a.href);
+  },
+
+  applyGuiConfigText: (text: string) => {
+    const parsed = normalizeGuiConfig(JSON.parse(text));
+    try {
+      localStorage.setItem('bl_gui_config', JSON.stringify(parsed));
+    } catch {
+      // ignore storage errors
+    }
+    set({
+      guiConfig: parsed,
+      activeTargetId: parsed.defaultTarget,
+      flashTargetIds: [parsed.defaultTarget],
+      firmwareFormat: parsed.defaultFirmwareFormat,
+    });
   },
 
   setSlaveId: (id) => set({ slaveId: id }),

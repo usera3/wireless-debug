@@ -15,9 +15,9 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'osc', label: '地址示波器', icon: '📈' },
   { id: 'modbusOsc', label: '参数示波器', icon: '📉' },
   { id: 'params', label: '参数编辑', icon: '⚙️' },
+  { id: 'bootloader', label: '固件烧录', icon: '🚀' },
   { id: 'connection', label: '连接设置', icon: '🔌' },
   { id: 'debug', label: '调试信息', icon: '🐛' },
-  { id: 'bootloader', label: '固件烧录', icon: '🚀' },
 ];
 
 export function Layout({ activeTab, onTabChange, children }: LayoutProps) {

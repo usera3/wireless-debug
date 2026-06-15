@@ -110,11 +110,11 @@ export class Flasher {
       await this.client.setSessionTarget(targetCode);
     }
 
-    const [blResult, flashResult, appResult] = await Promise.all([
-      this.client.readInputRegisters(0xf000, 5),
-      this.client.readInputRegisters(0xf100, 6),
-      this.client.readInputRegisters(0xf300, 32),
-    ]);
+    const [blResult, flashResult, appResult] = [
+      await this.client.readInputRegisters(0xf000, 5),
+      await this.client.readInputRegisters(0xf100, 6),
+      await this.client.readInputRegisters(0xf300, 32),
+    ];
 
     const bl = blResult.registers;
     const fl = flashResult.registers;

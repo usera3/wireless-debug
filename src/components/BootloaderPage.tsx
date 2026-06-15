@@ -175,7 +175,6 @@ function logColor(type: string) {
 export function BootloaderPage() {
   const {
     guiConfig,
-    slaveId, setSlaveId,
     firmwareFormat, setFirmwareFormat,
     activeTargetId, setActiveTargetId,
     flashTargetIds, toggleFlashTarget,
@@ -204,12 +203,12 @@ export function BootloaderPage() {
   }, [logs]);
 
   const makeFlasher = useCallback(() => {
-    return new Flasher(slaveId, {
+    return new Flasher(0xff, {
       onLog: (msg, type = 'info') => addLog(msg, type),
       onStatus: (s, msg) => setStatus(s, msg),
       onProgress: (_cur, _tot, pct) => setProgress(pct, `${pct}%`),
     });
-  }, [slaveId, addLog, setStatus, setProgress]);
+  }, [addLog, setStatus, setProgress]);
 
   // ── Load firmware document ─────────────────────────────────────────────────
 
@@ -326,24 +325,6 @@ export function BootloaderPage() {
     <div className="flex h-full overflow-hidden">
       {/* ── 左侧配置面板 ── */}
       <aside className="w-72 shrink-0 bg-slate-800 border-r border-slate-700 overflow-y-auto flex flex-col">
-
-        {/* Modbus 配置 */}
-        <div className="px-4 pt-4 pb-2">
-          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Modbus 配置</div>
-          <label className="flex items-center gap-2 text-xs text-slate-300">
-            <span className="w-16 shrink-0">从站 ID</span>
-            <input
-              type="number"
-              min={1}
-              max={247}
-              value={slaveId}
-              onChange={(e) => setSlaveId(Number(e.target.value))}
-              className="flex-1 bg-slate-700 border border-slate-600 rounded px-2 py-1 text-slate-200 text-xs"
-            />
-          </label>
-        </div>
-
-        <Divider />
 
         {/* 固件来源 */}
         <div className="px-4 py-2">

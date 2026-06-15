@@ -10,6 +10,9 @@ import { appendCrc, verifyCrc } from './crc16';
 
 const TIMEOUT_MS = 500;
 
+/** Bootloader 广播地址（进入BL时固定使用，无需知道从站ID） */
+const BL_ENTER_SLAVE_ID = 0xff;
+
 /** 各功能码响应的固定长度（不含动态 0x04） */
 const RESPONSE_LEN: Record<number, number> = {
   0x65: 5,  // enterBootloaderMode
@@ -97,9 +100,10 @@ export class BlModbusClient {
 
   // ── Public API ─────────────────────────────────────────────────────────────
 
-  /** 进入 Bootloader 模式 (0x65) */
+  /** 进入 Bootloader 模式 (0x65)，使用固定广播地址 0xFF */
   async enterBootloaderMode(): Promise<{ success: true; message: string }> {
-    const req = this._buildRequest(0x65);
+    const header = new Uint8Array([BL_ENTER_SLAVE_ID, 0x65]);
+    const req = appendCrc(header);
     const resp = await this._sendRequest(req, 0x65);
     const data = this._checkResponse(resp, 0x65);
     if (data.length < 1) throw new Error('响应数据长度不足');

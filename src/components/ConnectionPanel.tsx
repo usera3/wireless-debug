@@ -6,8 +6,28 @@ import { useBootloaderStore } from '../store/bootloaderStore';
 export function ConnectionPanel() {
   const { url, connected, connecting, setUrl, connect, disconnect } = useConnectionStore();
   const [showBaudPicker, setShowBaudPicker] = useState(false);
-  const { guiConfig, loadGuiConfig, exportGuiConfig } = useBootloaderStore();
+  const { guiConfig, loadGuiConfig, exportGuiConfig, applyGuiConfigText } = useBootloaderStore();
   const configInputRef = useRef<HTMLInputElement>(null);
+
+  const [editingJson, setEditingJson] = useState(false);
+  const [jsonText, setJsonText] = useState('');
+  const [jsonError, setJsonError] = useState<string | null>(null);
+
+  function openJsonEditor() {
+    setJsonText(JSON.stringify(guiConfig, null, 2));
+    setJsonError(null);
+    setEditingJson(true);
+  }
+
+  function applyJson() {
+    try {
+      applyGuiConfigText(jsonText);
+      setEditingJson(false);
+      setJsonError(null);
+    } catch (e) {
+      setJsonError((e as Error).message);
+    }
+  }
 
   return (
     <div className="p-6 max-w-lg">
@@ -75,7 +95,7 @@ export function ConnectionPanel() {
           <p className="text-xs text-slate-500 mb-2">
             当前目标：{guiConfig.targets.map((t) => t.displayName).join(' / ')}
           </p>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <input
               type="file"
               accept=".json"
@@ -99,7 +119,43 @@ export function ConnectionPanel() {
             >
               导出
             </button>
+            <button
+              onClick={editingJson ? () => setEditingJson(false) : openJsonEditor}
+              className="px-3 py-1.5 rounded text-xs font-medium bg-slate-600 hover:bg-slate-500 text-white transition-colors"
+            >
+              {editingJson ? '收起' : '编辑 JSON'}
+            </button>
           </div>
+
+          {/* JSON 编辑区 */}
+          {editingJson && (
+            <div className="mt-3 space-y-2">
+              <textarea
+                value={jsonText}
+                onChange={(e) => { setJsonText(e.target.value); setJsonError(null); }}
+                className="w-full h-72 bg-slate-900 border border-slate-600 rounded px-3 py-2 text-slate-200
+                           text-xs font-mono resize-y focus:outline-none focus:border-blue-500"
+                spellCheck={false}
+              />
+              {jsonError && (
+                <p className="text-xs text-red-400">❌ {jsonError}</p>
+              )}
+              <div className="flex gap-2">
+                <button
+                  onClick={applyJson}
+                  className="px-3 py-1.5 rounded text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+                >
+                  应用
+                </button>
+                <button
+                  onClick={() => setEditingJson(false)}
+                  className="px-3 py-1.5 rounded text-xs font-medium bg-slate-600 hover:bg-slate-500 text-white transition-colors"
+                >
+                  取消
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
