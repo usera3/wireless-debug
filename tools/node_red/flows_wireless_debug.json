@@ -1,0 +1,369 @@
+[
+  {
+    "id": "wd_tab_001",
+    "type": "tab",
+    "label": "Wireless Debug Node-RED Console",
+    "disabled": false,
+    "info": "Standalone Node-RED page and backend proxy for ESP32 wireless_debug."
+  },
+  {
+    "id": "wd_note",
+    "type": "comment",
+    "z": "wd_tab_001",
+    "name": "Open http://localhost:1880/wireless-debug",
+    "info": "The browser talks to Node-RED only. Node-RED calls the ESP32 HTTP API and bridges WebSocket UART frames to /ws.",
+    "x": 250,
+    "y": 40,
+    "wires": []
+  },
+  {
+    "id": "wd_http_page_in",
+    "type": "http in",
+    "z": "wd_tab_001",
+    "name": "GET /wireless-debug",
+    "url": "/wireless-debug",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 150,
+    "y": 100,
+    "wires": [
+      [
+        "wd_page_fn"
+      ]
+    ]
+  },
+  {
+    "id": "wd_page_fn",
+    "type": "function",
+    "z": "wd_tab_001",
+    "name": "serve console html",
+    "func": "const file = '/mnt/d/Users/sunqi39/Desktop/wireless_debug-main/tools/node_red/esp32_console.html';\nmsg.headers = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' };\nmsg.payload = fs.readFileSync(file, 'utf8');\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "fs",
+        "module": "fs"
+      }
+    ],
+    "x": 380,
+    "y": 100,
+    "wires": [
+      [
+        "wd_http_page_resp"
+      ]
+    ]
+  },
+  {
+    "id": "wd_http_page_resp",
+    "type": "http response",
+    "z": "wd_tab_001",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 590,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "wd_rpc_in",
+    "type": "http in",
+    "z": "wd_tab_001",
+    "name": "POST /wireless-debug/rpc",
+    "url": "/wireless-debug/rpc",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 170,
+    "y": 170,
+    "wires": [
+      [
+        "wd_rpc_fn"
+      ]
+    ]
+  },
+  {
+    "id": "wd_rpc_fn",
+    "type": "function",
+    "z": "wd_tab_001",
+    "name": "ESP32 REST proxy",
+    "func": "const allowedMethods = new Set(['GET', 'POST', 'DELETE']);\nfunction cleanHost(value) {\n    const host = String(value || 'http://192.168.4.1').trim().replace(/\\/+$/, '');\n    if (!/^https?:\\/\\//i.test(host)) return 'http://' + host;\n    return host;\n}\nfunction cleanPath(value) {\n    const path = String(value || '/').trim();\n    return path.startsWith('/') ? path : '/' + path;\n}\nfunction requestBuffer(target, options = {}, body) {\n    return new Promise((resolve, reject) => {\n        const parsed = new urlLib.URL(target);\n        const lib = parsed.protocol === 'https:' ? https : http;\n        const req = lib.request(parsed, {\n            method: options.method || 'GET',\n            headers: options.headers || {},\n            timeout: options.timeout || 8000,\n        }, (res) => {\n            const chunks = [];\n            res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));\n            res.on('end', () => resolve({\n                status: res.statusCode || 0,\n                headers: res.headers || {},\n                body: Buffer.concat(chunks),\n            }));\n        });\n        req.on('timeout', () => req.destroy(new Error('request timeout')));\n        req.on('error', reject);\n        if (body !== undefined && body !== null) req.write(body);\n        req.end();\n    });\n}\nconst input = msg.payload || {};\nconst method = String(input.method || 'GET').toUpperCase();\nif (!allowedMethods.has(method)) {\n    msg.statusCode = 400;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = JSON.stringify({ ok: false, error: 'Unsupported method: ' + method });\n    return msg;\n}\nconst host = cleanHost(input.host);\nconst apiPath = cleanPath(input.path);\nconst headers = {};\nlet body;\nif (method !== 'GET' && input.body !== undefined) {\n    headers['Content-Type'] = 'application/json';\n    body = Buffer.from(typeof input.body === 'string' ? input.body : JSON.stringify(input.body));\n    headers['Content-Length'] = body.length;\n}\ntry {\n    const resp = await requestBuffer(host + apiPath, { method, headers }, body);\n    msg.statusCode = resp.status;\n    msg.headers = { 'Content-Type': resp.headers['content-type'] || 'application/json', 'Cache-Control': 'no-store' };\n    msg.payload = resp.body.toString('utf8');\n    return msg;\n} catch (err) {\n    msg.statusCode = 502;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = JSON.stringify({ ok: false, error: err.message, target: host + apiPath });\n    return msg;\n}",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "http",
+        "module": "http"
+      },
+      {
+        "var": "https",
+        "module": "https"
+      },
+      {
+        "var": "urlLib",
+        "module": "url"
+      }
+    ],
+    "x": 400,
+    "y": 170,
+    "wires": [
+      [
+        "wd_rpc_resp"
+      ]
+    ]
+  },
+  {
+    "id": "wd_rpc_resp",
+    "type": "http response",
+    "z": "wd_tab_001",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 600,
+    "y": 170,
+    "wires": []
+  },
+  {
+    "id": "wd_fb_in",
+    "type": "http in",
+    "z": "wd_tab_001",
+    "name": "GET framebuffer",
+    "url": "/wireless-debug/framebuffer",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 150,
+    "y": 240,
+    "wires": [
+      [
+        "wd_fb_fn"
+      ]
+    ]
+  },
+  {
+    "id": "wd_fb_fn",
+    "type": "function",
+    "z": "wd_tab_001",
+    "name": "ESP32 framebuffer proxy",
+    "func": "function cleanHost(value) {\n    const host = String(value || 'http://192.168.4.1').trim().replace(/\\/+$/, '');\n    if (!/^https?:\\/\\//i.test(host)) return 'http://' + host;\n    return host;\n}\nfunction requestBuffer(target) {\n    return new Promise((resolve, reject) => {\n        const parsed = new urlLib.URL(target);\n        const lib = parsed.protocol === 'https:' ? https : http;\n        const req = lib.request(parsed, { method: 'GET', timeout: 8000 }, (res) => {\n            const chunks = [];\n            res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));\n            res.on('end', () => resolve({ status: res.statusCode || 0, headers: res.headers || {}, body: Buffer.concat(chunks) }));\n        });\n        req.on('timeout', () => req.destroy(new Error('request timeout')));\n        req.on('error', reject);\n        req.end();\n    });\n}\nconst host = cleanHost(msg.req?.query?.host);\ntry {\n    const resp = await requestBuffer(host + '/api/display/framebuffer');\n    msg.statusCode = resp.status;\n    msg.headers = { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store' };\n    msg.payload = resp.body;\n    return msg;\n} catch (err) {\n    msg.statusCode = 502;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = JSON.stringify({ ok: false, error: err.message, target: host + '/api/display/framebuffer' });\n    return msg;\n}",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "http",
+        "module": "http"
+      },
+      {
+        "var": "https",
+        "module": "https"
+      },
+      {
+        "var": "urlLib",
+        "module": "url"
+      }
+    ],
+    "x": 410,
+    "y": 240,
+    "wires": [
+      [
+        "wd_fb_resp"
+      ]
+    ]
+  },
+  {
+    "id": "wd_fb_resp",
+    "type": "http response",
+    "z": "wd_tab_001",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 620,
+    "y": 240,
+    "wires": []
+  },
+  {
+    "id": "wd_up_in",
+    "type": "http in",
+    "z": "wd_tab_001",
+    "name": "POST Excel upload",
+    "url": "/wireless-debug/excel/upload",
+    "method": "post",
+    "upload": true,
+    "swaggerDoc": "",
+    "x": 160,
+    "y": 310,
+    "wires": [
+      [
+        "wd_up_fn"
+      ]
+    ]
+  },
+  {
+    "id": "wd_up_fn",
+    "type": "function",
+    "z": "wd_tab_001",
+    "name": "ESP32 Excel upload proxy",
+    "func": "function cleanHost(value) {\n    const host = String(value || 'http://192.168.4.1').trim().replace(/\\/+$/, '');\n    if (!/^https?:\\/\\//i.test(host)) return 'http://' + host;\n    return host;\n}\nfunction requestBuffer(target, options = {}, body) {\n    return new Promise((resolve, reject) => {\n        const parsed = new urlLib.URL(target);\n        const lib = parsed.protocol === 'https:' ? https : http;\n        const req = lib.request(parsed, {\n            method: options.method || 'GET',\n            headers: options.headers || {},\n            timeout: options.timeout || 15000,\n        }, (res) => {\n            const chunks = [];\n            res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));\n            res.on('end', () => resolve({ status: res.statusCode || 0, headers: res.headers || {}, body: Buffer.concat(chunks) }));\n        });\n        req.on('timeout', () => req.destroy(new Error('request timeout')));\n        req.on('error', reject);\n        if (body !== undefined && body !== null) req.write(body);\n        req.end();\n    });\n}\nconst host = cleanHost(msg.req?.body?.host || msg.payload?.host || msg.req?.query?.host);\nlet file = null;\nif (msg.req?.files) {\n    if (Array.isArray(msg.req.files)) file = msg.req.files[0];\n    else file = Object.values(msg.req.files)[0];\n    if (Array.isArray(file)) file = file[0];\n}\nif (!file) {\n    msg.statusCode = 400;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = JSON.stringify({ ok: false, error: 'No uploaded file field found' });\n    return msg;\n}\nconst filename = file.originalname || file.name || 'upload.xlsx';\nconst buffer = Buffer.from(file.buffer || file.data || []);\ntry {\n    const resp = await requestBuffer(host + '/api/excel/upload', {\n        method: 'POST',\n        headers: { 'X-Filename': filename, 'Content-Length': buffer.length },\n    }, buffer);\n    msg.statusCode = resp.status;\n    msg.headers = { 'Content-Type': resp.headers['content-type'] || 'application/json' };\n    msg.payload = resp.body.length ? resp.body.toString('utf8') : JSON.stringify({ ok: resp.status >= 200 && resp.status < 300, filename });\n    return msg;\n} catch (err) {\n    msg.statusCode = 502;\n    msg.headers = { 'Content-Type': 'application/json' };\n    msg.payload = JSON.stringify({ ok: false, error: err.message, target: host + '/api/excel/upload' });\n    return msg;\n}",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "http",
+        "module": "http"
+      },
+      {
+        "var": "https",
+        "module": "https"
+      },
+      {
+        "var": "urlLib",
+        "module": "url"
+      }
+    ],
+    "x": 420,
+    "y": 310,
+    "wires": [
+      [
+        "wd_up_resp"
+      ]
+    ]
+  },
+  {
+    "id": "wd_up_resp",
+    "type": "http response",
+    "z": "wd_tab_001",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 640,
+    "y": 310,
+    "wires": []
+  },
+  {
+    "id": "wd_serial_in",
+    "type": "http in",
+    "z": "wd_tab_001",
+    "name": "POST serial inject",
+    "url": "/wireless-debug/serial-inject",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 150,
+    "y": 380,
+    "wires": [
+      [
+        "wd_serial_fn"
+      ]
+    ]
+  },
+  {
+    "id": "wd_serial_fn",
+    "type": "function",
+    "z": "wd_tab_001",
+    "name": "motor osc serial injector",
+    "func": "function clampInt(value, fallback, min, max) {\n    const n = Number(value);\n    if (!Number.isFinite(n)) return fallback;\n    return Math.min(max, Math.max(min, Math.trunc(n)));\n}\nfunction crc16Modbus(buffer) {\n    let crc = 0xFFFF;\n    for (const b of buffer) {\n        crc ^= b;\n        for (let i = 0; i < 8; i++) crc = (crc & 1) ? ((crc >>> 1) ^ 0xA001) : (crc >>> 1);\n    }\n    return crc & 0xFFFF;\n}\nfunction normalizeChannels(input) {\n    const source = Array.isArray(input) && input.length ? input : [{ label: 'CH0', paramType: 0, byteWidth: 2 }];\n    return source.slice(0, 8).map((ch, index) => {\n        const byteWidth = [2, 4, 8].includes(Number(ch.byteWidth)) ? Number(ch.byteWidth) : 2;\n        return {\n            label: String(ch.label || ('CH' + index)),\n            paramType: Number(ch.paramType || 0),\n            byteWidth\n        };\n    });\n}\nfunction writeValue(buffer, offset, cfg, value) {\n    if (cfg.byteWidth === 2) {\n        const v = Math.max(-32768, Math.min(32767, Math.round(value)));\n        buffer.writeInt16BE(v, offset);\n    } else if (cfg.byteWidth === 4) {\n        if (cfg.paramType === 3 || cfg.paramType === 7) buffer.writeFloatBE(value, offset);\n        else buffer.writeInt32BE(Math.round(value), offset);\n    } else {\n        buffer.writeDoubleBE(value, offset);\n    }\n}\nfunction buildFrames(config) {\n    const magic = Buffer.from([0xFF, 0x77, 0xAA, 0x55]);\n    const frameLen = clampInt(config.frameLen, 130, 20, 2048);\n    const frames = clampInt(config.frames, 1, 1, 32);\n    const channels = normalizeChannels(config.channels);\n    const stride = channels.reduce((sum, ch) => sum + ch.byteWidth, 0);\n    if (stride <= 0 || stride > frameLen - 10) throw new Error('invalid channel stride');\n    const payloadLen = frameLen - 10;\n    const samples = Math.floor(payloadLen / stride);\n    if (samples <= 0) throw new Error('frameLen too small for channels');\n    let phase = Number(context.get('serialOscPhase') || 0);\n    const out = [];\n    for (let f = 0; f < frames; f++) {\n        const payload = Buffer.alloc(payloadLen);\n        for (let sample = 0; sample < samples; sample++) {\n            let offset = sample * stride;\n            channels.forEach((ch, index) => {\n                const t = phase + sample * 0.08 + f * samples * 0.08;\n                const amp = 120 + index * 45;\n                const base = Math.sin(t * (1 + index * 0.18)) * amp;\n                const ripple = Math.sin(t * 5 + index) * (8 + index * 2);\n                writeValue(payload, offset, ch, base + ripple + (ch.byteWidth === 2 ? 0 : index * 20));\n                offset += ch.byteWidth;\n            });\n        }\n        const frame = Buffer.alloc(frameLen);\n        magic.copy(frame, 0);\n        payload.copy(frame, 4);\n        const crc = crc16Modbus(payload);\n        frame[frameLen - 6] = crc & 0xFF;\n        frame[frameLen - 5] = (crc >> 8) & 0xFF;\n        magic.copy(frame, frameLen - 4);\n        out.push(frame);\n    }\n    phase += frames * samples * 0.08;\n    context.set('serialOscPhase', phase);\n    return { data: Buffer.concat(out), frameLen, frames, channels, samples };\n}\nfunction psQuote(value) {\n    return String(value).replace(/'/g, \"''\");\n}\nfunction writeWindowsCom(port, baud, data) {\n    return new Promise((resolve, reject) => {\n        const script = \"$ErrorActionPreference='Stop';\" +\n            \"$port='\" + psQuote(port) + \"';\" +\n            \"$baud=\" + Number(baud) + \";\" +\n            \"$data=[Convert]::FromBase64String('\" + data.toString('base64') + \"');\" +\n            \"$sent=$false;\" +\n            \"for($i=0;$i -lt 8;$i++){\" +\n            \"$sp=$null;\" +\n            \"try{\" +\n            \"$sp=[System.IO.Ports.SerialPort]::new($port,$baud,[System.IO.Ports.Parity]::None,8,[System.IO.Ports.StopBits]::One);\" +\n            \"$sp.WriteTimeout=2000;$sp.Open();$sp.Write($data,0,$data.Length);$sent=$true;break;\" +\n            \"}catch [System.UnauthorizedAccessException]{\" +\n            \"if($i -ge 7){throw};Start-Sleep -Milliseconds 120;\" +\n            \"}finally{\" +\n            \"if($sp -ne $null){if($sp.IsOpen){$sp.Close()};$sp.Dispose()};\" +\n            \"}\" +\n            \"};\" +\n            \"if(-not $sent){throw 'serial write failed'};\" +\n            \"Write-Output ('sent=' + $data.Length);\";\n        child_process.execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], { timeout: 10000 }, (error, stdout, stderr) => {\n            if (error) {\n                reject(new Error((stderr || stdout || error.message).trim()));\n                return;\n            }\n            resolve(String(stdout || '').trim());\n        });\n    });\n}\nfunction writeWslSerial(port, baud, data) {\n    return new Promise((resolve, reject) => {\n        child_process.execFile('stty', ['-F', port, String(baud), 'cs8', '-cstopb', '-parenb', 'raw', '-echo'], { timeout: 3000 }, (error, stdout, stderr) => {\n            if (error) {\n                reject(new Error((stderr || error.message).trim()));\n                return;\n            }\n            fs.open(port, 'w', (openErr, fd) => {\n                if (openErr) {\n                    reject(openErr);\n                    return;\n                }\n                fs.write(fd, data, 0, data.length, null, (writeErr, written) => {\n                    fs.close(fd, () => {});\n                    if (writeErr) reject(writeErr);\n                    else resolve('sent=' + written);\n                });\n            });\n        });\n    });\n}\nfunction sleep(ms) {\n    return new Promise((resolve) => setTimeout(resolve, ms));\n}\nasync function acquireSerialSlot(port) {\n    const key = 'serialWriteBusy:' + String(port || '').toUpperCase();\n    const deadline = Date.now() + 6000;\n    while (context.get(key)) {\n        if (Date.now() > deadline) throw new Error('serial port busy: ' + port);\n        await sleep(50);\n    }\n    context.set(key, true);\n    return () => context.set(key, false);\n}\nconst input = msg.payload || {};\nconst port = String(input.port || 'COM4').trim();\nconst baud = clampInt(input.baud, 2000000, 1200, 5000000);\ntry {\n    const built = buildFrames(input);\n    const isWslPath = port.startsWith('/dev/');\n    const releaseSerialSlot = await acquireSerialSlot(port);\n    let result;\n    try {\n        result = isWslPath ? await writeWslSerial(port, baud, built.data) : await writeWindowsCom(port, baud, built.data);\n    } finally {\n        releaseSerialSlot();\n    }\n    msg.statusCode = 200;\n    msg.headers = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };\n    msg.payload = JSON.stringify({\n        ok: true,\n        method: isWslPath ? 'wsl-serial' : 'windows-com',\n        port,\n        baud,\n        bytes: built.data.length,\n        frameLen: built.frameLen,\n        frames: built.frames,\n        samplesPerFrame: built.samples,\n        channels: built.channels.map((ch) => ({ label: ch.label, paramType: ch.paramType, byteWidth: ch.byteWidth })),\n        result\n    });\n    return msg;\n} catch (err) {\n    msg.statusCode = 502;\n    msg.headers = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };\n    msg.payload = JSON.stringify({ ok: false, error: err.message, port, baud });\n    return msg;\n}",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "child_process",
+        "module": "child_process"
+      },
+      {
+        "var": "fs",
+        "module": "fs"
+      }
+    ],
+    "x": 410,
+    "y": 380,
+    "wires": [
+      [
+        "wd_serial_resp"
+      ]
+    ]
+  },
+  {
+    "id": "wd_serial_resp",
+    "type": "http response",
+    "z": "wd_tab_001",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 640,
+    "y": 380,
+    "wires": []
+  },
+  {
+    "id": "wd_ws_in",
+    "type": "websocket in",
+    "z": "wd_tab_001",
+    "name": "Browser WS /wireless-debug/ws",
+    "server": "wd_ws_server",
+    "client": "",
+    "x": 190,
+    "y": 400,
+    "wires": [
+      [
+        "wd_ws_bridge"
+      ]
+    ]
+  },
+  {
+    "id": "wd_ws_bridge",
+    "type": "function",
+    "z": "wd_tab_001",
+    "name": "dynamic ESP32 WS bridge",
+    "func": "const bridges = context.get('bridges') || {};\nfunction cleanWsHost(value) {\n    const raw = String(value || 'http://192.168.4.1').trim().replace(/\\/+$/, '');\n    if (/^wss?:\\/\\//i.test(raw)) return raw;\n    if (/^https?:\\/\\//i.test(raw)) return raw.replace(/^http/i, 'ws');\n    return 'ws://' + raw;\n}\nfunction closeBridge(id) {\n    const bridge = bridges[id];\n    if (!bridge) return;\n    try { bridge.remote.close(); } catch (err) {}\n    delete bridges[id];\n    context.set('bridges', bridges);\n}\nconst session = msg._session?.id;\nif (!session) return null;\nif (msg._event === 'disconnect') {\n    closeBridge(session);\n    return null;\n}\nlet bridge = bridges[session];\nif (!bridge) {\n    const query = msg._session?.req?.query || {};\n    const target = cleanWsHost(query.host) + '/ws';\n    const remote = new WebSocket(target);\n    bridge = { remote, queue: [], opened: false, target };\n    bridges[session] = bridge;\n    context.set('bridges', bridges);\n    remote.binaryType = 'nodebuffer';\n    remote.on('open', () => {\n        bridge.opened = true;\n        while (bridge.queue.length) remote.send(bridge.queue.shift());\n        node.send({ _session: { type: 'websocket', id: session }, payload: 'bridge open ' + target });\n    });\n    remote.on('message', (data) => {\n        node.send({ _session: { type: 'websocket', id: session }, payload: Buffer.isBuffer(data) ? data : Buffer.from(data) });\n    });\n    remote.on('close', () => {\n        node.send({ _session: { type: 'websocket', id: session }, payload: 'bridge closed' });\n        closeBridge(session);\n    });\n    remote.on('error', (err) => {\n        node.send({ _session: { type: 'websocket', id: session }, payload: 'bridge error ' + err.message });\n    });\n}\nif (msg.payload !== undefined) {\n    const payload = Buffer.isBuffer(msg.payload) ? msg.payload : Buffer.from(String(msg.payload));\n    if (bridge.opened && bridge.remote.readyState === WebSocket.OPEN) bridge.remote.send(payload);\n    else bridge.queue.push(payload);\n}\ncontext.set('bridges', bridges);\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "const bridges = context.get('bridges') || {};\nObject.values(bridges).forEach((bridge) => {\n    try { bridge.remote.close(); } catch (err) {}\n});\ncontext.set('bridges', {});",
+    "libs": [
+      {
+        "var": "WebSocket",
+        "module": "ws"
+      }
+    ],
+    "x": 450,
+    "y": 400,
+    "wires": [
+      [
+        "wd_ws_out"
+      ]
+    ]
+  },
+  {
+    "id": "wd_ws_out",
+    "type": "websocket out",
+    "z": "wd_tab_001",
+    "name": "reply to browser",
+    "server": "wd_ws_server",
+    "client": "",
+    "x": 690,
+    "y": 400,
+    "wires": []
+  },
+  {
+    "id": "wd_ws_server",
+    "type": "websocket-listener",
+    "path": "/wireless-debug/ws",
+    "wholemsg": "false"
+  }
+]

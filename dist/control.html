@@ -1,0 +1,1342 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ESP32 Control Console</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111317;
+      --panel: #1a1f27;
+      --panel2: #202733;
+      --line: #343d4d;
+      --text: #edf1f7;
+      --muted: #99a3b3;
+      --accent: #4aa3ff;
+      --ok: #38c172;
+      --warn: #f0ad4e;
+      --bad: #e55353;
+      --input: #0f141b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-height: 52px;
+      padding: 10px 16px;
+      background: #151922;
+      border-bottom: 1px solid var(--line);
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 28px;
+      padding: 4px 9px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--muted);
+      background: var(--panel);
+      white-space: nowrap;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--warn);
+    }
+    .dot.ok { background: var(--ok); }
+    .dot.bad { background: var(--bad); }
+    .bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-left: auto;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    main {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 12px;
+      padding: 12px;
+    }
+    section {
+      grid-column: span 4;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      min-width: 0;
+      overflow: hidden;
+    }
+    section.wide { grid-column: span 8; }
+    section.full { grid-column: span 12; }
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 42px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel2);
+    }
+    h2 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+    .section-body {
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+    .grid2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .grid3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+    label {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      min-width: 0;
+    }
+    input, select, textarea, button {
+      font: inherit;
+      letter-spacing: 0;
+    }
+    input, select, textarea {
+      width: 100%;
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--text);
+      background: var(--input);
+      padding: 7px 9px;
+      outline: none;
+    }
+    textarea {
+      min-height: 84px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 12px;
+    }
+    input[type="checkbox"] {
+      width: 16px;
+      min-height: 16px;
+      padding: 0;
+      accent-color: var(--accent);
+    }
+    .checkrow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    button {
+      min-height: 34px;
+      border: 1px solid #3e79ac;
+      border-radius: 6px;
+      padding: 7px 10px;
+      background: #174d7a;
+      color: white;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    button.secondary {
+      border-color: var(--line);
+      background: #2a3240;
+    }
+    button.danger {
+      border-color: #9b3535;
+      background: #6f2626;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .scroll {
+      max-height: 220px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+    .kv {
+      display: grid;
+      grid-template-columns: minmax(90px, 0.45fr) minmax(0, 1fr);
+      gap: 5px 8px;
+      font-size: 12px;
+    }
+    .kv div:nth-child(odd) { color: var(--muted); }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 12px;
+      word-break: break-all;
+    }
+    pre {
+      margin: 0;
+      min-height: 90px;
+      max-height: 260px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #0b0f14;
+      padding: 9px;
+      white-space: pre-wrap;
+      color: #d8e2f0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 6px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 600; }
+    canvas {
+      width: 100%;
+      max-width: 384px;
+      aspect-ratio: 2 / 1;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #020304;
+      image-rendering: pixelated;
+    }
+    canvas.wave-canvas {
+      max-width: none;
+      height: 220px;
+      aspect-ratio: 3 / 1;
+      image-rendering: auto;
+    }
+    @media (max-width: 1100px) {
+      section, section.wide { grid-column: span 6; }
+    }
+    @media (max-width: 760px) {
+      main { grid-template-columns: 1fr; }
+      section, section.wide, section.full { grid-column: 1; }
+      .grid2, .grid3 { grid-template-columns: 1fr; }
+      header { align-items: flex-start; flex-direction: column; }
+      .bar { margin-left: 0; justify-content: flex-start; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ESP32 Control Console</h1>
+    <span class="status-pill"><span id="httpDot" class="dot"></span><span id="httpState">HTTP idle</span></span>
+    <span class="status-pill"><span id="wsDot" class="dot bad"></span><span id="wsState">WS closed</span></span>
+    <div class="bar">
+      <button id="jumpMotorDiag" class="secondary">Motor Reg</button>
+      <button id="jumpMotorOsc" class="secondary">Osc</button>
+      <button id="jumpMotorParams" class="secondary">Params</button>
+      <input id="baseUrl" value="" placeholder="Device URL">
+      <button id="saveBase" class="secondary">Set URL</button>
+      <button id="refreshAll">Refresh</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="wide">
+      <div class="section-head"><h2>Device Status</h2><button data-refresh="status" class="secondary">Refresh</button></div>
+      <div class="section-body">
+        <div id="statusKv" class="kv"></div>
+        <pre id="statusRaw"></pre>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head"><h2>Communication</h2></div>
+      <div class="section-body">
+        <label>Comm mode
+          <select id="commMode">
+            <option value="auto">auto</option>
+            <option value="wifi">wifi</option>
+            <option value="ble">ble</option>
+          </select>
+        </label>
+        <div class="actions">
+          <button id="setComm">Set Comm</button>
+          <button data-key="up" class="secondary">Menu Up</button>
+          <button data-key="down" class="secondary">Menu Down</button>
+          <button data-key="ok" class="secondary">Menu OK</button>
+          <button data-key="back" class="secondary">Back</button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head"><h2>UART</h2></div>
+      <div class="section-body">
+        <label>Baud
+          <select id="baud">
+            <option value="115200">115200</option>
+            <option value="921600">921600</option>
+            <option value="2000000">2000000</option>
+            <option value="3000000">3000000</option>
+          </select>
+        </label>
+        <div class="actions">
+          <button id="setBaud">Set Baud</button>
+          <button id="getBaud" class="secondary">Read Baud</button>
+        </div>
+        <label>TX Text <input id="uartText" value="AT+HELP"></label>
+        <label>TX Hex <input id="uartHex" value="FF0301000002D029"></label>
+        <div class="actions">
+          <button id="uartSendText" class="secondary">Send Text</button>
+          <button id="uartSendHex" class="secondary">Send Hex</button>
+        </div>
+        <pre id="uartOut"></pre>
+      </div>
+    </section>
+
+    <section class="wide">
+      <div class="section-head"><h2>Capabilities</h2><button data-refresh="caps" class="secondary">Refresh</button></div>
+      <div class="section-body">
+        <div id="capsKv" class="kv"></div>
+        <div class="scroll"><table id="capsTable"></table></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head"><h2>System</h2><button data-refresh="health" class="secondary">Refresh</button></div>
+      <div class="section-body">
+        <div id="healthKv" class="kv"></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head"><h2>Communication Stats</h2><button data-refresh="stats" class="secondary">Refresh</button></div>
+      <div class="section-body">
+        <div id="statsKv" class="kv"></div>
+        <button id="resetStats" class="danger">Reset Stats</button>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head"><h2>Menu Snapshot</h2><button data-refresh="menu" class="secondary">Refresh</button></div>
+      <div class="section-body">
+        <div id="menuKv" class="kv"></div>
+        <pre id="menuRows"></pre>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head"><h2>WiFi</h2><button data-refresh="wifi" class="secondary">Refresh</button></div>
+      <div class="section-body">
+        <div id="wifiKv" class="kv"></div>
+        <div class="grid2">
+          <label>STA SSID <input id="staSsid" placeholder="Router SSID"></label>
+          <label>STA Password <input id="staPass" type="password" placeholder="Password"></label>
+        </div>
+        <div class="actions">
+          <button id="saveSta">Save STA</button>
+          <button id="clearSta" class="danger">Clear STA</button>
+          <button id="wifiAp" class="secondary">AP Mode</button>
+          <button id="wifiSta" class="secondary">STA Mode</button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head"><h2>BLE</h2><button data-refresh="ble" class="secondary">Refresh</button></div>
+      <div class="section-body">
+        <div id="bleKv" class="kv"></div>
+        <button id="bleStart" class="secondary">Start BLE</button>
+        <label>BLE TX Text <input id="bleText" value="hello"></label>
+        <label>BLE TX Hex <input id="bleHex" value="01 02 03 04"></label>
+        <div class="actions">
+          <button id="bleSendText" class="secondary">Send Text</button>
+          <button id="bleSendHex" class="secondary">Send Hex</button>
+        </div>
+        <pre id="bleOut"></pre>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head"><h2>OLED Text Screen</h2></div>
+      <div class="section-body">
+        <div class="grid2">
+          <label>Title <input id="dispTitle" value="WEB"></label>
+          <label>Footer <input id="dispFooter" value="manual"></label>
+          <label>Line 1 <input id="disp1" value="control"></label>
+          <label>Line 2 <input id="disp2" value="ready"></label>
+          <label>Line 3 <input id="disp3"></label>
+          <label>Line 4 <input id="disp4"></label>
+        </div>
+        <div class="actions">
+          <button id="setDisplay">Set Display</button>
+          <button id="clearDisplay" class="secondary">Clear</button>
+        </div>
+        <label>Scroll Text <textarea id="dispScroll">无线调试终端手动控制台</textarea></label>
+        <button id="setDisplayScroll" class="secondary">Set Scroll Text</button>
+      </div>
+    </section>
+
+    <section id="motorDiag" class="wide">
+      <div class="section-head"><h2>Motor Diagnostic Register</h2></div>
+      <div class="section-body">
+        <div class="grid3">
+          <label>Slave <input id="diagSlave" value="255"></label>
+          <label>Address <input id="diagAddr" value="0x0100"></label>
+          <label>Count <input id="diagCount" value="1"></label>
+        </div>
+        <div class="grid3">
+          <label>Value <input id="diagValue" value="1.2"></label>
+          <label>Type
+            <select id="diagType">
+              <option value="u16">u16</option>
+              <option value="i16">i16</option>
+              <option value="scaled">scaled</option>
+              <option value="float32">float32</option>
+            </select>
+          </label>
+          <label>Decimals <input id="diagDecimals" value="1"></label>
+        </div>
+        <label class="checkrow"><input id="diagSend" type="checkbox"> Send to UART</label>
+        <div class="actions">
+          <button id="diagRead">Build/Read</button>
+          <button id="diagWrite">Build/Write</button>
+        </div>
+        <pre id="diagOut"></pre>
+      </div>
+    </section>
+
+    <section id="motorOsc" class="wide">
+      <div class="section-head"><h2>Motor Oscilloscope</h2></div>
+      <div class="section-body">
+        <div class="grid3">
+          <label>Slave <input id="oscSlave" value="255"></label>
+          <label>Query
+            <select id="oscQuery">
+              <option value="frame_len">frame_len</option>
+              <option value="max_channels">max_channels</option>
+              <option value="sample_rate">sample_rate</option>
+              <option value="custom">custom</option>
+            </select>
+          </label>
+          <label>Custom Address <input id="oscQueryAddr" value="0x0002"></label>
+        </div>
+        <div class="grid3">
+          <label>Channel <input id="oscChannel" value="0"></label>
+          <label>Param Type <input id="oscParamType" value="0x00"></label>
+          <label>Param Address <input id="oscParamAddr" value="0x0100"></label>
+        </div>
+        <div class="grid3">
+          <label>Bytes/sec <input id="oscRate" value="2000000"></label>
+          <label class="checkrow"><input id="oscSend" type="checkbox"> Send to UART</label>
+        </div>
+        <div class="actions">
+          <button id="oscQueryBtn">Query</button>
+          <button id="oscChannelBtn" class="secondary">Set Channel</button>
+          <button id="oscStart" class="secondary">Start</button>
+          <button id="oscStop" class="secondary">Stop</button>
+          <button id="oscHeartbeat" class="secondary">Heartbeat</button>
+          <button id="oscRateBtn" class="secondary">Set Rate</button>
+        </div>
+        <pre id="oscOut"></pre>
+        <div class="grid3">
+          <label>Frame Len <input id="oscFrameLen" value="130"></label>
+          <label>Max Samples <input id="oscMaxSamples" value="600"></label>
+          <label>Plot Channels <textarea id="oscPlotChannels">CH0,0,2</textarea></label>
+        </div>
+        <div class="actions">
+          <button id="oscApplyPlot" class="secondary">Apply Plot Config</button>
+          <button id="oscClearPlot" class="secondary">Clear Plot</button>
+          <button id="oscSimToggle" class="secondary">Sim Data</button>
+        </div>
+        <div id="oscPlotKv" class="kv"></div>
+        <canvas id="oscCanvas" class="wave-canvas" width="900" height="260"></canvas>
+      </div>
+    </section>
+
+    <section id="motorParams" class="wide">
+      <div class="section-head"><h2>Parameter Table</h2><button data-refresh="params" class="secondary">Refresh</button></div>
+      <div class="section-body">
+        <div id="paramsKv" class="kv"></div>
+        <div class="grid3">
+          <label>Alias <input id="paramAlias" value="Kp"></label>
+          <label>Address <input id="paramAddress" value="0x0100"></label>
+          <label>Unit <input id="paramUnit"></label>
+        </div>
+        <div class="grid3">
+          <label>Type
+            <select id="paramType">
+              <option value="u16">u16</option>
+              <option value="i16">i16</option>
+              <option value="scaled">scaled</option>
+              <option value="float32">float32</option>
+            </select>
+          </label>
+          <label>Decimals <input id="paramDecimals" value="1"></label>
+          <label>Write Value <input id="paramValue" value="1.2"></label>
+        </div>
+        <div class="grid3">
+          <label>Min <input id="paramMin" value="0"></label>
+          <label>Max <input id="paramMax" value="10"></label>
+          <label class="checkrow"><input id="paramReadonly" type="checkbox"> Read only</label>
+        </div>
+        <label class="checkrow"><input id="paramSend" type="checkbox"> Send read/write frame to UART</label>
+        <div class="actions">
+          <button id="paramRegister">Register</button>
+          <button id="paramRead" class="secondary">Read Alias</button>
+          <button id="paramWrite" class="secondary">Write Alias</button>
+          <button id="paramClear" class="danger">Clear All</button>
+        </div>
+        <pre id="paramOut"></pre>
+        <div class="scroll"><table id="paramsTable"></table></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head"><h2>Display Backend</h2><button data-refresh="display" class="secondary">Refresh</button></div>
+      <div class="section-body">
+        <div id="displayKv" class="kv"></div>
+        <canvas id="framebuffer" width="128" height="64"></canvas>
+        <button id="readFramebuffer" class="secondary">Read Framebuffer</button>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head"><h2>Files</h2><button data-refresh="excel" class="secondary">Refresh</button></div>
+      <div class="section-body">
+        <input id="excelFile" type="file" accept=".xlsx,.xls">
+        <div class="actions">
+          <button id="uploadExcel">Upload</button>
+        </div>
+        <div id="excelList"></div>
+      </div>
+    </section>
+
+    <section class="wide">
+      <div class="section-head"><h2>WebSocket UART Tunnel</h2><button data-refresh="wsstatus" class="secondary">Refresh</button></div>
+      <div class="section-body">
+        <div id="wsStatusKv" class="kv"></div>
+        <div class="actions">
+          <button id="wsConnect">Connect WS</button>
+          <button id="wsClose" class="secondary">Close</button>
+        </div>
+        <label>TX Hex <input id="wsHex" value="FF0301000002D029"></label>
+        <div class="actions">
+          <button id="wsSendHex">Send Hex</button>
+          <button id="wsClear" class="secondary">Clear Log</button>
+        </div>
+        <pre id="wsLog"></pre>
+      </div>
+    </section>
+
+    <section class="wide">
+      <div class="section-head"><h2>Raw HTTP API</h2></div>
+      <div class="section-body">
+        <div class="grid3">
+          <label>Method
+            <select id="rawMethod">
+              <option value="GET">GET</option>
+              <option value="POST">POST</option>
+              <option value="DELETE">DELETE</option>
+            </select>
+          </label>
+          <label style="grid-column: span 2;">Path <input id="rawPath" value="/api/device/status"></label>
+        </div>
+        <label>Body <textarea id="rawBody">{}</textarea></label>
+        <div class="actions">
+          <button id="rawSend">Send</button>
+          <button id="rawFillStatus" class="secondary">Status</button>
+          <button id="rawFillParam" class="secondary">Param Write</button>
+          <button id="rawFillDiag" class="secondary">Diag Read</button>
+        </div>
+        <pre id="rawOut"></pre>
+      </div>
+    </section>
+
+    <section class="full">
+      <div class="section-head"><h2>API Log</h2><button id="clearLog" class="secondary">Clear</button></div>
+      <div class="section-body">
+        <pre id="apiLog"></pre>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const apiLog = $("apiLog");
+    const wsLog = $("wsLog");
+    let ws = null;
+
+    function defaultBase() {
+      if (location.protocol.startsWith("http")) return location.origin;
+      return localStorage.getItem("control.baseUrl") || "http://192.168.4.1";
+    }
+
+    function baseUrl() {
+      return ($("baseUrl").value || defaultBase()).replace(/\/+$/, "");
+    }
+
+    function setHttp(ok, text) {
+      $("httpDot").className = "dot " + (ok ? "ok" : "bad");
+      $("httpState").textContent = text;
+    }
+
+    function setWs(state) {
+      $("wsDot").className = "dot " + (state === "open" ? "ok" : state === "connecting" ? "" : "bad");
+      $("wsState").textContent = "WS " + state;
+    }
+
+    function log(line, obj) {
+      const ts = new Date().toLocaleTimeString();
+      apiLog.textContent += `[${ts}] ${line}`;
+      if (obj !== undefined) apiLog.textContent += "\n" + JSON.stringify(obj, null, 2);
+      apiLog.textContent += "\n";
+      apiLog.scrollTop = apiLog.scrollHeight;
+    }
+
+    async function request(path, options = {}) {
+      const url = path.startsWith("http") ? path : baseUrl() + path;
+      try {
+        const resp = await fetch(url, { cache: "no-store", ...options });
+        const text = await resp.text();
+        let data = text;
+        try { data = text ? JSON.parse(text) : {}; } catch {}
+        setHttp(resp.ok, resp.ok ? "HTTP ok" : "HTTP " + resp.status);
+        log(`${options.method || "GET"} ${path}`, data);
+        return data;
+      } catch (err) {
+        setHttp(false, "HTTP error");
+        log(`${options.method || "GET"} ${path} ERROR ${err.message}`);
+        throw err;
+      }
+    }
+
+    function post(path, body) {
+      return request(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body || {}),
+      });
+    }
+
+    function del(path) {
+      return request(path, { method: "DELETE" });
+    }
+
+    function kv(el, data) {
+      el.innerHTML = "";
+      Object.entries(data || {}).forEach(([k, v]) => {
+        const a = document.createElement("div");
+        const b = document.createElement("div");
+        a.textContent = k;
+        b.textContent = typeof v === "object" ? JSON.stringify(v) : String(v);
+        b.className = "mono";
+        el.appendChild(a);
+        el.appendChild(b);
+      });
+    }
+
+    function renderTable(table, columns, rows, onUse) {
+      table.innerHTML = "";
+      const thead = document.createElement("thead");
+      const head = document.createElement("tr");
+      columns.forEach(col => {
+        const th = document.createElement("th");
+        th.textContent = col.label;
+        head.appendChild(th);
+      });
+      if (onUse) {
+        const th = document.createElement("th");
+        th.textContent = "";
+        head.appendChild(th);
+      }
+      thead.appendChild(head);
+      table.appendChild(thead);
+
+      const tbody = document.createElement("tbody");
+      (rows || []).forEach(row => {
+        const tr = document.createElement("tr");
+        columns.forEach(col => {
+          const td = document.createElement("td");
+          const value = typeof col.value === "function" ? col.value(row) : row[col.key];
+          td.textContent = value === undefined || value === null ? "" : String(value);
+          td.className = "mono";
+          tr.appendChild(td);
+        });
+        if (onUse) {
+          const td = document.createElement("td");
+          const btn = document.createElement("button");
+          btn.className = "secondary";
+          btn.textContent = "Use";
+          btn.onclick = () => onUse(row);
+          td.appendChild(btn);
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+    }
+
+    function hexToBytes(hex) {
+      const clean = hex.replace(/[^0-9a-fA-F]/g, "");
+      if (clean.length % 2) throw new Error("hex length must be even");
+      const out = new Uint8Array(clean.length / 2);
+      for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+      return out;
+    }
+
+    function bytesToHex(buf) {
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).toUpperCase().padStart(2, "0")).join(" ");
+    }
+
+    const oscMagic = new Uint8Array([255, 119, 170, 85]);
+    const oscFloatTypes = new Set([3, 7]);
+    const oscColors = ["#4aa3ff", "#38c172", "#f0ad4e", "#e55353", "#d86cff", "#5eead4"];
+    let oscBuf = new Uint8Array(0);
+    let oscChannels = [];
+    let oscSeries = [];
+    let oscFrameCount = 0;
+    let oscSampleCount = 0;
+    let oscSimTimer = null;
+    let oscSimPhase = 0;
+
+    function crc16Modbus(bytes) {
+      let crc = 0xFFFF;
+      for (const b of bytes) {
+        crc ^= b;
+        for (let i = 0; i < 8; i++) crc = (crc & 1) ? ((crc >>> 1) ^ 0xA001) : (crc >>> 1);
+      }
+      return crc & 0xFFFF;
+    }
+
+    function oscHasMagic(bytes, pos) {
+      if (pos + oscMagic.length > bytes.length) return false;
+      for (let i = 0; i < oscMagic.length; i++) if (bytes[pos + i] !== oscMagic[i]) return false;
+      return true;
+    }
+
+    function parseOscPlotConfig() {
+      const lines = $("oscPlotChannels").value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      const parsed = lines.map((line, index) => {
+        const parts = line.split(/[,\s]+/).filter(Boolean);
+        const label = parts[0] || `CH${index}`;
+        const paramType = Number(parts[1] || 0);
+        const byteWidth = Number(parts[2] || 2);
+        return { label, paramType, byteWidth: [2, 4, 8].includes(byteWidth) ? byteWidth : 2 };
+      });
+      oscChannels = parsed.length ? parsed : [{ label: "CH0", paramType: 0, byteWidth: 2 }];
+      oscSeries = oscChannels.map(() => []);
+      oscFrameCount = 0;
+      oscSampleCount = 0;
+      oscBuf = new Uint8Array(0);
+      drawOscPlot();
+      updateOscInfo();
+    }
+
+    function appendOscValues(values) {
+      const maxSamples = Math.max(16, Number($("oscMaxSamples").value || 600));
+      values.forEach((value, index) => {
+        if (!oscSeries[index]) oscSeries[index] = [];
+        oscSeries[index].push(value);
+        if (oscSeries[index].length > maxSamples) oscSeries[index].splice(0, oscSeries[index].length - maxSamples);
+      });
+      oscSampleCount++;
+    }
+
+    function readOscValue(view, offset, cfg) {
+      if (cfg.byteWidth === 2) return view.getInt16(offset, false);
+      if (cfg.byteWidth === 4) return oscFloatTypes.has(cfg.paramType) ? view.getFloat32(offset, false) : view.getInt32(offset, false);
+      return view.getFloat64(offset, false);
+    }
+
+    function parseOscFrame(frame) {
+      if (frame.length < 10 || !oscHasMagic(frame, 0) || !oscHasMagic(frame, frame.length - 4)) return false;
+      const payloadEnd = frame.length - 6;
+      const payload = frame.slice(4, payloadEnd);
+      const crc = crc16Modbus(payload);
+      if (frame[payloadEnd] !== (crc & 0xFF) || frame[payloadEnd + 1] !== (crc >> 8)) return false;
+      const stride = oscChannels.reduce((sum, ch) => sum + ch.byteWidth, 0);
+      if (!stride) return false;
+      const samples = Math.floor(payload.length / stride);
+      const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+      for (let sample = 0; sample < samples; sample++) {
+        let offset = sample * stride;
+        const values = [];
+        oscChannels.forEach((ch, index) => {
+          values[index] = readOscValue(view, offset, ch);
+          offset += ch.byteWidth;
+        });
+        appendOscValues(values);
+      }
+      oscFrameCount++;
+      drawOscPlot();
+      updateOscInfo();
+      return true;
+    }
+
+    function pushSimOscData() {
+      for (let i = 0; i < 8; i++) {
+        const values = oscChannels.map((ch, index) => {
+          const t = oscSimPhase + i * 0.08;
+          const amp = 120 + index * 45;
+          const base = Math.sin(t * (1 + index * 0.18)) * amp;
+          const ripple = Math.sin(t * 5 + index) * (8 + index * 2);
+          if (ch.byteWidth === 2) return Math.round(base + ripple);
+          return base + ripple + index * 20;
+        });
+        appendOscValues(values);
+      }
+      oscSimPhase += 0.64;
+      oscFrameCount++;
+      drawOscPlot();
+      updateOscInfo();
+    }
+
+    function setOscSim(enabled) {
+      if (enabled) {
+        if (oscSimTimer) return;
+        if (!oscChannels.length) parseOscPlotConfig();
+        $("oscSimToggle").textContent = "Stop Sim";
+        pushSimOscData();
+        oscSimTimer = setInterval(pushSimOscData, 80);
+      } else {
+        if (oscSimTimer) clearInterval(oscSimTimer);
+        oscSimTimer = null;
+        $("oscSimToggle").textContent = "Sim Data";
+      }
+    }
+
+    function feedOscBytes(chunk) {
+      const next = new Uint8Array(oscBuf.length + chunk.length);
+      next.set(oscBuf);
+      next.set(chunk, oscBuf.length);
+      oscBuf = next;
+      const frameLen = Math.max(10, Number($("oscFrameLen").value || 130));
+      while (oscBuf.length >= 4) {
+        let magicAt = -1;
+        for (let i = 0; i <= oscBuf.length - 4; i++) {
+          if (oscHasMagic(oscBuf, i)) { magicAt = i; break; }
+        }
+        if (magicAt < 0) {
+          oscBuf = new Uint8Array(0);
+          return;
+        }
+        if (magicAt > 0) oscBuf = oscBuf.slice(magicAt);
+        if (oscBuf.length < frameLen) return;
+        if (!oscHasMagic(oscBuf, frameLen - 4)) {
+          oscBuf = oscBuf.slice(1);
+          continue;
+        }
+        parseOscFrame(oscBuf.slice(0, frameLen));
+        oscBuf = oscBuf.slice(frameLen);
+      }
+    }
+
+    function updateOscInfo() {
+      const last = {};
+      oscChannels.forEach((ch, index) => {
+        const values = oscSeries[index] || [];
+        const value = values.length ? values[values.length - 1] : "-";
+        last[ch.label] = typeof value === "number" ? Number(value.toFixed(5)) : value;
+      });
+      kv($("oscPlotKv"), {
+        frames: oscFrameCount,
+        samples: oscSampleCount,
+        channels: oscChannels.length,
+        last,
+      });
+    }
+
+    function drawOscPlot() {
+      const canvas = $("oscCanvas");
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const width = Math.max(360, Math.floor(rect.width * dpr));
+      const height = Math.max(180, Math.floor(220 * dpr));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      const ctx = canvas.getContext("2d");
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = "#020304";
+      ctx.fillRect(0, 0, width, height);
+      ctx.strokeStyle = "#18202b";
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 5; i++) {
+        const y = Math.round((height * i) / 5);
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+      }
+      const all = oscSeries.flat().filter(Number.isFinite);
+      const min = all.length ? Math.min(...all) : -1;
+      const max = all.length ? Math.max(...all) : 1;
+      const span = max === min ? 1 : max - min;
+      oscSeries.forEach((values, index) => {
+        if (!values.length) return;
+        ctx.strokeStyle = oscColors[index % oscColors.length];
+        ctx.lineWidth = 1.5 * dpr;
+        ctx.beginPath();
+        values.forEach((value, i) => {
+          const x = values.length <= 1 ? 0 : (i / (values.length - 1)) * (width - 1);
+          const y = height - ((value - min) / span) * (height - 1);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      });
+    }
+
+    function drawFramebuffer(bytes, width = 128, height = 64) {
+      const canvas = $("framebuffer");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      const image = ctx.createImageData(width, height);
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const byte = bytes[Math.floor(y / 8) * width + x] || 0;
+          const on = (byte & (1 << (y & 7))) !== 0;
+          const p = (y * width + x) * 4;
+          image.data[p] = on ? 238 : 2;
+          image.data[p + 1] = on ? 241 : 3;
+          image.data[p + 2] = on ? 247 : 4;
+          image.data[p + 3] = 255;
+        }
+      }
+      ctx.putImageData(image, 0, 0);
+    }
+
+    function fillParam(row) {
+      $("paramAlias").value = row.alias || "";
+      $("paramAddress").value = row.address_hex || row.address || "";
+      $("paramUnit").value = row.unit || "";
+      $("paramType").value = row.type || "u16";
+      $("paramDecimals").value = row.decimals ?? 0;
+      $("paramReadonly").checked = !!row.read_only;
+      $("paramMin").value = row.has_min ? row.min : "";
+      $("paramMax").value = row.has_max ? row.max : "";
+    }
+
+    async function refreshStatus() {
+      const s = await request("/api/device/status");
+      kv($("statusKv"), {
+        net: s.net,
+        comm: s.comm,
+        baud: s.uart_baud,
+        ble: s.ble_ready,
+        ws_client: s.wifi_ws_client,
+        display: `${s.display_backend}/${s.display_status}`,
+        params: s.motor_params ? `${s.motor_params.count}/${s.motor_params.capacity}` : "-",
+      });
+      $("statusRaw").textContent = JSON.stringify(s, null, 2);
+      if (s.comm) $("commMode").value = String(s.comm).toLowerCase();
+      if (s.uart_baud) $("baud").value = String(s.uart_baud);
+    }
+
+    async function refreshCaps() {
+      const device = await request("/api/device/capabilities");
+      let diag = {};
+      let osc = {};
+      try { diag = await request("/api/motor/diag/capabilities"); } catch {}
+      try { osc = await request("/api/motor/osc/capabilities"); } catch {}
+      kv($("capsKv"), {
+        profile: device.profile,
+        domain: device.domain,
+        diag: diag.profile || "-",
+        osc: osc.profile || "-",
+        actions: Array.isArray(device.actions) ? device.actions.length : 0,
+      });
+      const rows = []
+        .concat(Array.isArray(device.http) ? device.http : [])
+        .concat(Array.isArray(diag.http) ? diag.http : [])
+        .concat(Array.isArray(osc.http) ? osc.http : []);
+      renderTable($("capsTable"), [
+        { label: "Method", key: "method" },
+        { label: "Path", key: "path" },
+        { label: "Body", key: "body" },
+      ], rows, row => {
+        $("rawMethod").value = row.method || "GET";
+        $("rawPath").value = row.path || "/";
+        $("rawBody").value = row.body ? row.body : "{}";
+      });
+    }
+
+    async function refreshMenu() {
+      const s = await request("/api/menu/status");
+      kv($("menuKv"), {
+        active: s.active,
+        page: s.page,
+        depth: s.depth,
+        selected: s.selected,
+        net: s.net,
+        comm: s.comm,
+        baud: s.uart_baud,
+        title: s.title,
+        path: s.path,
+        message: s.message,
+      });
+      $("menuRows").textContent = Array.isArray(s.rows) ? s.rows.join("\n") : JSON.stringify(s, null, 2);
+    }
+
+    async function refreshHealth() {
+      const s = await request("/api/system/health");
+      kv($("healthKv"), {
+        uptime_ms: s.uptime_ms,
+        heap_free: s.heap?.free,
+        heap_min: s.heap?.min_free,
+        largest: s.heap?.largest,
+        internal_free: s.heap?.internal_free,
+        restart_reason: s.restart_reason,
+      });
+    }
+
+    async function refreshStats() {
+      const s = await request("/api/comm/stats");
+      kv($("statsKv"), {
+        uart: s.uart ? `rx ${s.uart.rx_frames}/${s.uart.rx_bytes}B, tx ${s.uart.tx_bytes}B, fail ${s.uart.tx_failures}` : "-",
+        ble: s.ble ? `rx ${s.ble.rx_frames}/${s.ble.rx_bytes}B, tx ${s.ble.tx_bytes}B, drop ${s.ble.no_subscriber_drops}` : "-",
+        wifi: s.wifi ? `rx ${s.wifi.rx_frames}/${s.wifi.rx_bytes}B, tx ${s.wifi.tx_sent_bytes}B, fail ${s.wifi.tx_failures}` : "-",
+        route: s.route ? `idle ${s.route.idle_drops}, unavailable ${s.route.unavailable_drops}, partial ${s.route.partial_drops}` : "-",
+      });
+    }
+
+    async function refreshWifi() {
+      const s = await request("/api/wifi/status");
+      kv($("wifiKv"), s);
+      if (s.sta_ssid) $("staSsid").value = s.sta_ssid;
+    }
+
+    async function refreshBle() {
+      const s = await request("/api/ble/status");
+      kv($("bleKv"), s);
+    }
+
+    async function refreshWsStatus() {
+      const s = await request("/api/ws/status");
+      kv($("wsStatusKv"), s);
+    }
+
+    async function refreshParams() {
+      const s = await request("/api/motor/params");
+      kv($("paramsKv"), {
+        ok: s.ok,
+        count: s.count,
+        capacity: s.capacity,
+      });
+      renderTable($("paramsTable"), [
+        { label: "Alias", key: "alias" },
+        { label: "Address", key: "address_hex" },
+        { label: "Type", key: "type" },
+        { label: "Decimals", key: "decimals" },
+        { label: "Unit", key: "unit" },
+        { label: "Range", value: row => `${row.has_min ? row.min : "-"}..${row.has_max ? row.max : "-"}` },
+        { label: "RO", value: row => row.read_only ? "yes" : "" },
+      ], Array.isArray(s.items) ? s.items : [], fillParam);
+    }
+
+    async function refreshDisplay() {
+      const s = await request("/api/display/status");
+      kv($("displayKv"), s);
+    }
+
+    async function refreshExcel() {
+      const files = await request("/api/excel/list");
+      const list = $("excelList");
+      list.innerHTML = "";
+      (Array.isArray(files) ? files : []).forEach(name => {
+        const row = document.createElement("div");
+        row.className = "actions";
+        const span = document.createElement("span");
+        span.className = "mono";
+        span.textContent = name;
+        const btn = document.createElement("button");
+        btn.className = "danger";
+        btn.textContent = "Delete";
+        btn.onclick = async () => { await del("/api/excel/delete?name=" + encodeURIComponent(name)); refreshExcel(); };
+        row.appendChild(span);
+        row.appendChild(btn);
+        list.appendChild(row);
+      });
+    }
+
+    async function refreshAll() {
+      await refreshStatus();
+      await Promise.allSettled([
+        refreshCaps(),
+        refreshMenu(),
+        refreshHealth(),
+        refreshStats(),
+        refreshWifi(),
+        refreshBle(),
+        refreshWsStatus(),
+        refreshParams(),
+        refreshDisplay(),
+        refreshExcel(),
+      ]);
+    }
+
+    function diagBody() {
+      return {
+        slave: Number($("diagSlave").value || 255),
+        address: $("diagAddr").value,
+        count: Number($("diagCount").value || 1),
+        value: Number($("diagValue").value || 0),
+        type: $("diagType").value,
+        decimals: Number($("diagDecimals").value || 0),
+        send: $("diagSend").checked,
+      };
+    }
+
+    function oscBaseBody() {
+      return {
+        slave: Number($("oscSlave").value || 255),
+        send: $("oscSend").checked,
+      };
+    }
+
+    function oscQueryBody() {
+      const body = oscBaseBody();
+      const query = $("oscQuery").value;
+      if (query === "custom") body.address = $("oscQueryAddr").value;
+      else body.item = query;
+      return body;
+    }
+
+    function oscChannelBody() {
+      return {
+        ...oscBaseBody(),
+        channel: Number($("oscChannel").value || 0),
+        paramType: $("oscParamType").value,
+        address: $("oscParamAddr").value,
+      };
+    }
+
+    function oscRateBody() {
+      return {
+        ...oscBaseBody(),
+        bytesPerSec: Number($("oscRate").value || 0),
+      };
+    }
+
+    function paramBody() {
+      const body = {
+        alias: $("paramAlias").value,
+        address: $("paramAddress").value,
+        unit: $("paramUnit").value,
+        type: $("paramType").value,
+        decimals: Number($("paramDecimals").value || 0),
+        readOnly: $("paramReadonly").checked,
+      };
+      if ($("paramMin").value !== "") body.min = Number($("paramMin").value);
+      if ($("paramMax").value !== "") body.max = Number($("paramMax").value);
+      return body;
+    }
+
+    function paramRWBody() {
+      return {
+        alias: $("paramAlias").value,
+        value: Number($("paramValue").value || 0),
+        send: $("paramSend").checked,
+      };
+    }
+
+    async function sendRaw() {
+      const method = $("rawMethod").value;
+      const path = $("rawPath").value || "/";
+      const options = { method };
+      if (method !== "GET") {
+        options.headers = { "Content-Type": "application/json" };
+        options.body = $("rawBody").value || "{}";
+      }
+      const data = await request(path, options);
+      $("rawOut").textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+    }
+
+    $("baseUrl").value = localStorage.getItem("control.baseUrl") || defaultBase();
+    $("saveBase").onclick = () => { localStorage.setItem("control.baseUrl", baseUrl()); refreshAll(); };
+    $("refreshAll").onclick = refreshAll;
+    $("jumpMotorDiag").onclick = () => $("motorDiag").scrollIntoView({ behavior: "smooth", block: "start" });
+    $("jumpMotorOsc").onclick = () => $("motorOsc").scrollIntoView({ behavior: "smooth", block: "start" });
+    $("jumpMotorParams").onclick = () => $("motorParams").scrollIntoView({ behavior: "smooth", block: "start" });
+    document.querySelectorAll("[data-refresh]").forEach(btn => {
+      btn.onclick = () => ({
+        status: refreshStatus,
+        caps: refreshCaps,
+        menu: refreshMenu,
+        health: refreshHealth,
+        stats: refreshStats,
+        wifi: refreshWifi,
+        ble: refreshBle,
+        wsstatus: refreshWsStatus,
+        params: refreshParams,
+        display: refreshDisplay,
+        excel: refreshExcel,
+      })[btn.dataset.refresh]();
+    });
+
+    $("setComm").onclick = () => post("/api/comm/mode", { mode: $("commMode").value }).then(refreshStatus);
+    $("setBaud").onclick = () => post("/api/uart/baud", { baud: Number($("baud").value) }).then(refreshStatus);
+    $("getBaud").onclick = () => request("/api/uart/baud");
+    $("uartSendText").onclick = async () => { $("uartOut").textContent = JSON.stringify(await post("/api/uart/tx", { text: $("uartText").value }), null, 2); };
+    $("uartSendHex").onclick = async () => { $("uartOut").textContent = JSON.stringify(await post("/api/uart/tx", { hex: $("uartHex").value }), null, 2); };
+    $("resetStats").onclick = () => del("/api/comm/stats").then(refreshStats);
+    document.querySelectorAll("[data-key]").forEach(btn => {
+      btn.onclick = () => post("/api/input/key", { key: btn.dataset.key }).then(refreshStatus);
+    });
+
+    $("saveSta").onclick = () => post("/api/wifi/sta", { ssid: $("staSsid").value, password: $("staPass").value }).then(refreshWifi);
+    $("clearSta").onclick = () => del("/api/wifi/sta").then(refreshWifi);
+    $("wifiAp").onclick = () => post("/api/wifi/mode", { mode: "ap" }).then(refreshWifi);
+    $("wifiSta").onclick = () => post("/api/wifi/mode", { mode: "sta" }).then(refreshWifi);
+    $("bleStart").onclick = () => post("/api/ble/start", {}).then(refreshBle);
+    $("bleSendText").onclick = async () => { $("bleOut").textContent = JSON.stringify(await post("/api/ble/tx", { text: $("bleText").value }), null, 2); };
+    $("bleSendHex").onclick = async () => { $("bleOut").textContent = JSON.stringify(await post("/api/ble/tx", { hex: $("bleHex").value }), null, 2); };
+
+    $("setDisplay").onclick = () => post("/api/display/text", {
+      title: $("dispTitle").value,
+      line1: $("disp1").value,
+      line2: $("disp2").value,
+      line3: $("disp3").value,
+      line4: $("disp4").value,
+      footer: $("dispFooter").value,
+    });
+    $("clearDisplay").onclick = () => del("/api/display/text");
+    $("setDisplayScroll").onclick = () => post("/api/display/scroll", {
+      title: $("dispTitle").value,
+      text: $("dispScroll").value,
+      footer: $("dispFooter").value,
+    });
+
+    $("diagRead").onclick = async () => { $("diagOut").textContent = JSON.stringify(await post("/api/motor/diag/read", diagBody()), null, 2); };
+    $("diagWrite").onclick = async () => { $("diagOut").textContent = JSON.stringify(await post("/api/motor/diag/write", diagBody()), null, 2); };
+
+    $("oscQueryBtn").onclick = async () => { $("oscOut").textContent = JSON.stringify(await post("/api/motor/osc/query", oscQueryBody()), null, 2); };
+    $("oscChannelBtn").onclick = async () => { $("oscOut").textContent = JSON.stringify(await post("/api/motor/osc/channel", oscChannelBody()), null, 2); };
+    $("oscStart").onclick = async () => { $("oscOut").textContent = JSON.stringify(await post("/api/motor/osc/start", oscBaseBody()), null, 2); };
+    $("oscStop").onclick = async () => { $("oscOut").textContent = JSON.stringify(await post("/api/motor/osc/stop", oscBaseBody()), null, 2); };
+    $("oscHeartbeat").onclick = async () => { $("oscOut").textContent = JSON.stringify(await post("/api/motor/osc/heartbeat", oscBaseBody()), null, 2); };
+    $("oscRateBtn").onclick = async () => { $("oscOut").textContent = JSON.stringify(await post("/api/motor/osc/rate", oscRateBody()), null, 2); };
+    $("oscApplyPlot").onclick = parseOscPlotConfig;
+    $("oscClearPlot").onclick = () => {
+      oscSeries = oscChannels.map(() => []);
+      oscFrameCount = 0;
+      oscSampleCount = 0;
+      oscBuf = new Uint8Array(0);
+      drawOscPlot();
+      updateOscInfo();
+    };
+    $("oscSimToggle").onclick = () => setOscSim(!oscSimTimer);
+
+    $("paramRegister").onclick = () => post("/api/motor/params", paramBody()).then((r) => { $("paramOut").textContent = JSON.stringify(r, null, 2); return refreshParams(); });
+    $("paramRead").onclick = async () => { $("paramOut").textContent = JSON.stringify(await post("/api/motor/params/read", { alias: $("paramAlias").value, send: $("paramSend").checked }), null, 2); };
+    $("paramWrite").onclick = async () => { $("paramOut").textContent = JSON.stringify(await post("/api/motor/params/write", paramRWBody()), null, 2); };
+    $("paramClear").onclick = () => del("/api/motor/params").then(refreshParams);
+
+    $("readFramebuffer").onclick = async () => {
+      const resp = await fetch(baseUrl() + "/api/display/framebuffer", { cache: "no-store" });
+      const data = new Uint8Array(await resp.arrayBuffer());
+      drawFramebuffer(data);
+      log("GET /api/display/framebuffer", { ok: resp.ok, bytes: data.length });
+    };
+
+    $("uploadExcel").onclick = async () => {
+      const file = $("excelFile").files[0];
+      if (!file) return log("No file selected");
+      const resp = await fetch(baseUrl() + "/api/excel/upload", {
+        method: "POST",
+        headers: { "X-Filename": file.name },
+        body: file,
+      });
+      log("POST /api/excel/upload", { ok: resp.ok, text: await resp.text() });
+      refreshExcel();
+    };
+
+    $("wsConnect").onclick = () => {
+      if (ws && ws.readyState === WebSocket.OPEN) return;
+      setWs("connecting");
+      const url = baseUrl().replace(/^http/, "ws") + "/ws";
+      ws = new WebSocket(url);
+      ws.binaryType = "arraybuffer";
+      ws.onopen = () => { setWs("open"); wsLog.textContent += "open " + url + "\n"; };
+      ws.onclose = () => { setWs("closed"); wsLog.textContent += "closed\n"; };
+      ws.onerror = () => { setWs("error"); wsLog.textContent += "error\n"; };
+      ws.onmessage = (ev) => {
+        if (ev.data instanceof ArrayBuffer) {
+          const bytes = new Uint8Array(ev.data);
+          wsLog.textContent += "RX " + bytesToHex(bytes) + "\n";
+          feedOscBytes(bytes);
+        } else {
+          wsLog.textContent += "RX " + ev.data + "\n";
+        }
+        wsLog.scrollTop = wsLog.scrollHeight;
+      };
+    };
+    $("wsClose").onclick = () => { if (ws) ws.close(); };
+    $("wsSendHex").onclick = () => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return log("WebSocket is not open");
+      const data = hexToBytes($("wsHex").value);
+      ws.send(data);
+      wsLog.textContent += "TX " + bytesToHex(data) + "\n";
+      wsLog.scrollTop = wsLog.scrollHeight;
+    };
+    $("wsClear").onclick = () => { wsLog.textContent = ""; };
+    $("rawSend").onclick = sendRaw;
+    $("rawFillStatus").onclick = () => {
+      $("rawMethod").value = "GET";
+      $("rawPath").value = "/api/device/status";
+      $("rawBody").value = "{}";
+    };
+    $("rawFillParam").onclick = () => {
+      $("rawMethod").value = "POST";
+      $("rawPath").value = "/api/motor/params/write";
+      $("rawBody").value = JSON.stringify(paramRWBody(), null, 2);
+    };
+    $("rawFillDiag").onclick = () => {
+      $("rawMethod").value = "POST";
+      $("rawPath").value = "/api/motor/diag/read";
+      $("rawBody").value = JSON.stringify(diagBody(), null, 2);
+    };
+    $("clearLog").onclick = () => { apiLog.textContent = ""; };
+
+    refreshAll();
+    parseOscPlotConfig();
+    setInterval(refreshStatus, 4000);
+  </script>
+</body>
+</html>

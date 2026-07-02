@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ESP32 WiFi Config</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        background: #101820;
+        color: #eef5f7;
+        font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        width: min(420px, calc(100vw - 32px));
+        padding: 18px;
+      }
+
+      h1 {
+        margin: 0 0 4px;
+        font-size: 20px;
+        letter-spacing: 0;
+      }
+
+      .sub {
+        margin: 0 0 16px;
+        color: #9fb2bd;
+      }
+
+      label {
+        display: block;
+        margin: 12px 0 6px;
+        color: #c8d9df;
+        font-weight: 700;
+      }
+
+      input {
+        width: 100%;
+        min-height: 44px;
+        border: 1px solid #3d5563;
+        border-radius: 8px;
+        background: #16232b;
+        color: #f8fbfc;
+        font: inherit;
+        padding: 0 12px;
+      }
+
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      button {
+        min-height: 46px;
+        border: 1px solid #3d5563;
+        border-radius: 8px;
+        background: #1c2a33;
+        color: #f8fbfc;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+
+      button.primary {
+        background: #176b5f;
+        border-color: #2c9b8d;
+      }
+
+      button.danger {
+        background: #59343c;
+        border-color: #8d5360;
+      }
+
+      .status {
+        min-height: 44px;
+        margin-top: 14px;
+        padding: 10px 12px;
+        border: 1px solid #324956;
+        border-radius: 8px;
+        background: #16232b;
+        color: #c8d9df;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        word-break: break-word;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>STA 配网</h1>
+      <p class="sub">保存路由器 Wi-Fi 后，再回到菜单选择 STA。</p>
+
+      <form id="form">
+        <label for="ssid">Wi-Fi 名称</label>
+        <input id="ssid" name="ssid" maxlength="32" autocomplete="off" required />
+
+        <label for="password">Wi-Fi 密码</label>
+        <input id="password" name="password" maxlength="64" type="password" autocomplete="current-password" />
+
+        <div class="actions">
+          <button class="primary" type="submit">保存</button>
+          <button class="danger" id="clear" type="button">清除</button>
+        </div>
+      </form>
+
+      <div id="status" class="status">loading...</div>
+    </main>
+
+    <script>
+      (() => {
+        const form = document.getElementById("form");
+        const ssidEl = document.getElementById("ssid");
+        const passwordEl = document.getElementById("password");
+        const clearEl = document.getElementById("clear");
+        const statusEl = document.getElementById("status");
+
+        async function loadStatus() {
+          try {
+            const resp = await fetch("/api/wifi/status", { cache: "no-store" });
+            const data = await resp.json();
+            if (data.sta_ssid) ssidEl.value = data.sta_ssid;
+            statusEl.textContent = data.sta_configured
+              ? `saved: ${data.sta_ssid || "-"}`
+              : "STA not configured";
+          } catch (err) {
+            statusEl.textContent = `status failed: ${err.message}`;
+          }
+        }
+
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const ssid = ssidEl.value.trim();
+          const password = passwordEl.value;
+          if (!ssid) {
+            statusEl.textContent = "missing ssid";
+            return;
+          }
+          statusEl.textContent = "saving...";
+          try {
+            const resp = await fetch("/api/wifi/sta", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ssid, password }),
+              cache: "no-store",
+            });
+            const data = await resp.json();
+            statusEl.textContent = data.ok
+              ? `saved: ${data.ssid}; go back and select STA`
+              : `save failed: ${data.msg || "unknown"}`;
+          } catch (err) {
+            statusEl.textContent = `save failed: ${err.message}`;
+          }
+        });
+
+        clearEl.addEventListener("click", async () => {
+          statusEl.textContent = "clearing...";
+          try {
+            const resp = await fetch("/api/wifi/sta", {
+              method: "DELETE",
+              cache: "no-store",
+            });
+            const data = await resp.json();
+            if (data.ok) {
+              passwordEl.value = "";
+              statusEl.textContent = "STA config cleared";
+            } else {
+              statusEl.textContent = `clear failed: ${data.msg || "unknown"}`;
+            }
+          } catch (err) {
+            statusEl.textContent = `clear failed: ${err.message}`;
+          }
+        });
+
+        loadStatus();
+      })();
+    </script>
+  </body>
+</html>

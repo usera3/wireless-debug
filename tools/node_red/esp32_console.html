@@ -1,0 +1,1645 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wireless Debug Hardware Bench</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bench: #e7eaee;
+      --bench-line: #c7ced8;
+      --ink: #151b22;
+      --muted: #66717f;
+      --panel: #2b3036;
+      --panel-hi: #3a4149;
+      --panel-low: #171b20;
+      --metal: #d4d8dd;
+      --metal-dark: #8e98a5;
+      --screen: #0b1914;
+      --green: #33d17a;
+      --amber: #f5b84b;
+      --red: #ef5b4f;
+      --blue: #46a5ff;
+      --violet: #8b5cf6;
+      --shadow: 0 22px 44px rgba(23, 31, 42, 0.22);
+      --soft-shadow: 0 10px 28px rgba(23, 31, 42, 0.14);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      background:
+        linear-gradient(90deg, rgba(255,255,255,0.34) 1px, transparent 1px) 0 0 / 32px 32px,
+        linear-gradient(0deg, rgba(255,255,255,0.34) 1px, transparent 1px) 0 0 / 32px 32px,
+        var(--bench);
+      color: var(--ink);
+      font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+    button, input, select, textarea { font: inherit; letter-spacing: 0; }
+    button { cursor: pointer; }
+    input, select, textarea {
+      width: 100%;
+      min-height: 34px;
+      border: 1px solid #b9c2cf;
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      padding: 7px 9px;
+      outline: none;
+    }
+    textarea {
+      min-height: 78px;
+      resize: vertical;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+    input[type="checkbox"] { width: 16px; min-height: 16px; padding: 0; accent-color: #157a6e; }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: grid;
+      grid-template-columns: minmax(360px, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--bench-line);
+      background: rgba(239, 242, 246, 0.93);
+      backdrop-filter: blur(10px);
+    }
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      min-width: 0;
+    }
+    .brand h1 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1;
+    }
+    .brand span { color: var(--muted); font-size: 12px; }
+    .hostbar {
+      display: grid;
+      grid-template-columns: 90px minmax(220px, 360px) 72px 92px;
+      gap: 8px;
+      align-items: center;
+    }
+    .hostbar label { color: var(--muted); font-size: 12px; }
+
+    .btn {
+      min-height: 34px;
+      border: 1px solid #0e6258;
+      border-radius: 6px;
+      padding: 7px 11px;
+      background: #157a6e;
+      color: #fff;
+      box-shadow: inset 0 1px rgba(255,255,255,0.26), 0 2px 4px rgba(20, 30, 40, 0.12);
+    }
+    .btn:hover { background: #0e6258; }
+    .btn.secondary {
+      border-color: #b5beca;
+      background: #fff;
+      color: var(--ink);
+    }
+    .btn.secondary:hover { background: #f4f6f8; }
+    .btn.danger { border-color: #9f2118; background: #c0392b; }
+    .btn.danger:hover { background: #9f2118; }
+
+    .status-strip {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 30px;
+      padding: 5px 9px;
+      border: 1px solid #c5ccd6;
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    main {
+      display: grid;
+      gap: 18px;
+      padding: 18px;
+    }
+    .bench-layout {
+      display: grid;
+      grid-template-columns: minmax(640px, 1fr) minmax(330px, 0.42fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .device {
+      position: relative;
+      min-height: 650px;
+      border-radius: 20px;
+      border: 1px solid #15191f;
+      background:
+        radial-gradient(circle at 15% 9%, rgba(255,255,255,0.17), transparent 26%),
+        linear-gradient(145deg, #424a54, #20252c 52%, #171b21);
+      box-shadow: var(--shadow), inset 0 1px rgba(255,255,255,0.17), inset 0 -12px 36px rgba(0,0,0,0.28);
+      padding: 22px;
+      overflow: hidden;
+    }
+    .device::before,
+    .device::after {
+      content: "";
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #f0f2f5, #717b88 58%, #303740);
+      box-shadow: inset 0 1px 2px rgba(255,255,255,0.8), 0 1px 2px #000;
+    }
+    .device::before { left: 18px; top: 18px; }
+    .device::after { right: 18px; bottom: 18px; }
+    .device-grid {
+      display: grid;
+      grid-template-columns: 1.08fr 0.92fr;
+      grid-template-rows: auto auto 1fr;
+      gap: 18px;
+      position: relative;
+      z-index: 1;
+    }
+    .engraving {
+      grid-column: 1 / -1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: #d7dde5;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 12px;
+    }
+    .engraving strong { color: #fff; font-size: 15px; letter-spacing: 0.04em; }
+
+    .module {
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.02));
+      box-shadow: inset 0 1px rgba(255,255,255,0.1), inset 0 -1px rgba(0,0,0,0.32);
+      padding: 14px;
+      color: #edf2f7;
+      min-width: 0;
+    }
+    .module-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      color: #cbd5e1;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      margin-bottom: 10px;
+    }
+
+    .oled-shell {
+      padding: 14px;
+      border-radius: 15px;
+      background: linear-gradient(160deg, #0b0d10, #1c2228);
+      border: 1px solid #06080b;
+      box-shadow: inset 0 1px rgba(255,255,255,0.08), 0 14px 28px rgba(0,0,0,0.28);
+    }
+    .oled {
+      position: relative;
+      min-height: 210px;
+      border-radius: 10px;
+      border: 1px solid #183d35;
+      background:
+        linear-gradient(rgba(52, 211, 153, 0.04) 50%, rgba(0, 0, 0, 0.08) 50%) 0 0 / 100% 4px,
+        radial-gradient(circle at 48% 12%, rgba(73, 222, 128, 0.11), transparent 35%),
+        var(--screen);
+      box-shadow: inset 0 0 24px rgba(45, 212, 120, 0.14), inset 0 0 70px rgba(0,0,0,0.45);
+      padding: 18px;
+      color: #72f2a3;
+      font: 15px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+      overflow: hidden;
+    }
+    .oled::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(110deg, transparent 0 20%, rgba(255,255,255,0.08) 40%, transparent 58%);
+      pointer-events: none;
+    }
+    .oled-title {
+      color: #b8ffd2;
+      font-weight: 700;
+      margin-bottom: 10px;
+      text-shadow: 0 0 8px rgba(51,209,122,0.62);
+    }
+    .oled-lines { white-space: pre-wrap; min-height: 104px; }
+    .oled-footer {
+      position: absolute;
+      left: 18px;
+      right: 18px;
+      bottom: 12px;
+      color: rgba(184,255,210,0.72);
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .lamp-row {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+    }
+    .lamp {
+      display: grid;
+      justify-items: center;
+      gap: 6px;
+      color: #cbd5e1;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .lens {
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.18);
+      background: radial-gradient(circle at 35% 30%, #535d67, #1c2228 68%);
+      box-shadow: inset 0 2px 5px rgba(255,255,255,0.12), inset 0 -5px 8px rgba(0,0,0,0.42), 0 2px 4px rgba(0,0,0,0.35);
+    }
+    .lens.on.green { background: radial-gradient(circle at 35% 28%, #d7ffe4, #33d17a 36%, #0c5c35 72%); box-shadow: 0 0 18px rgba(51,209,122,0.75), inset 0 2px 5px rgba(255,255,255,0.7); }
+    .lens.on.amber { background: radial-gradient(circle at 35% 28%, #fff2cf, #f5b84b 36%, #82520c 72%); box-shadow: 0 0 18px rgba(245,184,75,0.75), inset 0 2px 5px rgba(255,255,255,0.7); }
+    .lens.on.blue { background: radial-gradient(circle at 35% 28%, #d8ecff, #46a5ff 36%, #0b4b86 72%); box-shadow: 0 0 18px rgba(70,165,255,0.72), inset 0 2px 5px rgba(255,255,255,0.7); }
+    .lens.on.violet { background: radial-gradient(circle at 35% 28%, #ede9fe, #8b5cf6 36%, #4c1d95 72%); box-shadow: 0 0 18px rgba(139,92,246,0.72), inset 0 2px 5px rgba(255,255,255,0.7); }
+    .lens.on.red { background: radial-gradient(circle at 35% 28%, #ffe0dd, #ef5b4f 36%, #8f211a 72%); box-shadow: 0 0 18px rgba(239,91,79,0.72), inset 0 2px 5px rgba(255,255,255,0.7); }
+
+    .lever-box {
+      display: grid;
+      gap: 12px;
+    }
+    .lever-track {
+      position: relative;
+      height: 64px;
+      border-radius: 12px;
+      border: 1px solid #090b0d;
+      background: linear-gradient(180deg, #101318, #232a31);
+      box-shadow: inset 0 3px 8px rgba(0,0,0,0.65), inset 0 -1px rgba(255,255,255,0.08);
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      align-items: end;
+      padding: 8px;
+    }
+    .lever-track button {
+      position: relative;
+      z-index: 2;
+      border: 0;
+      background: transparent;
+      color: #9aa7b8;
+      min-height: 42px;
+      font-size: 12px;
+    }
+    .lever {
+      position: absolute;
+      left: 8px;
+      top: 8px;
+      width: calc((100% - 16px) / 3);
+      height: 48px;
+      border-radius: 10px;
+      background: linear-gradient(180deg, #f4f6f8, #9ba6b3);
+      box-shadow: inset 0 1px rgba(255,255,255,0.9), inset 0 -5px 10px rgba(45, 55, 72, 0.35), 0 5px 12px rgba(0,0,0,0.42);
+      transition: transform 180ms ease;
+      z-index: 1;
+    }
+    .lever-track[data-mode="wifi"] .lever { transform: translateX(100%); }
+    .lever-track[data-mode="ble"] .lever { transform: translateX(200%); }
+    .lever-track[data-mode="auto"] button[data-mode="auto"],
+    .lever-track[data-mode="wifi"] button[data-mode="wifi"],
+    .lever-track[data-mode="ble"] button[data-mode="ble"] { color: #111827; font-weight: 700; }
+
+    .dial-area {
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 14px;
+      align-items: center;
+    }
+    .dial {
+      position: relative;
+      width: 136px;
+      height: 136px;
+      border-radius: 50%;
+      border: 1px solid #11161c;
+      background:
+        radial-gradient(circle at 38% 30%, rgba(255,255,255,0.26), transparent 24%),
+        radial-gradient(circle, #707b88 0 37%, #303740 38% 62%, #15191f 63%);
+      box-shadow: inset 0 5px 10px rgba(255,255,255,0.12), inset 0 -14px 20px rgba(0,0,0,0.45), 0 12px 22px rgba(0,0,0,0.35);
+    }
+    .dial::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 10px;
+      width: 8px;
+      height: 35px;
+      border-radius: 99px;
+      background: var(--amber);
+      box-shadow: 0 0 10px rgba(245,184,75,0.75);
+      transform: translateX(-50%);
+    }
+    .dial-value {
+      display: grid;
+      gap: 8px;
+    }
+    .dial-readout {
+      border-radius: 8px;
+      border: 1px solid #15191f;
+      background: #101820;
+      color: #f6d365;
+      padding: 10px;
+      font: 18px/1 ui-monospace, SFMono-Regular, Consolas, monospace;
+      text-align: center;
+      box-shadow: inset 0 0 16px rgba(246,211,101,0.12);
+    }
+    .dial-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+    .keypad {
+      display: grid;
+      grid-template-columns: repeat(3, 70px);
+      gap: 10px;
+      justify-content: center;
+      align-items: center;
+    }
+    .key {
+      width: 70px;
+      height: 54px;
+      border-radius: 12px;
+      border: 1px solid #060708;
+      background: linear-gradient(180deg, #303842, #11161c);
+      color: #e5edf6;
+      box-shadow: inset 0 1px rgba(255,255,255,0.12), inset 0 -6px 12px rgba(0,0,0,0.46), 0 6px 10px rgba(0,0,0,0.32);
+    }
+    .key:active {
+      transform: translateY(2px);
+      box-shadow: inset 0 1px 8px rgba(0,0,0,0.65), 0 2px 5px rgba(0,0,0,0.25);
+    }
+    .key.blank { visibility: hidden; }
+
+    .socket-board {
+      display: grid;
+      gap: 12px;
+    }
+    .port-row {
+      display: grid;
+      grid-template-columns: 94px minmax(0, 1fr) 78px;
+      gap: 8px;
+      align-items: center;
+    }
+    .port-label { color: #cbd5e1; font-size: 12px; text-transform: uppercase; }
+    .jack {
+      min-height: 42px;
+      border: 1px solid #060708;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #101318, #050607);
+      box-shadow: inset 0 4px 9px rgba(0,0,0,0.7), inset 0 -1px rgba(255,255,255,0.1);
+      padding: 5px;
+      display: flex;
+      align-items: center;
+    }
+    .plug {
+      width: 60%;
+      height: 28px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #f3f5f7, #8a95a4);
+      box-shadow: inset 0 1px rgba(255,255,255,0.9), 0 4px 10px rgba(0,0,0,0.32);
+      transition: width 160ms ease, background 160ms ease;
+    }
+    .jack.connected .plug { width: 100%; background: linear-gradient(180deg, #d8ecff, #46a5ff); }
+
+    .side-rack {
+      display: grid;
+      gap: 14px;
+    }
+    .rack {
+      border: 1px solid #c2c9d3;
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: var(--soft-shadow);
+      overflow: hidden;
+    }
+    .rack-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-bottom: 1px solid #d8dee7;
+      background: #f8fafc;
+    }
+    .rack-head h2 { margin: 0; font-size: 14px; }
+    .rack-body { padding: 12px; display: grid; gap: 10px; }
+    .kv {
+      display: grid;
+      grid-template-columns: minmax(94px, 0.42fr) minmax(0, 1fr);
+      gap: 6px 10px;
+      font-size: 12px;
+    }
+    .kv div:nth-child(odd) { color: var(--muted); }
+    .mono { font: 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; word-break: break-all; }
+    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+    .form-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .field { display: grid; gap: 5px; color: var(--muted); font-size: 12px; min-width: 0; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .checkrow { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+
+    .motor-bench {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .scope {
+      border: 1px solid #1b2027;
+      border-radius: 14px;
+      background: linear-gradient(160deg, #252b33, #11161c);
+      box-shadow: var(--shadow), inset 0 1px rgba(255,255,255,0.08);
+      padding: 14px;
+      color: #e5edf6;
+    }
+    #oscCanvas {
+      width: 100%;
+      height: 260px;
+      border-radius: 8px;
+      border: 1px solid #0b0f14;
+      background: #020617;
+    }
+    .scope-controls {
+      margin-top: 10px;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+    #framebuffer {
+      width: 100%;
+      max-width: 360px;
+      aspect-ratio: 2 / 1;
+      border: 1px solid #16251f;
+      border-radius: 8px;
+      background: #06110d;
+      image-rendering: pixelated;
+    }
+    pre {
+      margin: 0;
+      min-height: 88px;
+      max-height: 260px;
+      overflow: auto;
+      border-radius: 8px;
+      background: #101820;
+      color: #d7fbe8;
+      padding: 10px;
+      white-space: pre-wrap;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+    .scroll {
+      max-height: 280px;
+      overflow: auto;
+      border: 1px solid #d8dee7;
+      border-radius: 8px;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td { border-bottom: 1px solid #d8dee7; padding: 7px 8px; text-align: left; vertical-align: top; }
+    th { background: #f8fafc; color: var(--muted); }
+    details summary {
+      cursor: pointer;
+      font-weight: 700;
+      color: #26313d;
+      padding: 12px 0;
+    }
+    .advanced {
+      border-top: 1px solid var(--bench-line);
+      padding-top: 4px;
+    }
+    .file-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 0;
+      border-bottom: 1px solid #d8dee7;
+    }
+    .toast {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      display: grid;
+      gap: 8px;
+      z-index: 30;
+      max-width: min(440px, calc(100vw - 32px));
+    }
+    .toast div {
+      border-radius: 8px;
+      background: #151b22;
+      color: #fff;
+      padding: 10px 12px;
+      box-shadow: var(--shadow);
+      font-size: 13px;
+    }
+
+    @media (max-width: 1180px) {
+      .bench-layout { grid-template-columns: 1fr; }
+      .side-rack { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .motor-bench { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 820px) {
+      .topbar { grid-template-columns: 1fr; }
+      .hostbar { grid-template-columns: 1fr; }
+      .status-strip { justify-content: flex-start; }
+      .device { padding: 14px; }
+      .device-grid { grid-template-columns: 1fr; }
+      .side-rack { grid-template-columns: 1fr; }
+      .lamp-row { grid-template-columns: repeat(3, 1fr); }
+      .dial-area { grid-template-columns: 1fr; justify-items: center; }
+      .form-grid, .form-grid.three, .scope-controls { grid-template-columns: 1fr; }
+      .port-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>Wireless Debug Hardware Bench</h1>
+      <span>Node-RED front panel for ESP32-S3</span>
+    </div>
+    <div class="hostbar">
+      <label for="host">ESP32 Host</label>
+      <input id="host" value="http://192.168.4.1">
+      <button id="saveHost" class="btn secondary">Save</button>
+      <button id="refreshAll" class="btn">Sync</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="status-strip">
+      <span class="pill"><span id="httpDot" class="lens" style="width:12px;height:12px"></span><span id="httpState">HTTP idle</span></span>
+      <span class="pill"><span id="wsDot" class="lens" style="width:12px;height:12px"></span><span id="wsState">WS closed</span></span>
+      <span class="pill" id="commState">COMM -</span>
+      <span class="pill" id="lastRefresh">No sync yet</span>
+    </div>
+
+    <section class="bench-layout">
+      <div class="device">
+        <div class="device-grid">
+          <div class="engraving">
+            <strong>ESP32-S3 Wireless Debug Terminal</strong>
+            <span>AP / BLE / UART / Motor Lab</span>
+          </div>
+
+          <section class="module">
+            <div class="module-title"><span>OLED Simulator</span><button id="readFramebuffer" class="btn secondary">Read Pixels</button></div>
+            <div class="oled-shell">
+              <div class="oled">
+                <div class="oled-title" id="oledTitle">STATUS</div>
+                <div class="oled-lines" id="oledLines">Waiting for device...</div>
+                <div class="oled-footer"><span id="oledLeft">NET -</span><span id="oledRight">UART -</span></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="module">
+            <div class="module-title"><span>Status Lamps</span><span id="deviceProfile">profile -</span></div>
+            <div class="lamp-row">
+              <div class="lamp"><span id="lampPower" class="lens"></span><span>PWR</span></div>
+              <div class="lamp"><span id="lampWifi" class="lens"></span><span>WiFi</span></div>
+              <div class="lamp"><span id="lampBle" class="lens"></span><span>BLE</span></div>
+              <div class="lamp"><span id="lampUart" class="lens"></span><span>UART</span></div>
+              <div class="lamp"><span id="lampWs" class="lens"></span><span>WS</span></div>
+            </div>
+          </section>
+
+          <section class="module">
+            <div class="module-title"><span>Communication Selector</span><span id="commReadout">AUTO</span></div>
+            <div class="lever-box">
+              <div class="lever-track" id="commLever" data-mode="auto">
+                <span class="lever"></span>
+                <button data-mode="auto">AUTO</button>
+                <button data-mode="wifi">WiFi</button>
+                <button data-mode="ble">BLE</button>
+              </div>
+              <div class="socket-board">
+                <div class="port-row">
+                  <span class="port-label">WiFi mode</span>
+                  <div class="jack" id="wifiJack"><span class="plug"></span></div>
+                  <button id="wifiModeToggle" class="btn secondary">AP</button>
+                </div>
+                <div class="port-row">
+                  <span class="port-label">BLE radio</span>
+                  <div class="jack" id="bleJack"><span class="plug"></span></div>
+                  <button id="bleStart" class="btn secondary">Start</button>
+                </div>
+                <div class="port-row">
+                  <span class="port-label">WS cable</span>
+                  <div class="jack" id="wsJack"><span class="plug"></span></div>
+                  <button id="wsConnect" class="btn secondary">Plug In</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="module">
+            <div class="module-title"><span>Baud Rate Dial</span><button id="setBaud" class="btn secondary">Apply</button></div>
+            <div class="dial-area">
+              <button id="baudDial" class="dial" aria-label="Baud dial"></button>
+              <div class="dial-value">
+                <div class="dial-readout" id="baudReadout">2000000</div>
+                <select id="baud">
+                  <option>115200</option>
+                  <option>921600</option>
+                  <option>2000000</option>
+                  <option>3000000</option>
+                  <option>5000000</option>
+                </select>
+                <div class="dial-buttons">
+                  <button id="baudPrev" class="btn secondary">Lower</button>
+                  <button id="baudNext" class="btn secondary">Higher</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="module">
+            <div class="module-title"><span>Hardware Keys</span><span>OLED Menu</span></div>
+            <div class="keypad">
+              <button class="key blank"></button>
+              <button class="key" data-key="up">UP</button>
+              <button class="key" data-key="next">NEXT</button>
+              <button class="key" data-key="back">BACK</button>
+              <button class="key" data-key="ok">OK</button>
+              <button class="key" data-key="down">DOWN</button>
+            </div>
+          </section>
+
+          <section class="module">
+            <div class="module-title"><span>Transmit Bay</span><button id="wsClose" class="btn secondary">Unplug WS</button></div>
+            <div class="socket-board">
+              <label class="field">UART Text<input id="uartText" value="AT+HELP"></label>
+              <div class="actions">
+                <button id="uartSendText" class="btn">Send UART Text</button>
+                <button id="uartSendHex" class="btn secondary">Send UART Hex</button>
+              </div>
+              <label class="field">UART / WS Hex<input id="uartHex" value="FF0301000002D029"></label>
+              <div class="actions">
+                <button id="wsSendHex" class="btn">Send WS Hex</button>
+                <button id="wsClear" class="btn secondary">Clear WS Log</button>
+              </div>
+              <pre id="wsLog"></pre>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <aside class="side-rack">
+        <section class="rack">
+          <div class="rack-head"><h2>Live Snapshot</h2><button data-refresh="status" class="btn secondary">Sync</button></div>
+          <div class="rack-body">
+            <div id="statusKv" class="kv"></div>
+            <div id="healthKv" class="kv"></div>
+          </div>
+        </section>
+        <section class="rack">
+          <div class="rack-head"><h2>Screen Composer</h2><button id="clearDisplay" class="btn secondary">Clear</button></div>
+          <div class="rack-body">
+            <div class="form-grid">
+              <label class="field">Title<input id="dispTitle" value="WEB"></label>
+              <label class="field">Footer<input id="dispFooter" value="manual"></label>
+              <label class="field">Line 1<input id="disp1" value="control"></label>
+              <label class="field">Line 2<input id="disp2" value="ready"></label>
+              <label class="field">Line 3<input id="disp3"></label>
+              <label class="field">Line 4<input id="disp4"></label>
+            </div>
+            <div class="actions">
+              <button id="setDisplay" class="btn">Push To OLED</button>
+              <button id="setDisplayScroll" class="btn secondary">Scroll Text</button>
+            </div>
+            <textarea id="dispScroll">无线调试终端 Node-RED 仿真面板</textarea>
+            <canvas id="framebuffer" width="128" height="64"></canvas>
+          </div>
+        </section>
+        <section class="rack">
+          <div class="rack-head"><h2>Radio Setup</h2><button data-refresh="wifi" class="btn secondary">Read</button></div>
+          <div class="rack-body">
+            <div id="wifiKv" class="kv"></div>
+            <label class="field">STA SSID<input id="staSsid"></label>
+            <label class="field">STA Password<input id="staPass" type="password"></label>
+            <div class="actions">
+              <button id="saveSta" class="btn">Save STA</button>
+              <button id="clearSta" class="btn danger">Clear STA</button>
+            </div>
+            <div id="bleKv" class="kv"></div>
+            <label class="field">BLE TX<input id="bleText" value="hello"></label>
+            <label class="field">BLE Hex<input id="bleHex" value="01 02 03 04"></label>
+            <div class="actions">
+              <button id="bleSendText" class="btn secondary">BLE Text</button>
+              <button id="bleSendHex" class="btn secondary">BLE Hex</button>
+            </div>
+          </div>
+        </section>
+      </aside>
+    </section>
+
+    <section class="motor-bench">
+      <div class="scope">
+        <div class="module-title"><span>Motor Oscilloscope</span><span id="oscStatus">idle</span></div>
+        <canvas id="oscCanvas" width="900" height="260"></canvas>
+        <div id="oscPlotKv" class="kv" style="margin-top:10px"></div>
+        <div class="scope-controls">
+          <button id="oscStart" class="btn">Start</button>
+          <button id="oscStop" class="btn secondary">Stop</button>
+          <button id="oscHeartbeat" class="btn secondary">Heartbeat</button>
+          <button id="oscSimToggle" class="btn secondary">Serial Inject</button>
+        </div>
+        <div class="rack-body" style="padding:12px 0 0">
+          <div class="form-grid three">
+            <label class="field">Slave<input id="oscSlave" value="255"></label>
+            <label class="field">Query<select id="oscQuery"><option value="frame_len">frame_len</option><option value="max_channels">max_channels</option><option value="sample_rate">sample_rate</option><option value="custom">custom</option></select></label>
+            <label class="field">Custom Address<input id="oscQueryAddr" value="0x0002"></label>
+            <label class="field">Channel<input id="oscChannel" value="0"></label>
+            <label class="field">Param Type<input id="oscParamType" value="0x00"></label>
+            <label class="field">Param Address<input id="oscParamAddr" value="0x0100"></label>
+            <label class="field">Bytes/sec<input id="oscRate" value="2000000"></label>
+            <label class="field">Frame Len<input id="oscFrameLen" value="130"></label>
+            <label class="field">Max Samples<input id="oscMaxSamples" value="600"></label>
+            <label class="field">Serial Port<input id="serialPort" value="COM4"></label>
+            <label class="field">Serial Baud<input id="serialBaud" value="2000000"></label>
+            <label class="field">Frames/Tick<input id="serialFrames" value="2"></label>
+            <label class="field">Inject ms<input id="serialInterval" value="300"></label>
+          </div>
+          <label class="checkrow"><input id="oscSend" type="checkbox"> Send generated frame to UART</label>
+          <label class="field">Plot Channels<textarea id="oscPlotChannels">CH0,0,2</textarea></label>
+          <div class="actions">
+            <button id="oscQueryBtn" class="btn secondary">Query</button>
+            <button id="oscChannelBtn" class="btn secondary">Set Channel</button>
+            <button id="oscRateBtn" class="btn secondary">Set Rate</button>
+            <button id="oscApplyPlot" class="btn secondary">Apply Plot</button>
+            <button id="oscClearPlot" class="btn secondary">Clear Plot</button>
+          </div>
+          <pre id="oscOut"></pre>
+        </div>
+      </div>
+
+      <section class="rack">
+        <div class="rack-head"><h2>Motor Diagnostic Workbench</h2><button data-refresh="params" class="btn secondary">Params</button></div>
+        <div class="rack-body">
+          <div class="form-grid three">
+            <label class="field">Slave<input id="diagSlave" value="255"></label>
+            <label class="field">Address<input id="diagAddr" value="0x0100"></label>
+            <label class="field">Count<input id="diagCount" value="1"></label>
+            <label class="field">Value<input id="diagValue" value="1.2"></label>
+            <label class="field">Type<select id="diagType"><option value="u16">u16</option><option value="i16">i16</option><option value="scaled">scaled</option><option value="float32">float32</option></select></label>
+            <label class="field">Decimals<input id="diagDecimals" value="1"></label>
+          </div>
+          <label class="checkrow"><input id="diagSend" type="checkbox"> Send diagnostic frame to UART</label>
+          <div class="actions">
+            <button id="diagRead" class="btn">Read / Build</button>
+            <button id="diagWrite" class="btn secondary">Write / Build</button>
+          </div>
+          <pre id="diagOut"></pre>
+          <div class="form-grid three">
+            <label class="field">Alias<input id="paramAlias" value="Kp"></label>
+            <label class="field">Address<input id="paramAddress" value="0x0100"></label>
+            <label class="field">Unit<input id="paramUnit"></label>
+            <label class="field">Type<select id="paramType"><option value="u16">u16</option><option value="i16">i16</option><option value="scaled">scaled</option><option value="float32">float32</option></select></label>
+            <label class="field">Decimals<input id="paramDecimals" value="1"></label>
+            <label class="field">Write Value<input id="paramValue" value="1.2"></label>
+            <label class="field">Min<input id="paramMin" value="0"></label>
+            <label class="field">Max<input id="paramMax" value="10"></label>
+            <label class="checkrow"><input id="paramReadonly" type="checkbox"> Read only</label>
+          </div>
+          <label class="checkrow"><input id="paramSend" type="checkbox"> Send param frame to UART</label>
+          <div class="actions">
+            <button id="paramRegister" class="btn">Register</button>
+            <button id="paramRead" class="btn secondary">Read Alias</button>
+            <button id="paramWrite" class="btn secondary">Write Alias</button>
+            <button id="paramClear" class="btn danger">Clear Params</button>
+          </div>
+          <div id="paramsKv" class="kv"></div>
+          <div class="scroll"><table id="paramsTable"></table></div>
+          <pre id="paramOut"></pre>
+        </div>
+      </section>
+    </section>
+
+    <details class="advanced">
+      <summary>Advanced service bay: capabilities, files, raw API and activity log</summary>
+      <section class="motor-bench">
+        <section class="rack">
+          <div class="rack-head"><h2>Capabilities</h2><button data-refresh="caps" class="btn secondary">Read</button></div>
+          <div class="rack-body">
+            <div id="capsKv" class="kv"></div>
+            <div class="scroll"><table id="capsTable"></table></div>
+          </div>
+        </section>
+        <section class="rack">
+          <div class="rack-head"><h2>Files and Raw API</h2><button data-refresh="excel" class="btn secondary">Files</button></div>
+          <div class="rack-body">
+            <input id="excelFile" type="file" accept=".xlsx,.xls">
+            <button id="uploadExcel" class="btn">Upload Excel</button>
+            <div id="excelList"></div>
+            <div class="form-grid three">
+              <label class="field">Method<select id="rawMethod"><option value="GET">GET</option><option value="POST">POST</option><option value="DELETE">DELETE</option></select></label>
+              <label class="field" style="grid-column:span 2">Path<input id="rawPath" value="/api/device/status"></label>
+            </div>
+            <textarea id="rawBody">{}</textarea>
+            <div class="actions">
+              <button id="rawSend" class="btn">Send Raw</button>
+              <button id="rawFillStatus" class="btn secondary">Status</button>
+              <button id="rawFillParam" class="btn secondary">Param Write</button>
+              <button id="rawFillDiag" class="btn secondary">Diag Read</button>
+            </div>
+            <pre id="rawOut"></pre>
+          </div>
+        </section>
+      </section>
+      <section class="rack" style="margin-top:16px">
+        <div class="rack-head"><h2>Activity Log</h2><button id="clearLog" class="btn secondary">Clear</button></div>
+        <div class="rack-body"><pre id="apiLog"></pre></div>
+      </section>
+    </details>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const apiLog = $("apiLog");
+    const wsLog = $("wsLog");
+    let ws = null;
+    let wsBridgeReady = false;
+    let wsBridgeWaiters = [];
+    let currentWifiMode = "ap";
+    const baudValues = ["115200", "921600", "2000000", "3000000", "5000000"];
+    const state = { host: localStorage.getItem("wirelessDebug.host") || "http://192.168.4.1" };
+
+    function host() {
+      return ($("host").value || state.host || "http://192.168.4.1").replace(/\/+$/, "");
+    }
+    function stamp() { return new Date().toLocaleTimeString(); }
+    function toast(text) {
+      const n = document.createElement("div");
+      n.textContent = text;
+      $("toast").appendChild(n);
+      setTimeout(() => n.remove(), 3200);
+    }
+    function log(line, obj) {
+      apiLog.textContent += "[" + stamp() + "] " + line;
+      if (obj !== undefined) apiLog.textContent += "\n" + JSON.stringify(obj, null, 2);
+      apiLog.textContent += "\n";
+      apiLog.scrollTop = apiLog.scrollHeight;
+    }
+    function showJson(el, data) {
+      el.textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+    }
+    function setLamp(id, on, color) {
+      const el = $(id);
+      el.className = "lens" + (on ? " on " + color : "");
+    }
+    function setHttp(ok, text) {
+      $("httpDot").className = "lens " + (ok ? "on green" : "on red");
+      $("httpState").textContent = text;
+      setLamp("lampPower", ok, ok ? "green" : "red");
+    }
+    function setWs(stateText) {
+      const open = stateText === "open";
+      $("wsDot").className = "lens " + (open ? "on blue" : stateText === "connecting" ? "on amber" : "on red");
+      $("wsState").textContent = "WS " + stateText;
+      $("wsJack").classList.toggle("connected", open);
+      setLamp("lampWs", open, "blue");
+      $("wsConnect").textContent = open ? "Plugged" : "Plug In";
+    }
+    function settleWsBridge(error) {
+      const waiters = wsBridgeWaiters;
+      wsBridgeWaiters = [];
+      waiters.forEach(({ resolve, reject }) => error ? reject(error) : resolve());
+    }
+    function noteWsBridgeText(text) {
+      if (text.startsWith("bridge open")) {
+        wsBridgeReady = true;
+        $("wsState").textContent = "WS bridged";
+        settleWsBridge();
+      } else if (text.startsWith("bridge error")) {
+        wsBridgeReady = false;
+        settleWsBridge(new Error(text));
+      } else if (text.startsWith("bridge closed")) {
+        wsBridgeReady = false;
+      }
+    }
+    function waitForWsBridge(timeoutMs = 5000) {
+      if (wsBridgeReady) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const waiter = {};
+        const timer = setTimeout(() => {
+          wsBridgeWaiters = wsBridgeWaiters.filter((item) => item !== waiter);
+          reject(new Error("WebSocket bridge did not open"));
+        }, timeoutMs);
+        waiter.resolve = () => { clearTimeout(timer); resolve(); };
+        waiter.reject = (err) => { clearTimeout(timer); reject(err); };
+        wsBridgeWaiters.push(waiter);
+      });
+    }
+    async function rpc(method, path, body) {
+      const payload = { host: host(), method, path, body };
+      try {
+        const resp = await fetch("/wireless-debug/rpc", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const text = await resp.text();
+        let data = text;
+        try { data = text ? JSON.parse(text) : {}; } catch {}
+        setHttp(resp.ok && !(data && data.ok === false), resp.ok ? "HTTP ok" : "HTTP " + resp.status);
+        log(method + " " + path, data);
+        if (!resp.ok || (data && data.ok === false && data.error)) throw new Error((data && data.error) || ("HTTP " + resp.status));
+        return data;
+      } catch (err) {
+        setHttp(false, "HTTP error");
+        log(method + " " + path + " ERROR " + err.message);
+        toast(err.message);
+        throw err;
+      }
+    }
+    const get = (path) => rpc("GET", path);
+    const post = (path, body) => rpc("POST", path, body || {});
+    const del = (path) => rpc("DELETE", path);
+
+    function kv(el, data) {
+      el.innerHTML = "";
+      Object.entries(data || {}).forEach(([k, v]) => {
+        const a = document.createElement("div");
+        const b = document.createElement("div");
+        a.textContent = k;
+        b.textContent = typeof v === "object" ? JSON.stringify(v) : String(v);
+        b.className = "mono";
+        el.append(a, b);
+      });
+    }
+    function renderTable(table, columns, rows, onUse) {
+      table.innerHTML = "";
+      const thead = document.createElement("thead");
+      const head = document.createElement("tr");
+      columns.forEach((col) => {
+        const th = document.createElement("th");
+        th.textContent = col.label;
+        head.appendChild(th);
+      });
+      if (onUse) head.appendChild(document.createElement("th"));
+      thead.appendChild(head);
+      table.appendChild(thead);
+      const tbody = document.createElement("tbody");
+      (rows || []).forEach((row) => {
+        const tr = document.createElement("tr");
+        columns.forEach((col) => {
+          const td = document.createElement("td");
+          const value = typeof col.value === "function" ? col.value(row) : row[col.key];
+          td.textContent = value === undefined || value === null ? "" : String(value);
+          td.className = "mono";
+          tr.appendChild(td);
+        });
+        if (onUse) {
+          const td = document.createElement("td");
+          const btn = document.createElement("button");
+          btn.className = "btn secondary";
+          btn.textContent = "Use";
+          btn.onclick = () => onUse(row);
+          td.appendChild(btn);
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+    }
+
+    function updateOledFromStatus(s) {
+      $("oledTitle").textContent = s.menu_title || "STATUS";
+      $("oledLines").textContent = [
+        "NET  " + (s.net || "-"),
+        "COMM " + (s.comm || "-") + "   UART " + (s.uart_baud || "-"),
+        "BLE  " + (s.ble_ready ? "READY" : "OFF") + "   WS " + (s.wifi_ws_client ? "ON" : "OFF"),
+        s.menu_message || s.display_status || "ready"
+      ].join("\n");
+      $("oledLeft").textContent = "NET " + (s.net || "-");
+      $("oledRight").textContent = "UART " + (s.uart_baud || "-");
+    }
+    function updateOledFromMenu(s) {
+      if (!s) return;
+      $("oledTitle").textContent = s.title || "MENU";
+      $("oledLines").textContent = Array.isArray(s.rows) ? s.rows.join("\n") : (s.message || JSON.stringify(s, null, 2));
+      $("oledLeft").textContent = s.path || "MENU";
+      $("oledRight").textContent = s.comm || "";
+    }
+    function setCommLever(mode) {
+      const normalized = String(mode || "auto").toLowerCase();
+      $("commLever").dataset.mode = ["auto", "wifi", "ble"].includes(normalized) ? normalized : "auto";
+      $("commReadout").textContent = $("commLever").dataset.mode.toUpperCase();
+      $("commState").textContent = "COMM " + $("commLever").dataset.mode.toUpperCase();
+    }
+    function setBaudValue(value) {
+      const text = String(value || "2000000");
+      $("baud").value = baudValues.includes(text) ? text : "2000000";
+      $("baudReadout").textContent = $("baud").value;
+      const index = baudValues.indexOf($("baud").value);
+      $("baudDial").style.transform = "rotate(" + (-120 + index * 60) + "deg)";
+    }
+
+    async function refreshStatus() {
+      const s = await get("/api/device/status");
+      kv($("statusKv"), {
+        net: s.net,
+        comm: s.comm,
+        baud: s.uart_baud,
+        ble: s.ble_ready,
+        ws_client: s.wifi_ws_client,
+        display: (s.display_backend || "-") + "/" + (s.display_status || "-"),
+        params: s.motor_params ? s.motor_params.count + "/" + s.motor_params.capacity : "-"
+      });
+      updateOledFromStatus(s);
+      setCommLever(s.comm);
+      setBaudValue(s.uart_baud);
+      setLamp("lampWifi", !!s.net, s.net === "STA" ? "blue" : "amber");
+      setLamp("lampBle", !!s.ble_ready, "violet");
+      setLamp("lampUart", !!s.uart_baud, "green");
+      setLamp("lampWs", !!s.wifi_ws_client || (ws && ws.readyState === WebSocket.OPEN), "blue");
+      $("wifiJack").classList.toggle("connected", !!s.net);
+      $("bleJack").classList.toggle("connected", !!s.ble_ready);
+      $("deviceProfile").textContent = (s.display_backend || "device") + " / " + (s.net || "-");
+      $("lastRefresh").textContent = "Last sync " + stamp();
+    }
+    async function refreshMenu() {
+      const s = await get("/api/menu/status");
+      updateOledFromMenu(s);
+    }
+    async function refreshHealth() {
+      const s = await get("/api/system/health");
+      kv($("healthKv"), {
+        uptime_ms: s.uptime_ms,
+        heap_free: s.heap?.free,
+        heap_min: s.heap?.min_free,
+        restart_reason: s.restart_reason
+      });
+    }
+    async function refreshWifi() {
+      const s = await get("/api/wifi/status");
+      kv($("wifiKv"), s);
+      currentWifiMode = String(s.mode || s.net || currentWifiMode || "ap").toLowerCase().includes("sta") ? "sta" : "ap";
+      $("wifiModeToggle").textContent = currentWifiMode.toUpperCase();
+      if (s.sta_ssid) $("staSsid").value = s.sta_ssid;
+    }
+    async function refreshBle() {
+      const s = await get("/api/ble/status");
+      kv($("bleKv"), s);
+      $("bleJack").classList.toggle("connected", !!(s.ready || s.started || s.enabled));
+    }
+    async function refreshCaps() {
+      const device = await get("/api/device/capabilities");
+      let diag = {};
+      let osc = {};
+      try { diag = await get("/api/motor/diag/capabilities"); } catch {}
+      try { osc = await get("/api/motor/osc/capabilities"); } catch {}
+      kv($("capsKv"), {
+        profile: device.profile,
+        domain: device.domain,
+        diag: diag.profile || "-",
+        osc: osc.profile || "-",
+        actions: Array.isArray(device.actions) ? device.actions.length : 0
+      });
+      const rows = []
+        .concat(Array.isArray(device.http) ? device.http : [])
+        .concat(Array.isArray(diag.http) ? diag.http : [])
+        .concat(Array.isArray(osc.http) ? osc.http : []);
+      renderTable($("capsTable"), [
+        { label: "Method", key: "method" },
+        { label: "Path", key: "path" },
+        { label: "Body", key: "body" }
+      ], rows, (row) => {
+        $("rawMethod").value = row.method || "GET";
+        $("rawPath").value = row.path || "/";
+        $("rawBody").value = row.body || "{}";
+      });
+    }
+    async function refreshParams() {
+      const s = await get("/api/motor/params");
+      kv($("paramsKv"), { ok: s.ok, count: s.count, capacity: s.capacity });
+      renderTable($("paramsTable"), [
+        { label: "Alias", key: "alias" },
+        { label: "Address", key: "address_hex" },
+        { label: "Type", key: "type" },
+        { label: "Decimals", key: "decimals" },
+        { label: "Unit", key: "unit" },
+        { label: "Range", value: (r) => (r.has_min ? r.min : "-") + ".." + (r.has_max ? r.max : "-") },
+        { label: "RO", value: (r) => r.read_only ? "yes" : "" }
+      ], Array.isArray(s.items) ? s.items : [], fillParam);
+    }
+    async function refreshExcel() {
+      const files = await get("/api/excel/list");
+      const list = $("excelList");
+      list.innerHTML = "";
+      (Array.isArray(files) ? files : []).forEach((name) => {
+        const row = document.createElement("div");
+        row.className = "file-row";
+        const span = document.createElement("span");
+        span.className = "mono";
+        span.textContent = name;
+        const btn = document.createElement("button");
+        btn.className = "btn danger";
+        btn.textContent = "Delete";
+        btn.onclick = async () => { await del("/api/excel/delete?name=" + encodeURIComponent(name)); refreshExcel(); };
+        row.append(span, btn);
+        list.appendChild(row);
+      });
+    }
+    async function refreshAll() {
+      await refreshStatus();
+      await Promise.allSettled([refreshMenu(), refreshHealth(), refreshWifi(), refreshBle(), refreshCaps(), refreshParams(), refreshExcel()]);
+    }
+
+    function hexToBytes(hex) {
+      const clean = hex.replace(/[^0-9a-fA-F]/g, "");
+      if (clean.length % 2) throw new Error("hex length must be even");
+      const out = new Uint8Array(clean.length / 2);
+      for (let i = 0; i < out.length; i++) out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+      return out;
+    }
+    function bytesToHex(buf) {
+      return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).toUpperCase().padStart(2, "0")).join(" ");
+    }
+    function drawFramebuffer(bytes, width = 128, height = 64) {
+      const canvas = $("framebuffer");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      const image = ctx.createImageData(width, height);
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const byte = bytes[Math.floor(y / 8) * width + x] || 0;
+          const on = (byte & (1 << (y & 7))) !== 0;
+          const p = (y * width + x) * 4;
+          image.data[p] = on ? 114 : 6;
+          image.data[p + 1] = on ? 242 : 17;
+          image.data[p + 2] = on ? 163 : 13;
+          image.data[p + 3] = 255;
+        }
+      }
+      ctx.putImageData(image, 0, 0);
+    }
+
+    function diagBody() {
+      return {
+        slave: Number($("diagSlave").value || 255),
+        address: $("diagAddr").value,
+        count: Number($("diagCount").value || 1),
+        value: Number($("diagValue").value || 0),
+        type: $("diagType").value,
+        decimals: Number($("diagDecimals").value || 0),
+        send: $("diagSend").checked
+      };
+    }
+    function oscBaseBody() {
+      return { slave: Number($("oscSlave").value || 255), send: $("oscSend").checked };
+    }
+    function oscQueryBody() {
+      const body = oscBaseBody();
+      const q = $("oscQuery").value;
+      if (q === "custom") body.address = $("oscQueryAddr").value;
+      else body.item = q;
+      return body;
+    }
+    function oscChannelBody() {
+      return { ...oscBaseBody(), channel: Number($("oscChannel").value || 0), paramType: $("oscParamType").value, address: $("oscParamAddr").value };
+    }
+    function oscRateBody() {
+      return { ...oscBaseBody(), bytesPerSec: Number($("oscRate").value || 0) };
+    }
+    function paramBody() {
+      const body = {
+        alias: $("paramAlias").value,
+        address: $("paramAddress").value,
+        unit: $("paramUnit").value,
+        type: $("paramType").value,
+        decimals: Number($("paramDecimals").value || 0),
+        readOnly: $("paramReadonly").checked
+      };
+      if ($("paramMin").value !== "") body.min = Number($("paramMin").value);
+      if ($("paramMax").value !== "") body.max = Number($("paramMax").value);
+      return body;
+    }
+    function paramRWBody() {
+      return { alias: $("paramAlias").value, value: Number($("paramValue").value || 0), send: $("paramSend").checked };
+    }
+    function fillParam(row) {
+      $("paramAlias").value = row.alias || "";
+      $("paramAddress").value = row.address_hex || row.address || "";
+      $("paramUnit").value = row.unit || "";
+      $("paramType").value = row.type || "u16";
+      $("paramDecimals").value = row.decimals ?? 0;
+      $("paramReadonly").checked = !!row.read_only;
+      $("paramMin").value = row.has_min ? row.min : "";
+      $("paramMax").value = row.has_max ? row.max : "";
+    }
+
+    const oscMagic = new Uint8Array([255, 119, 170, 85]);
+    const oscFloatTypes = new Set([3, 7]);
+    const oscColors = ["#33d17a", "#46a5ff", "#f5b84b", "#ef5b4f", "#8b5cf6", "#06b6d4"];
+    let oscBuf = new Uint8Array(0);
+    let oscChannels = [];
+    let oscSeries = [];
+    let oscFrameCount = 0;
+    let oscSampleCount = 0;
+    let oscInjectTimer = null;
+    let oscInjectInFlight = false;
+    function crc16Modbus(bytes) {
+      let crc = 0xFFFF;
+      for (const b of bytes) {
+        crc ^= b;
+        for (let i = 0; i < 8; i++) crc = (crc & 1) ? ((crc >>> 1) ^ 0xA001) : (crc >>> 1);
+      }
+      return crc & 0xFFFF;
+    }
+    function oscHasMagic(bytes, pos) {
+      if (pos + oscMagic.length > bytes.length) return false;
+      for (let i = 0; i < oscMagic.length; i++) if (bytes[pos + i] !== oscMagic[i]) return false;
+      return true;
+    }
+    function parseOscPlotConfig() {
+      const lines = $("oscPlotChannels").value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      const source = lines.length ? lines : ["CH0,0,2"];
+      oscChannels = source.map((line, index) => {
+        const parts = line.split(/[,\s]+/).filter(Boolean);
+        return { label: parts[0] || "CH" + index, paramType: Number(parts[1] || 0), byteWidth: [2, 4, 8].includes(Number(parts[2] || 2)) ? Number(parts[2] || 2) : 2 };
+      });
+      oscSeries = oscChannels.map(() => []);
+      oscFrameCount = 0;
+      oscSampleCount = 0;
+      oscBuf = new Uint8Array(0);
+      drawOscPlot();
+      updateOscInfo();
+    }
+    function appendOscValues(values) {
+      const maxSamples = Math.max(16, Number($("oscMaxSamples").value || 600));
+      values.forEach((value, index) => {
+        if (!oscSeries[index]) oscSeries[index] = [];
+        oscSeries[index].push(value);
+        if (oscSeries[index].length > maxSamples) oscSeries[index].splice(0, oscSeries[index].length - maxSamples);
+      });
+      oscSampleCount++;
+    }
+    function readOscValue(view, offset, cfg) {
+      if (cfg.byteWidth === 2) return view.getInt16(offset, false);
+      if (cfg.byteWidth === 4) return oscFloatTypes.has(cfg.paramType) ? view.getFloat32(offset, false) : view.getInt32(offset, false);
+      return view.getFloat64(offset, false);
+    }
+    function parseOscFrame(frame) {
+      if (frame.length < 10 || !oscHasMagic(frame, 0) || !oscHasMagic(frame, frame.length - 4)) return false;
+      const payloadEnd = frame.length - 6;
+      const payload = frame.slice(4, payloadEnd);
+      const crc = crc16Modbus(payload);
+      if (frame[payloadEnd] !== (crc & 0xFF) || frame[payloadEnd + 1] !== (crc >> 8)) return false;
+      const stride = oscChannels.reduce((sum, ch) => sum + ch.byteWidth, 0);
+      if (!stride) return false;
+      const samples = Math.floor(payload.length / stride);
+      const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+      for (let sample = 0; sample < samples; sample++) {
+        let offset = sample * stride;
+        const values = [];
+        oscChannels.forEach((ch, index) => {
+          values[index] = readOscValue(view, offset, ch);
+          offset += ch.byteWidth;
+        });
+        appendOscValues(values);
+      }
+      oscFrameCount++;
+      drawOscPlot();
+      updateOscInfo();
+      return true;
+    }
+    function feedOscBytes(chunk) {
+      const next = new Uint8Array(oscBuf.length + chunk.length);
+      next.set(oscBuf);
+      next.set(chunk, oscBuf.length);
+      oscBuf = next;
+      const frameLen = Math.max(10, Number($("oscFrameLen").value || 130));
+      while (oscBuf.length >= 4) {
+        let magicAt = -1;
+        for (let i = 0; i <= oscBuf.length - 4; i++) {
+          if (oscHasMagic(oscBuf, i)) { magicAt = i; break; }
+        }
+        if (magicAt < 0) { oscBuf = new Uint8Array(0); return; }
+        if (magicAt > 0) oscBuf = oscBuf.slice(magicAt);
+        if (oscBuf.length < frameLen) return;
+        if (!oscHasMagic(oscBuf, frameLen - 4)) { oscBuf = oscBuf.slice(1); continue; }
+        parseOscFrame(oscBuf.slice(0, frameLen));
+        oscBuf = oscBuf.slice(frameLen);
+      }
+    }
+    function updateOscInfo() {
+      const last = {};
+      oscChannels.forEach((ch, index) => {
+        const values = oscSeries[index] || [];
+        const value = values.length ? values[values.length - 1] : "-";
+        last[ch.label] = typeof value === "number" ? Number(value.toFixed(5)) : value;
+      });
+      kv($("oscPlotKv"), { frames: oscFrameCount, samples: oscSampleCount, channels: oscChannels.length, last });
+    }
+    function drawOscPlot() {
+      const canvas = $("oscCanvas");
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const width = Math.max(360, Math.floor((rect.width || 900) * dpr));
+      const height = Math.max(180, Math.floor(260 * dpr));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#020617";
+      ctx.fillRect(0, 0, width, height);
+      ctx.strokeStyle = "#173126";
+      ctx.lineWidth = 1;
+      for (let i = 1; i < 6; i++) {
+        const y = Math.round((height * i) / 6);
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+      }
+      for (let i = 1; i < 10; i++) {
+        const x = Math.round((width * i) / 10);
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+      }
+      const all = oscSeries.flat().filter(Number.isFinite);
+      const min = all.length ? Math.min(...all) : -1;
+      const max = all.length ? Math.max(...all) : 1;
+      const span = max === min ? 1 : max - min;
+      oscSeries.forEach((values, index) => {
+        if (!values.length) return;
+        ctx.strokeStyle = oscColors[index % oscColors.length];
+        ctx.lineWidth = 1.8 * dpr;
+        ctx.beginPath();
+        values.forEach((value, i) => {
+          const x = values.length <= 1 ? 0 : (i / (values.length - 1)) * (width - 1);
+          const y = height - ((value - min) / span) * (height - 1);
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      });
+    }
+    async function injectOscSerialFrames() {
+      if (!oscChannels.length) parseOscPlotConfig();
+      const body = {
+        port: $("serialPort").value || "COM4",
+        baud: Number($("serialBaud").value || $("baud").value || 2000000),
+        frameLen: Number($("oscFrameLen").value || 130),
+        frames: Number($("serialFrames").value || 2),
+        channels: oscChannels
+      };
+      const resp = await fetch("/wireless-debug/serial-inject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const data = await resp.json().catch(() => ({ ok: resp.ok, error: "invalid serial inject response" }));
+      log("SERIAL INJECT " + body.port, data);
+      if (!resp.ok || data.ok === false) throw new Error(data.error || ("serial inject HTTP " + resp.status));
+      $("oscStatus").textContent = "serial " + data.frames + " frame(s)";
+      return data;
+    }
+    async function runOscSerialInject() {
+      if (oscInjectInFlight) return null;
+      oscInjectInFlight = true;
+      try {
+        return await injectOscSerialFrames();
+      } finally {
+        oscInjectInFlight = false;
+      }
+    }
+    async function setOscSim(enabled) {
+      if (enabled) {
+        if (oscInjectTimer) return;
+        if (!oscChannels.length) parseOscPlotConfig();
+        $("oscSimToggle").textContent = "Stop Inject";
+        $("oscStatus").textContent = "serial injecting";
+        try {
+          if (!ws || ws.readyState !== WebSocket.OPEN) {
+            $("wsConnect").click();
+          }
+          await waitForWsBridge();
+        } catch (err) {
+          toast(err.message);
+          $("oscStatus").textContent = "ws bridge error";
+          await setOscSim(false);
+          return;
+        }
+        post("/api/comm/mode", { mode: "wifi" }).then(refreshStatus).catch(() => {});
+        runOscSerialInject().catch((err) => {
+          toast(err.message);
+          $("oscStatus").textContent = "serial error";
+        });
+        const interval = Math.max(80, Number($("serialInterval").value || 300));
+        oscInjectTimer = setInterval(() => {
+          runOscSerialInject().catch((err) => {
+            toast(err.message);
+            setOscSim(false);
+          });
+        }, interval);
+      } else {
+        if (oscInjectTimer) clearInterval(oscInjectTimer);
+        oscInjectTimer = null;
+        $("oscSimToggle").textContent = "Serial Inject";
+        $("oscStatus").textContent = "idle";
+      }
+    }
+
+    async function sendRaw() {
+      const method = $("rawMethod").value;
+      const path = $("rawPath").value || "/";
+      const body = method === "GET" ? undefined : JSON.parse($("rawBody").value || "{}");
+      const data = await rpc(method, path, body);
+      showJson($("rawOut"), data);
+    }
+
+    $("host").value = state.host;
+    $("saveHost").onclick = () => {
+      state.host = host();
+      localStorage.setItem("wirelessDebug.host", state.host);
+      toast("Host saved");
+    };
+    $("refreshAll").onclick = refreshAll;
+    document.querySelectorAll("[data-refresh]").forEach((btn) => {
+      btn.onclick = () => ({
+        status: refreshStatus,
+        wifi: refreshWifi,
+        caps: refreshCaps,
+        params: refreshParams,
+        excel: refreshExcel
+      })[btn.dataset.refresh]();
+    });
+    document.querySelectorAll("#commLever button").forEach((btn) => {
+      btn.onclick = async () => {
+        setCommLever(btn.dataset.mode);
+        await post("/api/comm/mode", { mode: btn.dataset.mode });
+        refreshStatus();
+      };
+    });
+    $("wifiModeToggle").onclick = async () => {
+      currentWifiMode = currentWifiMode === "ap" ? "sta" : "ap";
+      $("wifiModeToggle").textContent = currentWifiMode.toUpperCase();
+      await post("/api/wifi/mode", { mode: currentWifiMode });
+      refreshWifi();
+    };
+    $("bleStart").onclick = () => post("/api/ble/start", {}).then(refreshBle);
+    document.querySelectorAll("[data-key]").forEach((btn) => {
+      btn.onclick = () => {
+        btn.animate([{ transform: "translateY(2px)" }, { transform: "translateY(0)" }], { duration: 120 });
+        post("/api/input/key", { key: btn.dataset.key }).then(refreshMenu);
+      };
+    });
+    function cycleBaud(direction) {
+      const current = baudValues.indexOf($("baud").value);
+      const next = (current + direction + baudValues.length) % baudValues.length;
+      setBaudValue(baudValues[next]);
+    }
+    $("baudPrev").onclick = () => cycleBaud(-1);
+    $("baudNext").onclick = () => cycleBaud(1);
+    $("baudDial").onclick = () => cycleBaud(1);
+    $("baud").onchange = () => setBaudValue($("baud").value);
+    $("setBaud").onclick = () => post("/api/uart/baud", { baud: Number($("baud").value) }).then(refreshStatus);
+    $("uartSendText").onclick = () => post("/api/uart/tx", { text: $("uartText").value }).then((r) => toast("UART text sent"));
+    $("uartSendHex").onclick = () => post("/api/uart/tx", { hex: $("uartHex").value }).then((r) => toast("UART hex sent"));
+    $("bleSendText").onclick = () => post("/api/ble/tx", { text: $("bleText").value }).then((r) => toast("BLE text sent"));
+    $("bleSendHex").onclick = () => post("/api/ble/tx", { hex: $("bleHex").value }).then((r) => toast("BLE hex sent"));
+    $("saveSta").onclick = () => post("/api/wifi/sta", { ssid: $("staSsid").value, password: $("staPass").value }).then(refreshWifi);
+    $("clearSta").onclick = () => del("/api/wifi/sta").then(refreshWifi);
+    $("setDisplay").onclick = () => {
+      const body = {
+        title: $("dispTitle").value,
+        line1: $("disp1").value,
+        line2: $("disp2").value,
+        line3: $("disp3").value,
+        line4: $("disp4").value,
+        footer: $("dispFooter").value
+      };
+      $("oledTitle").textContent = body.title || "WEB";
+      $("oledLines").textContent = [body.line1, body.line2, body.line3, body.line4].filter(Boolean).join("\n");
+      $("oledLeft").textContent = "manual";
+      $("oledRight").textContent = body.footer || "";
+      post("/api/display/text", body);
+    };
+    $("clearDisplay").onclick = () => del("/api/display/text").then(refreshStatus);
+    $("setDisplayScroll").onclick = () => post("/api/display/scroll", { title: $("dispTitle").value, text: $("dispScroll").value, footer: $("dispFooter").value });
+    $("readFramebuffer").onclick = async () => {
+      const resp = await fetch("/wireless-debug/framebuffer?host=" + encodeURIComponent(host()));
+      const data = new Uint8Array(await resp.arrayBuffer());
+      setHttp(resp.ok, resp.ok ? "HTTP ok" : "HTTP " + resp.status);
+      drawFramebuffer(data);
+      log("GET /api/display/framebuffer", { ok: resp.ok, bytes: data.length });
+    };
+    $("wsConnect").onclick = () => {
+      if (ws && ws.readyState === WebSocket.OPEN) return;
+      const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      const url = proto + "//" + location.host + "/wireless-debug/ws?host=" + encodeURIComponent(host());
+      setWs("connecting");
+      wsBridgeReady = false;
+      ws = new WebSocket(url);
+      ws.binaryType = "arraybuffer";
+      ws.onopen = () => {
+        setWs("open");
+        wsLog.textContent += "open " + url + "\n";
+        ws.send(new Uint8Array(0));
+      };
+      ws.onclose = () => {
+        wsBridgeReady = false;
+        settleWsBridge(new Error("WebSocket closed"));
+        setWs("closed");
+        wsLog.textContent += "closed\n";
+      };
+      ws.onerror = () => {
+        wsBridgeReady = false;
+        settleWsBridge(new Error("WebSocket error"));
+        setWs("error");
+        wsLog.textContent += "error\n";
+      };
+      ws.onmessage = (ev) => {
+        if (ev.data instanceof ArrayBuffer) {
+          const bytes = new Uint8Array(ev.data);
+          const text = new TextDecoder().decode(bytes);
+          if (text.startsWith("bridge ")) {
+            wsLog.textContent += text + "\n";
+            noteWsBridgeText(text);
+            wsLog.scrollTop = wsLog.scrollHeight;
+            return;
+          }
+          wsLog.textContent += "RX " + bytesToHex(bytes) + "\n";
+          feedOscBytes(bytes);
+        } else {
+          wsLog.textContent += "RX " + ev.data + "\n";
+          noteWsBridgeText(String(ev.data));
+        }
+        wsLog.scrollTop = wsLog.scrollHeight;
+      };
+    };
+    $("wsClose").onclick = () => { if (ws) ws.close(); };
+    $("wsSendHex").onclick = () => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return toast("WebSocket is not open");
+      const data = hexToBytes($("uartHex").value);
+      ws.send(data);
+      wsLog.textContent += "TX " + bytesToHex(data) + "\n";
+      wsLog.scrollTop = wsLog.scrollHeight;
+    };
+    $("wsClear").onclick = () => { wsLog.textContent = ""; };
+    $("diagRead").onclick = () => post("/api/motor/diag/read", diagBody()).then((r) => showJson($("diagOut"), r));
+    $("diagWrite").onclick = () => post("/api/motor/diag/write", diagBody()).then((r) => showJson($("diagOut"), r));
+    $("oscQueryBtn").onclick = () => post("/api/motor/osc/query", oscQueryBody()).then((r) => showJson($("oscOut"), r));
+    $("oscChannelBtn").onclick = () => post("/api/motor/osc/channel", oscChannelBody()).then((r) => showJson($("oscOut"), r));
+    $("oscStart").onclick = () => post("/api/motor/osc/start", oscBaseBody()).then((r) => { $("oscStatus").textContent = "running"; showJson($("oscOut"), r); });
+    $("oscStop").onclick = () => post("/api/motor/osc/stop", oscBaseBody()).then((r) => { $("oscStatus").textContent = "stopped"; showJson($("oscOut"), r); });
+    $("oscHeartbeat").onclick = () => post("/api/motor/osc/heartbeat", oscBaseBody()).then((r) => showJson($("oscOut"), r));
+    $("oscRateBtn").onclick = () => post("/api/motor/osc/rate", oscRateBody()).then((r) => showJson($("oscOut"), r));
+    $("oscApplyPlot").onclick = parseOscPlotConfig;
+    $("oscClearPlot").onclick = () => { oscSeries = oscChannels.map(() => []); oscFrameCount = 0; oscSampleCount = 0; oscBuf = new Uint8Array(0); drawOscPlot(); updateOscInfo(); };
+    $("oscSimToggle").onclick = () => setOscSim(!oscInjectTimer);
+    $("paramRegister").onclick = () => post("/api/motor/params", paramBody()).then((r) => { showJson($("paramOut"), r); return refreshParams(); });
+    $("paramRead").onclick = () => post("/api/motor/params/read", { alias: $("paramAlias").value, send: $("paramSend").checked }).then((r) => showJson($("paramOut"), r));
+    $("paramWrite").onclick = () => post("/api/motor/params/write", paramRWBody()).then((r) => showJson($("paramOut"), r));
+    $("paramClear").onclick = () => del("/api/motor/params").then(refreshParams);
+    $("uploadExcel").onclick = async () => {
+      const file = $("excelFile").files[0];
+      if (!file) return toast("No file selected");
+      const fd = new FormData();
+      fd.append("file", file, file.name);
+      fd.append("host", host());
+      const resp = await fetch("/wireless-debug/excel/upload", { method: "POST", body: fd });
+      const data = await resp.json().catch(() => ({ ok: resp.ok }));
+      setHttp(resp.ok, resp.ok ? "HTTP ok" : "HTTP " + resp.status);
+      log("POST /api/excel/upload", data);
+      refreshExcel();
+    };
+    $("rawSend").onclick = sendRaw;
+    $("rawFillStatus").onclick = () => { $("rawMethod").value = "GET"; $("rawPath").value = "/api/device/status"; $("rawBody").value = "{}"; };
+    $("rawFillParam").onclick = () => { $("rawMethod").value = "POST"; $("rawPath").value = "/api/motor/params/write"; $("rawBody").value = JSON.stringify(paramRWBody(), null, 2); };
+    $("rawFillDiag").onclick = () => { $("rawMethod").value = "POST"; $("rawPath").value = "/api/motor/diag/read"; $("rawBody").value = JSON.stringify(diagBody(), null, 2); };
+    $("clearLog").onclick = () => { apiLog.textContent = ""; };
+
+    setBaudValue("2000000");
+    setWs("closed");
+    parseOscPlotConfig();
+    refreshAll();
+    setInterval(refreshStatus, 5000);
+  </script>
+</body>
+</html>

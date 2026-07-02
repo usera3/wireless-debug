@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ESP32 OLED Keys</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        background: #101820;
+        color: #eef5f7;
+        font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        width: min(360px, calc(100vw - 32px));
+        padding: 18px;
+      }
+
+      h1 {
+        margin: 0 0 4px;
+        font-size: 20px;
+        letter-spacing: 0;
+      }
+
+      .sub {
+        margin: 0 0 16px;
+        color: #9fb2bd;
+      }
+
+      .pad {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 14px;
+      }
+
+      button {
+        min-height: 58px;
+        border: 1px solid #3d5563;
+        border-radius: 8px;
+        background: #1c2a33;
+        color: #f8fbfc;
+        font: inherit;
+        font-size: 16px;
+        font-weight: 700;
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+
+      button:active {
+        transform: translateY(1px);
+        background: #263944;
+      }
+
+      .next {
+        background: #28445a;
+        border-color: #4f7897;
+      }
+
+      .ok {
+        background: #176b5f;
+        border-color: #2c9b8d;
+      }
+
+      .back {
+        background: #59343c;
+        border-color: #8d5360;
+      }
+      .status {
+        min-height: 44px;
+        padding: 10px 12px;
+        border: 1px solid #324956;
+        border-radius: 8px;
+        background: #16232b;
+        color: #c8d9df;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        word-break: break-word;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>OLED 虚拟按键</h1>
+      <p class="sub">三键菜单：循环选择、确认、返回。</p>
+
+      <section class="pad" aria-label="virtual keys">
+        <button class="next" data-key="next">Next</button>
+        <button class="ok" data-key="ok">OK</button>
+        <button class="back" data-key="back">Back</button>
+      </section>
+
+      <div id="status" class="status">ready</div>
+    </main>
+
+    <script>
+      (() => {
+        const statusEl = document.getElementById("status");
+        const keys = new Set(["next", "ok", "back"]);
+        let sending = false;
+        let queuedKey = null;
+
+        async function redirectIfStaNeedsConfig(action) {
+          if (action !== "net_sta") return;
+          try {
+            const resp = await fetch("/api/wifi/status", { cache: "no-store" });
+            const wifi = await resp.json();
+            if (!wifi.sta_configured) {
+              statusEl.textContent = "STA needs WiFi config...";
+              window.location.href = "/wifi.html?need=sta";
+            }
+          } catch (err) {
+            statusEl.textContent = `wifi status failed: ${err.message}`;
+          }
+        }
+
+        async function press(key) {
+          if (!keys.has(key)) return;
+          if (sending) {
+            queuedKey = key;
+            return;
+          }
+          sending = true;
+          statusEl.textContent = `sending ${key}...`;
+          try {
+            const resp = await fetch("/api/input/key", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ key }),
+              cache: "no-store",
+            });
+            const data = await resp.json();
+            statusEl.textContent = data.ok
+              ? `key=${data.key} action=${data.action}`
+              : `failed: ${data.msg || "unknown"}`;
+            if (data.ok) {
+              await redirectIfStaNeedsConfig(data.action);
+            }
+          } catch (err) {
+            statusEl.textContent = `offline: ${err.message}`;
+          } finally {
+            sending = false;
+            if (queuedKey) {
+              const nextKey = queuedKey;
+              queuedKey = null;
+              setTimeout(() => press(nextKey), 20);
+            }
+          }
+        }
+
+        document.querySelectorAll("[data-key]").forEach((button) => {
+          button.addEventListener("click", () => press(button.dataset.key));
+        });
+
+        window.addEventListener("keydown", (event) => {
+          const map = {
+            ArrowUp: "next",
+            ArrowDown: "next",
+            ArrowLeft: "next",
+            ArrowRight: "next",
+            n: "next",
+            N: "next",
+            Enter: "ok",
+            Escape: "back",
+            Backspace: "back",
+          };
+          const key = map[event.key];
+          if (key) {
+            event.preventDefault();
+            press(key);
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>
