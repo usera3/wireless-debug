@@ -233,10 +233,17 @@ static uint8_t scroll_top_for(uint8_t selected, uint8_t item_count)
 static void make_row(char *dst, size_t dst_size, bool selected,
                      const char *label, const char *value)
 {
-    snprintf(dst, dst_size, "%c%-12s %s",
+    if (value == NULL || value[0] == '\0') {
+        snprintf(dst, dst_size, "%c%s",
+                 selected ? '>' : ' ',
+                 label == NULL ? "" : label);
+        return;
+    }
+
+    snprintf(dst, dst_size, "%c%-8s %s",
              selected ? '>' : ' ',
              label == NULL ? "" : label,
-             value == NULL ? "" : value);
+             value);
 }
 
 static void root_item_label(uint8_t index, char *label, size_t label_size,
