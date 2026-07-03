@@ -771,7 +771,7 @@
             <label class="field">Bytes/sec<input id="oscRate" value="2000000"></label>
             <label class="field">Frame Len<input id="oscFrameLen" value="130"></label>
             <label class="field">Max Samples<input id="oscMaxSamples" value="600"></label>
-            <label class="field">Serial Port<input id="serialPort" value="COM4"></label>
+            <label class="field">Serial Port<input id="serialPort" value="/dev/ttyS4"></label>
             <label class="field">Serial Baud<input id="serialBaud" value="2000000"></label>
             <label class="field">Frames/Tick<input id="serialFrames" value="2"></label>
             <label class="field">Inject ms<input id="serialInterval" value="300"></label>
@@ -1402,7 +1402,7 @@
     async function injectOscSerialFrames() {
       if (!oscChannels.length) parseOscPlotConfig();
       const body = {
-        port: $("serialPort").value || "COM4",
+        port: $("serialPort").value || "/dev/ttyS4",
         baud: Number($("serialBaud").value || $("baud").value || 2000000),
         frameLen: Number($("oscFrameLen").value || 130),
         frames: Number($("serialFrames").value || 2),
