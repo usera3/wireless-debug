@@ -31,7 +31,13 @@ tools\node_red\docker\start-node-red.cmd
 ```
 
 The script starts the Docker daemon if needed and then runs the compose service. A Windows
-scheduled task can call the wrapper on login:
+Startup folder shortcut can call the wrapper on login:
+
+```text
+%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\WirelessDebugNodeRed.cmd
+```
+
+A Windows scheduled task can also call the wrapper on login:
 
 ```cmd
 schtasks /create /tn WirelessDebugNodeRed /sc onlogon /rl LIMITED /f /tr "D:\Users\sunqi39\Desktop\wireless_debug-main\tools\node_red\docker\start-node-red.cmd"
