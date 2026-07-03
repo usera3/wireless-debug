@@ -388,7 +388,7 @@ static esp_err_t web_api_wifi_connect_sta(const char *ssid, const char *password
                                           bool save_on_success, void *ctx)
 {
     (void)ctx;
-    return wifi_manager_connect_sta(ssid, password, save_on_success);
+    return wifi_manager_schedule_connect_sta(ssid, password, save_on_success, 400);
 }
 
 static void web_api_request_wifi_net_mode(system_net_mode_t mode, void *ctx)

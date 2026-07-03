@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "esp_event.h"
 #include "esp_log.h"
@@ -487,10 +488,15 @@ esp_err_t wifi_manager_scan(wifi_manager_scan_ap_t *out, size_t capacity,
     if (fetch_count > WIFI_MANAGER_SCAN_MAX_APS * 2U) {
         fetch_count = WIFI_MANAGER_SCAN_MAX_APS * 2U;
     }
-    wifi_ap_record_t records[WIFI_MANAGER_SCAN_MAX_APS * 2U];
-    memset(records, 0, sizeof(records));
+    size_t record_capacity = fetch_count > 0 ? fetch_count : 1U;
+    wifi_ap_record_t *records = calloc(record_capacity, sizeof(*records));
+    if (records == NULL) {
+        xSemaphoreGive(s_mode_mutex);
+        return ESP_ERR_NO_MEM;
+    }
     ret = esp_wifi_scan_get_ap_records(&fetch_count, records);
     if (ret != ESP_OK) {
+        free(records);
         xSemaphoreGive(s_mode_mutex);
         return ret;
     }
@@ -520,6 +526,7 @@ esp_err_t wifi_manager_scan(wifi_manager_scan_ap_t *out, size_t capacity,
     }
 
     *out_count = written;
+    free(records);
     xSemaphoreGive(s_mode_mutex);
     return ESP_OK;
 }
@@ -571,6 +578,65 @@ esp_err_t wifi_manager_connect_sta(const char *ssid, const char *password,
 
     xSemaphoreGive(s_mode_mutex);
     return ret;
+}
+
+typedef struct {
+    char ssid[33];
+    char password[65];
+    bool save_on_success;
+    uint32_t delay_ms;
+} wifi_manager_connect_task_arg_t;
+
+static void wifi_manager_connect_task(void *arg)
+{
+    wifi_manager_connect_task_arg_t *task_arg = (wifi_manager_connect_task_arg_t *)arg;
+    if (task_arg == NULL) {
+        vTaskDelete(NULL);
+        return;
+    }
+
+    if (task_arg->delay_ms > 0) {
+        vTaskDelay(pdMS_TO_TICKS(task_arg->delay_ms));
+    }
+    esp_err_t ret = wifi_manager_connect_sta(task_arg->ssid,
+                                             task_arg->password,
+                                             task_arg->save_on_success);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Scheduled STA connect failed: %s", esp_err_to_name(ret));
+    }
+    free(task_arg);
+    vTaskDelete(NULL);
+}
+
+esp_err_t wifi_manager_schedule_connect_sta(const char *ssid, const char *password,
+                                            bool save_on_success,
+                                            uint32_t delay_ms)
+{
+    if (ssid == NULL || ssid[0] == '\0' || strlen(ssid) > 32) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (password == NULL) {
+        password = "";
+    }
+    if (strlen(password) > 64) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    wifi_manager_connect_task_arg_t *arg = calloc(1, sizeof(*arg));
+    if (arg == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    snprintf(arg->ssid, sizeof(arg->ssid), "%s", ssid);
+    snprintf(arg->password, sizeof(arg->password), "%s", password);
+    arg->save_on_success = save_on_success;
+    arg->delay_ms = delay_ms;
+
+    if (xTaskCreate(wifi_manager_connect_task, "wifi_sta_conn", 4096,
+                    arg, 4, NULL) != pdPASS) {
+        free(arg);
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
 }
 
 esp_err_t wifi_manager_quick_connect(const char *ssid)

@@ -181,6 +181,10 @@
           return resp.json();
         }
 
+        function delay(ms) {
+          return new Promise((resolve) => setTimeout(resolve, ms));
+        }
+
         function stopPolling() {
           if (pollTimer) {
             clearInterval(pollTimer);
@@ -228,21 +232,36 @@
         }
 
         async function scanWifi() {
+          stopPolling();
           setBusy(true);
           setStatus("scanning...");
-          try {
-            const data = await jsonFetch("/api/wifi/scan");
-            if (!data.ok) {
-              setStatus(`scan failed: ${data.msg || "unknown"}`);
-              return;
+          let data = null;
+          let lastError = "";
+
+          for (let left = 18; left > 0; left -= 1) {
+            try {
+              data = await jsonFetch(left === 18 ? "/api/wifi/scan?refresh=1" : "/api/wifi/scan");
+              if (!data.ok) {
+                setStatus(`scan failed: ${data.msg || "unknown"}`);
+                setBusy(false);
+                return;
+              }
+              if (data.state === "done") {
+                renderAps(data.aps || []);
+                setStatus(`found: ${(data.aps || []).length}`);
+                setBusy(false);
+                return;
+              }
+              setStatus("scanning...");
+            } catch (err) {
+              lastError = err.message;
+              setStatus("scanning... reconnecting");
             }
-            renderAps(data.aps || []);
-            setStatus(`found: ${(data.aps || []).length}`);
-          } catch (err) {
-            setStatus(`scan failed: ${err.message}`);
-          } finally {
-            setBusy(false);
+            await delay(1000);
           }
+
+          setStatus(`scan timeout${lastError ? `: ${lastError}` : ""}`);
+          setBusy(false);
         }
 
         function pollConnect(targetSsid) {

@@ -10,11 +10,27 @@
 #include "esp_heap_caps.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "http_utils.h"
 #include "motor_diag.h"
 #include "uart_transport.h"
 
 static web_api_context_t s_ctx;
+
+typedef enum {
+    WEB_WIFI_SCAN_IDLE,
+    WEB_WIFI_SCAN_SCANNING,
+    WEB_WIFI_SCAN_DONE,
+    WEB_WIFI_SCAN_FAIL,
+} web_wifi_scan_state_t;
+
+static SemaphoreHandle_t s_wifi_scan_mutex;
+static web_wifi_scan_state_t s_wifi_scan_state = WEB_WIFI_SCAN_IDLE;
+static wifi_manager_scan_ap_t s_wifi_scan_aps[WIFI_MANAGER_SCAN_MAX_APS];
+static size_t s_wifi_scan_count;
+static esp_err_t s_wifi_scan_error = ESP_OK;
 
 static const web_api_context_t *api_ctx(void)
 {
@@ -600,21 +616,161 @@ static esp_err_t wifi_sta_options_handler(httpd_req_t *req)
     return http_send_options(req, "POST, DELETE, OPTIONS", "Content-Type");
 }
 
-static esp_err_t wifi_scan_handler(httpd_req_t *req)
+static const char *wifi_scan_state_name(web_wifi_scan_state_t state)
 {
+    switch (state) {
+    case WEB_WIFI_SCAN_SCANNING:
+        return "scanning";
+    case WEB_WIFI_SCAN_DONE:
+        return "done";
+    case WEB_WIFI_SCAN_FAIL:
+        return "fail";
+    case WEB_WIFI_SCAN_IDLE:
+    default:
+        return "idle";
+    }
+}
+
+static void wifi_scan_task(void *arg)
+{
+    (void)arg;
     wifi_manager_scan_ap_t aps[WIFI_MANAGER_SCAN_MAX_APS];
     size_t count = 0;
 
-    http_prepare_json(req);
+    vTaskDelay(pdMS_TO_TICKS(300));
     esp_err_t err = wifi_scan_aps(aps, WIFI_MANAGER_SCAN_MAX_APS, &count);
-    if (err != ESP_OK) {
-        char resp[96];
-        snprintf(resp, sizeof(resp), "{\"ok\":false,\"msg\":\"scan failed:%d\"}", err);
+
+    if (s_wifi_scan_mutex != NULL &&
+        xSemaphoreTake(s_wifi_scan_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        memset(s_wifi_scan_aps, 0, sizeof(s_wifi_scan_aps));
+        if (err == ESP_OK) {
+            if (count > WIFI_MANAGER_SCAN_MAX_APS) {
+                count = WIFI_MANAGER_SCAN_MAX_APS;
+            }
+            memcpy(s_wifi_scan_aps, aps, sizeof(aps[0]) * count);
+            s_wifi_scan_count = count;
+            s_wifi_scan_error = ESP_OK;
+            s_wifi_scan_state = WEB_WIFI_SCAN_DONE;
+        } else {
+            s_wifi_scan_count = 0;
+            s_wifi_scan_error = err;
+            s_wifi_scan_state = WEB_WIFI_SCAN_FAIL;
+        }
+        xSemaphoreGive(s_wifi_scan_mutex);
+    }
+
+    vTaskDelete(NULL);
+}
+
+static esp_err_t wifi_scan_start_async(bool force)
+{
+    bool should_start = false;
+
+    if (s_wifi_scan_mutex == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (xSemaphoreTake(s_wifi_scan_mutex, pdMS_TO_TICKS(200)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    if (s_wifi_scan_state == WEB_WIFI_SCAN_SCANNING) {
+        xSemaphoreGive(s_wifi_scan_mutex);
+        return ESP_OK;
+    }
+    if (force || s_wifi_scan_state == WEB_WIFI_SCAN_IDLE) {
+        s_wifi_scan_state = WEB_WIFI_SCAN_SCANNING;
+        s_wifi_scan_count = 0;
+        s_wifi_scan_error = ESP_OK;
+        memset(s_wifi_scan_aps, 0, sizeof(s_wifi_scan_aps));
+        should_start = true;
+    }
+    xSemaphoreGive(s_wifi_scan_mutex);
+
+    if (!should_start) {
+        return ESP_OK;
+    }
+    if (xTaskCreate(wifi_scan_task, "wifi_scan_api", 4096, NULL, 4, NULL) != pdPASS) {
+        if (xSemaphoreTake(s_wifi_scan_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+            s_wifi_scan_state = WEB_WIFI_SCAN_FAIL;
+            s_wifi_scan_error = ESP_ERR_NO_MEM;
+            xSemaphoreGive(s_wifi_scan_mutex);
+        }
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+static bool wifi_scan_refresh_requested(httpd_req_t *req)
+{
+    char query[64];
+
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+        return false;
+    }
+    return strstr(query, "refresh=1") != NULL ||
+           strstr(query, "refresh=true") != NULL;
+}
+
+static esp_err_t wifi_scan_handler(httpd_req_t *req)
+{
+    wifi_manager_scan_ap_t aps[WIFI_MANAGER_SCAN_MAX_APS] = {0};
+    size_t count = 0;
+    web_wifi_scan_state_t state = WEB_WIFI_SCAN_IDLE;
+    esp_err_t scan_error = ESP_OK;
+    bool refresh = wifi_scan_refresh_requested(req);
+
+    http_prepare_json(req);
+
+    if (s_wifi_scan_mutex == NULL) {
+        httpd_resp_sendstr(req, "{\"ok\":false,\"state\":\"fail\",\"msg\":\"scan not ready\"}");
+        return ESP_OK;
+    }
+
+    bool start_scan = refresh;
+    if (!start_scan &&
+        xSemaphoreTake(s_wifi_scan_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        start_scan = s_wifi_scan_state == WEB_WIFI_SCAN_IDLE;
+        xSemaphoreGive(s_wifi_scan_mutex);
+    }
+
+    if (start_scan) {
+        esp_err_t start_err = wifi_scan_start_async(refresh);
+        if (start_err != ESP_OK) {
+            char resp[112];
+            snprintf(resp, sizeof(resp),
+                     "{\"ok\":false,\"state\":\"fail\",\"msg\":\"scan start failed:%d\"}",
+                     start_err);
+            httpd_resp_sendstr(req, resp);
+            return ESP_OK;
+        }
+    }
+
+    if (xSemaphoreTake(s_wifi_scan_mutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+        httpd_resp_sendstr(req, "{\"ok\":false,\"state\":\"fail\",\"msg\":\"scan busy\"}");
+        return ESP_OK;
+    }
+    state = s_wifi_scan_state;
+    count = s_wifi_scan_count;
+    if (count > WIFI_MANAGER_SCAN_MAX_APS) {
+        count = WIFI_MANAGER_SCAN_MAX_APS;
+    }
+    memcpy(aps, s_wifi_scan_aps, sizeof(aps[0]) * count);
+    scan_error = s_wifi_scan_error;
+    xSemaphoreGive(s_wifi_scan_mutex);
+
+    if (state == WEB_WIFI_SCAN_FAIL) {
+        char resp[112];
+        snprintf(resp, sizeof(resp),
+                 "{\"ok\":false,\"state\":\"fail\",\"msg\":\"scan failed:%d\",\"aps\":[]}",
+                 scan_error);
         httpd_resp_sendstr(req, resp);
         return ESP_OK;
     }
 
-    httpd_resp_sendstr_chunk(req, "{\"ok\":true,\"aps\":[");
+    char head[96];
+    snprintf(head, sizeof(head), "{\"ok\":true,\"state\":\"%s\",\"aps\":[",
+             wifi_scan_state_name(state));
+    httpd_resp_sendstr_chunk(req, head);
     for (size_t i = 0; i < count; i++) {
         char ssid[80];
         char item[176];
@@ -2370,6 +2526,19 @@ esp_err_t web_api_register_handlers(httpd_handle_t server, const web_api_context
     }
 
     s_ctx = *ctx;
+    if (s_wifi_scan_mutex == NULL) {
+        s_wifi_scan_mutex = xSemaphoreCreateMutex();
+        if (s_wifi_scan_mutex == NULL) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+    if (xSemaphoreTake(s_wifi_scan_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        s_wifi_scan_state = WEB_WIFI_SCAN_IDLE;
+        s_wifi_scan_count = 0;
+        s_wifi_scan_error = ESP_OK;
+        memset(s_wifi_scan_aps, 0, sizeof(s_wifi_scan_aps));
+        xSemaphoreGive(s_wifi_scan_mutex);
+    }
     esp_err_t first_error = ESP_OK;
 
 #define REGISTER_API(_uri, _method, _handler) do {                 \

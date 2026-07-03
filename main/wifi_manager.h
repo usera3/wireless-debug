@@ -44,6 +44,9 @@ esp_err_t wifi_manager_scan(wifi_manager_scan_ap_t *out, size_t capacity,
                             size_t *out_count);
 esp_err_t wifi_manager_connect_sta(const char *ssid, const char *password,
                                    bool save_on_success);
+esp_err_t wifi_manager_schedule_connect_sta(const char *ssid, const char *password,
+                                            bool save_on_success,
+                                            uint32_t delay_ms);
 esp_err_t wifi_manager_quick_connect(const char *ssid);
 void wifi_manager_schedule_net_mode(system_net_mode_t mode);
 esp_err_t wifi_manager_request_net_mode(system_net_mode_t mode);
