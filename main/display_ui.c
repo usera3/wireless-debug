@@ -376,13 +376,13 @@ static void update_menu_view(const display_ui_state_t *state)
         set_standard_layout();
     }
 
-    set_label_long_mode(s_title, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
-    set_label_long_mode(s_footer, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+    set_label_long_mode(s_title, LV_LABEL_LONG_MODE_CLIP);
+    set_label_long_mode(s_footer, LV_LABEL_LONG_MODE_CLIP);
     lv_label_set_text(s_title, menu->title[0] ? menu->title : "MENU");
 
     for (uint8_t i = 0; i < SYSTEM_MENU_ROWS; i++) {
         bool selected = menu->rows[i][0] == '>';
-        set_label_long_mode(s_rows[i], LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+        set_label_long_mode(s_rows[i], LV_LABEL_LONG_MODE_CLIP);
         lv_label_set_text(s_rows[i], menu->rows[i][0] ? menu->rows[i] : " ");
         set_row_selected(s_rows[i], selected);
     }

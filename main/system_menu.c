@@ -16,6 +16,7 @@ typedef enum {
     MENU_PAGE_NETWORK,
     MENU_PAGE_COMM,
     MENU_PAGE_UART,
+    MENU_PAGE_MORE,
     MENU_PAGE_BLE,
     MENU_PAGE_DISPLAY,
     MENU_PAGE_SYSTEM,
@@ -26,11 +27,16 @@ typedef enum {
     ROOT_ITEM_NETWORK,
     ROOT_ITEM_COMM,
     ROOT_ITEM_UART,
-    ROOT_ITEM_BLE,
-    ROOT_ITEM_DISPLAY,
-    ROOT_ITEM_SYSTEM,
+    ROOT_ITEM_MORE,
     ROOT_ITEM_COUNT,
 } root_item_t;
+
+typedef enum {
+    MORE_ITEM_BLE,
+    MORE_ITEM_DISPLAY,
+    MORE_ITEM_SYSTEM,
+    MORE_ITEM_COUNT,
+} more_item_t;
 
 static const uint32_t s_uart_baud_choices[] = {
     115200,
@@ -137,6 +143,8 @@ static uint8_t item_count_for_page(menu_page_t page)
         return 3;
     case MENU_PAGE_UART:
         return baud_choice_count();
+    case MENU_PAGE_MORE:
+        return MORE_ITEM_COUNT;
     case MENU_PAGE_BLE:
         return 2;
     case MENU_PAGE_DISPLAY:
@@ -158,12 +166,40 @@ static menu_page_t root_item_page(uint8_t selected)
         return MENU_PAGE_COMM;
     case ROOT_ITEM_UART:
         return MENU_PAGE_UART;
-    case ROOT_ITEM_BLE:
+    case ROOT_ITEM_MORE:
+        return MENU_PAGE_MORE;
+    default:
+        return MENU_PAGE_ROOT;
+    }
+}
+
+static menu_page_t more_item_page(uint8_t selected)
+{
+    switch (selected) {
+    case MORE_ITEM_BLE:
         return MENU_PAGE_BLE;
-    case ROOT_ITEM_DISPLAY:
+    case MORE_ITEM_DISPLAY:
         return MENU_PAGE_DISPLAY;
-    case ROOT_ITEM_SYSTEM:
+    case MORE_ITEM_SYSTEM:
         return MENU_PAGE_SYSTEM;
+    default:
+        return MENU_PAGE_MORE;
+    }
+}
+
+static menu_page_t parent_page(menu_page_t page)
+{
+    switch (page) {
+    case MENU_PAGE_BLE:
+    case MENU_PAGE_DISPLAY:
+    case MENU_PAGE_SYSTEM:
+        return MENU_PAGE_MORE;
+    case MENU_PAGE_NETWORK:
+    case MENU_PAGE_COMM:
+    case MENU_PAGE_UART:
+    case MENU_PAGE_MORE:
+        return MENU_PAGE_ROOT;
+    case MENU_PAGE_ROOT:
     default:
         return MENU_PAGE_ROOT;
     }
@@ -228,17 +264,9 @@ static void root_item_label(uint8_t index, char *label, size_t label_size,
         snprintf(label, label_size, "UART");
         snprintf(value, value_size, "%s", baud);
         break;
-    case ROOT_ITEM_BLE:
-        snprintf(label, label_size, "BLE");
-        snprintf(value, value_size, "%s", s_menu.ble_ready ? "READY" : "--");
-        break;
-    case ROOT_ITEM_DISPLAY:
-        snprintf(label, label_size, "Display");
-        snprintf(value, value_size, "Info");
-        break;
-    case ROOT_ITEM_SYSTEM:
-        snprintf(label, label_size, "System");
-        snprintf(value, value_size, "Health");
+    case ROOT_ITEM_MORE:
+        snprintf(label, label_size, "More");
+        snprintf(value, value_size, "...");
         break;
     default:
         snprintf(label, label_size, "-");
@@ -288,6 +316,18 @@ static void page_item_label(menu_page_t page, uint8_t index,
         snprintf(value, value_size, "%s",
                  system_menu_uart_baud_choice(index) == s_menu.uart_baud ? "ON" : "");
         break;
+    case MENU_PAGE_MORE:
+        if (index == MORE_ITEM_BLE) {
+            snprintf(label, label_size, "BLE");
+            snprintf(value, value_size, "%s", s_menu.ble_ready ? "READY" : "--");
+        } else if (index == MORE_ITEM_DISPLAY) {
+            snprintf(label, label_size, "Display");
+            snprintf(value, value_size, "Info");
+        } else {
+            snprintf(label, label_size, "System");
+            snprintf(value, value_size, "Health");
+        }
+        break;
     case MENU_PAGE_BLE:
         if (index == 0) {
             snprintf(label, label_size, "Status");
@@ -322,6 +362,8 @@ static const char *page_title(menu_page_t page)
         return "COMM MODE";
     case MENU_PAGE_UART:
         return "UART BAUD";
+    case MENU_PAGE_MORE:
+        return "MORE";
     case MENU_PAGE_BLE:
         return "BLE";
     case MENU_PAGE_DISPLAY:
@@ -343,6 +385,8 @@ static const char *page_path(menu_page_t page)
         return "MENU/COMM";
     case MENU_PAGE_UART:
         return "MENU/UART";
+    case MENU_PAGE_MORE:
+        return "MENU/MORE";
     case MENU_PAGE_BLE:
         return "MENU/BLE";
     case MENU_PAGE_DISPLAY:
@@ -373,6 +417,8 @@ static system_menu_action_t action_for_selected_locked(void)
         if (selected == 1) return SYSTEM_ACTION_UART_BAUD_921600;
         if (selected == 2) return SYSTEM_ACTION_UART_BAUD_2000000;
         return SYSTEM_ACTION_UART_BAUD_3000000;
+    case MENU_PAGE_MORE:
+        return SYSTEM_ACTION_NONE;
     case MENU_PAGE_BLE:
         return selected == 1 ? SYSTEM_ACTION_BLE_START : SYSTEM_ACTION_NONE;
     case MENU_PAGE_DISPLAY:
@@ -454,6 +500,8 @@ system_menu_action_t system_menu_handle_key(system_key_t key)
     case SYSTEM_KEY_OK:
         if (s_menu.page == MENU_PAGE_ROOT) {
             s_menu.page = root_item_page(s_menu.selected[MENU_PAGE_ROOT]);
+        } else if (s_menu.page == MENU_PAGE_MORE) {
+            s_menu.page = more_item_page(s_menu.selected[MENU_PAGE_MORE]);
         } else {
             action = action_for_selected_locked();
         }
@@ -463,7 +511,7 @@ system_menu_action_t system_menu_handle_key(system_key_t key)
             s_menu.active = false;
             set_message_locked("MENU CLOSED");
         } else {
-            s_menu.page = MENU_PAGE_ROOT;
+            s_menu.page = parent_page(s_menu.page);
             set_message_locked("-");
         }
         break;
@@ -488,7 +536,8 @@ void system_menu_get_snapshot(system_menu_snapshot_t *out)
     memset(out, 0, sizeof(*out));
     out->active = s_menu.active || s_menu.feedback_active;
     out->page = (uint8_t)s_menu.page;
-    out->depth = s_menu.page == MENU_PAGE_ROOT ? 0 : 1;
+    out->depth = s_menu.page == MENU_PAGE_ROOT ? 0 :
+                 parent_page(s_menu.page) == MENU_PAGE_MORE ? 2 : 1;
     out->selected = s_menu.selected[s_menu.page];
     out->item_count = item_count_for_page(s_menu.page);
     out->scroll_top = scroll_top_for(out->selected, out->item_count);
