@@ -13,7 +13,9 @@ typedef struct {
     uint32_t (*get_uart_baud)(void *ctx);
     esp_err_t (*set_uart_baud)(uint32_t baud, void *ctx);
     esp_err_t (*send_uart_frame)(const uint8_t *data, size_t len, void *ctx);
-    void (*apply_menu_action)(system_menu_action_t action, void *ctx);
+    esp_err_t (*apply_menu_action)(system_menu_action_t action,
+                                   system_action_source_t source,
+                                   void *ctx);
     void (*get_wifi_status)(wifi_manager_status_t *out, void *ctx);
     esp_err_t (*save_wifi_sta_config)(const char *ssid, const char *password, void *ctx);
     esp_err_t (*clear_wifi_sta_config)(void *ctx);

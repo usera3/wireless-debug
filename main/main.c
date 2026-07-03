@@ -29,6 +29,7 @@
 #include "display_lvgl.h"
 #include "display_port.h"
 #include "health_reporter.h"
+#include "input_buttons.h"
 #include "router_service.h"
 #include "system_menu.h"
 #include "ui_controller.h"
@@ -350,10 +351,12 @@ static esp_err_t web_api_send_uart_frame(const uint8_t *data, size_t len, void *
     return written == (int)len ? ESP_OK : ESP_FAIL;
 }
 
-static void web_api_apply_menu_action(system_menu_action_t action, void *ctx)
+static esp_err_t web_api_apply_menu_action(system_menu_action_t action,
+                                           system_action_source_t source,
+                                           void *ctx)
 {
     (void)ctx;
-    ui_controller_apply_menu_action(action);
+    return ui_controller_apply_menu_action(action, source);
 }
 
 static void web_api_get_wifi_status(wifi_manager_status_t *out, void *ctx)
@@ -476,6 +479,14 @@ static void ui_log_heap(const char *label, void *ctx)
 {
     (void)ctx;
     log_heap_checkpoint(label);
+}
+
+static void app_button_key_received(system_key_t key, void *ctx)
+{
+    (void)ctx;
+    system_menu_action_t action = system_menu_handle_key(key);
+    (void)ui_controller_apply_menu_action(action, SYSTEM_ACTION_SOURCE_KEY);
+    display_lvgl_request_redraw();
 }
 
 /**
@@ -653,6 +664,17 @@ void app_main(void)
     } else {
         display_lvgl_set_uart_baud(app_core_get_uart_baud());
         display_lvgl_set_status("lvgl_on");
+    }
+
+    input_buttons_config_t button_config = {
+        .s4_gpio = INPUT_BUTTON_S4_GPIO,
+        .s5_gpio = INPUT_BUTTON_S5_GPIO,
+        .on_key = app_button_key_received,
+        .ctx = NULL,
+    };
+    ret = input_buttons_start(&button_config);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Button input init failed: %s", esp_err_to_name(ret));
     }
 
     /* ---------------------------------------------------------

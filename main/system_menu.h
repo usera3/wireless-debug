@@ -5,13 +5,19 @@
 #include <stdint.h>
 
 #define SYSTEM_MENU_ROWS 4
-#define SYSTEM_MENU_TEXT_LEN 32
+#define SYSTEM_MENU_TEXT_LEN 48
 
 typedef enum {
     SYSTEM_KEY_NEXT,
     SYSTEM_KEY_OK,
     SYSTEM_KEY_BACK,
 } system_key_t;
+
+typedef enum {
+    SYSTEM_ACTION_SOURCE_KEY,
+    SYSTEM_ACTION_SOURCE_WEB,
+    SYSTEM_ACTION_SOURCE_SYSTEM,
+} system_action_source_t;
 
 typedef enum {
     SYSTEM_NET_AP,
@@ -38,6 +44,8 @@ typedef enum {
     SYSTEM_ACTION_UART_BAUD_3000000,
     SYSTEM_ACTION_BLE_START,
     SYSTEM_ACTION_HEAP_INFO,
+    SYSTEM_ACTION_STATS_RESET,
+    SYSTEM_ACTION_DISPLAY_INFO,
 } system_menu_action_t;
 
 typedef struct {
@@ -68,10 +76,16 @@ void system_menu_set_comm_mode(system_comm_mode_t mode);
 void system_menu_set_uart_baud(uint32_t baud);
 void system_menu_set_ble_ready(bool ready);
 void system_menu_set_message(const char *message);
+void system_menu_show_action_result(system_menu_action_t action,
+                                    const char *status,
+                                    const char *detail,
+                                    system_action_source_t source);
 uint32_t system_menu_uart_baud_choice(uint8_t index);
 uint8_t system_menu_uart_baud_choice_count(void);
 
 const char *system_menu_key_name(system_key_t key);
+const char *system_menu_action_name(system_menu_action_t action);
+const char *system_menu_action_title(system_menu_action_t action);
 const char *system_menu_net_name(system_net_mode_t mode);
 const char *system_menu_comm_name(system_comm_mode_t mode);
 

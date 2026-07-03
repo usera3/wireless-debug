@@ -18,6 +18,7 @@ typedef struct {
 } ui_controller_config_t;
 
 esp_err_t ui_controller_init(const ui_controller_config_t *config);
-void ui_controller_apply_menu_action(system_menu_action_t action);
+esp_err_t ui_controller_apply_menu_action(system_menu_action_t action,
+                                          system_action_source_t source);
 
 #endif /* UI_CONTROLLER_H */

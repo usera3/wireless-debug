@@ -315,18 +315,23 @@ static const char *menu_action_name(system_menu_action_t action)
         return "ble_start";
     case SYSTEM_ACTION_HEAP_INFO:
         return "heap_info";
+    case SYSTEM_ACTION_STATS_RESET:
+        return "stats_reset";
+    case SYSTEM_ACTION_DISPLAY_INFO:
+        return "display_info";
     case SYSTEM_ACTION_NONE:
     default:
         return "none";
     }
 }
 
-static void apply_action(system_menu_action_t action)
+static esp_err_t apply_action(system_menu_action_t action, system_action_source_t source)
 {
     const web_api_context_t *ctx = api_ctx();
     if (ctx->apply_menu_action != NULL) {
-        ctx->apply_menu_action(action, ctx->ctx);
+        return ctx->apply_menu_action(action, source, ctx->ctx);
     }
+    return ESP_ERR_INVALID_STATE;
 }
 
 static esp_err_t set_uart_baud(uint32_t baud)
@@ -373,25 +378,6 @@ static esp_err_t save_wifi_sta_config(const char *ssid, const char *password)
     return ctx->save_wifi_sta_config(ssid, password, ctx->ctx);
 }
 
-static esp_err_t clear_wifi_sta_config(void)
-{
-    const web_api_context_t *ctx = api_ctx();
-    if (ctx->clear_wifi_sta_config == NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    return ctx->clear_wifi_sta_config(ctx->ctx);
-}
-
-static esp_err_t request_wifi_net_mode(system_net_mode_t mode)
-{
-    const web_api_context_t *ctx = api_ctx();
-    if (ctx->request_wifi_net_mode == NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    ctx->request_wifi_net_mode(mode, ctx->ctx);
-    return ESP_OK;
-}
-
 static bool wifi_client_connected(void)
 {
     const web_api_context_t *ctx = api_ctx();
@@ -410,15 +396,6 @@ static bool ble_has_subscribers(void)
     return ctx->ble_has_subscribers != NULL && ctx->ble_has_subscribers(ctx->ctx);
 }
 
-static esp_err_t start_ble(void)
-{
-    const web_api_context_t *ctx = api_ctx();
-    if (ctx->ble_start == NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    return ctx->ble_start(ctx->ctx);
-}
-
 static size_t send_ble_frame(const uint8_t *data, size_t len)
 {
     const web_api_context_t *ctx = api_ctx();
@@ -426,6 +403,22 @@ static size_t send_ble_frame(const uint8_t *data, size_t len)
         return 0;
     }
     return ctx->send_ble_frame(data, len, ctx->ctx);
+}
+
+static system_menu_action_t uart_baud_action(uint32_t baud)
+{
+    switch (baud) {
+    case 115200:
+        return SYSTEM_ACTION_UART_BAUD_115200;
+    case 921600:
+        return SYSTEM_ACTION_UART_BAUD_921600;
+    case 2000000:
+        return SYSTEM_ACTION_UART_BAUD_2000000;
+    case 3000000:
+        return SYSTEM_ACTION_UART_BAUD_3000000;
+    default:
+        return SYSTEM_ACTION_NONE;
+    }
 }
 
 static esp_err_t send_uart_frame(const uint8_t *data, size_t len)
@@ -473,7 +466,13 @@ static esp_err_t uart_baud_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    esp_err_t err = set_uart_baud(baud);
+    esp_err_t err;
+    system_menu_action_t action = uart_baud_action(baud);
+    if (action != SYSTEM_ACTION_NONE) {
+        err = apply_action(action, SYSTEM_ACTION_SOURCE_WEB);
+    } else {
+        err = set_uart_baud(baud);
+    }
     if (err != ESP_OK) {
         char resp[80];
         snprintf(resp, sizeof(resp),
@@ -560,17 +559,13 @@ static esp_err_t wifi_sta_delete_handler(httpd_req_t *req)
 {
     http_prepare_json(req);
 
-    esp_err_t err = clear_wifi_sta_config();
+    esp_err_t err = apply_action(SYSTEM_ACTION_NET_STA_CLEAR, SYSTEM_ACTION_SOURCE_WEB);
     if (err != ESP_OK) {
         char resp[96];
         snprintf(resp, sizeof(resp), "{\"ok\":false,\"msg\":\"clear failed:%d\"}", err);
         httpd_resp_sendstr(req, resp);
         return ESP_OK;
     }
-
-    system_menu_set_net_mode(SYSTEM_NET_AP);
-    system_menu_set_message("STA CFG CLEAR");
-    display_lvgl_set_status("sta_clear");
     return http_send_json_ok(req);
 }
 
@@ -604,7 +599,7 @@ static esp_err_t input_key_handler(httpd_req_t *req)
     }
 
     system_menu_action_t action = system_menu_handle_key(key);
-    apply_action(action);
+    (void)apply_action(action, SYSTEM_ACTION_SOURCE_KEY);
     display_lvgl_request_redraw();
 
     char resp[96];
@@ -829,7 +824,14 @@ static esp_err_t comm_mode_set_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    apply_action(action);
+    esp_err_t action_err = apply_action(action, SYSTEM_ACTION_SOURCE_WEB);
+    if (action_err != ESP_OK) {
+        char resp[96];
+        snprintf(resp, sizeof(resp),
+                 "{\"ok\":false,\"msg\":\"action failed:%d\"}", action_err);
+        httpd_resp_sendstr(req, resp);
+        return ESP_OK;
+    }
     display_lvgl_request_redraw();
     return http_send_json_ok(req);
 }
@@ -897,7 +899,7 @@ static esp_err_t comm_stats_handler(httpd_req_t *req)
 static esp_err_t comm_stats_reset_handler(httpd_req_t *req)
 {
     http_prepare_json(req);
-    comm_stats_reset();
+    (void)apply_action(SYSTEM_ACTION_STATS_RESET, SYSTEM_ACTION_SOURCE_WEB);
     return http_send_json_ok(req);
 }
 
@@ -1043,17 +1045,17 @@ static esp_err_t wifi_mode_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    system_net_mode_t net_mode;
+    system_menu_action_t action;
     if (strcmp(mode, "ap") == 0 || strcmp(mode, "AP") == 0) {
-        net_mode = SYSTEM_NET_AP;
+        action = SYSTEM_ACTION_NET_AP;
     } else if (strcmp(mode, "sta") == 0 || strcmp(mode, "STA") == 0) {
-        net_mode = SYSTEM_NET_STA;
+        action = SYSTEM_ACTION_NET_STA;
     } else {
         httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"mode must be ap/sta\"}");
         return ESP_OK;
     }
 
-    esp_err_t err = request_wifi_net_mode(net_mode);
+    esp_err_t err = apply_action(action, SYSTEM_ACTION_SOURCE_WEB);
     if (err != ESP_OK) {
         char resp[96];
         snprintf(resp, sizeof(resp), "{\"ok\":false,\"msg\":\"wifi mode failed:%d\"}", err);
@@ -1094,7 +1096,7 @@ static esp_err_t ble_status_handler(httpd_req_t *req)
 static esp_err_t ble_start_handler(httpd_req_t *req)
 {
     http_prepare_json(req);
-    esp_err_t err = start_ble();
+    esp_err_t err = apply_action(SYSTEM_ACTION_BLE_START, SYSTEM_ACTION_SOURCE_WEB);
     if (err != ESP_OK) {
         char resp[96];
         snprintf(resp, sizeof(resp), "{\"ok\":false,\"msg\":\"ble start failed:%d\"}", err);

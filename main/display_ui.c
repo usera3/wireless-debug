@@ -61,6 +61,26 @@ static void set_label_style(lv_obj_t *obj)
     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
 }
 
+static void set_label_long_mode(lv_obj_t *obj, lv_label_long_mode_t mode)
+{
+    if (obj != NULL) {
+        lv_label_set_long_mode(obj, mode);
+    }
+}
+
+static void set_standard_layout(void)
+{
+    for (uint8_t i = 0; i < SYSTEM_MENU_ROWS; i++) {
+        lv_obj_set_style_text_font(s_rows[i], DISPLAY_LVGL_FONT, 0);
+        lv_obj_set_height(s_rows[i], UI_ROW_H);
+        lv_obj_set_y(s_rows[i], UI_ROW_Y + i * UI_ROW_H);
+        set_label_long_mode(s_rows[i], LV_LABEL_LONG_MODE_CLIP);
+    }
+    set_label_long_mode(s_title, LV_LABEL_LONG_MODE_CLIP);
+    set_label_long_mode(s_footer, LV_LABEL_LONG_MODE_CLIP);
+    s_overlay_text_layout = false;
+}
+
 static lv_obj_t *make_label(lv_obj_t *parent, int32_t x, int32_t y,
                             int32_t w, int32_t h, const char *text)
 {
@@ -317,14 +337,7 @@ static void update_closed_view(const display_ui_state_t *state)
     uint64_t errors = total_error_count(stats);
     uint32_t minutes = state->uptime_s / 60U;
 
-    if (s_overlay_text_layout) {
-        for (uint8_t i = 0; i < SYSTEM_MENU_ROWS; i++) {
-            lv_obj_set_style_text_font(s_rows[i], DISPLAY_LVGL_FONT, 0);
-            lv_obj_set_height(s_rows[i], UI_ROW_H);
-            lv_obj_set_y(s_rows[i], UI_ROW_Y + i * UI_ROW_H);
-        }
-        s_overlay_text_layout = false;
-    }
+    set_standard_layout();
 
     format_baud(baud, sizeof(baud), state->baud);
     format_wifi_label(wifi, sizeof(wifi), state->ssid);
@@ -353,6 +366,28 @@ static void update_closed_view(const display_ui_state_t *state)
                           status_compact(state->status),
                           (unsigned long)errors,
                           (unsigned long)minutes);
+}
+
+static void update_menu_view(const display_ui_state_t *state)
+{
+    const system_menu_snapshot_t *menu = &state->menu;
+
+    if (s_overlay_text_layout) {
+        set_standard_layout();
+    }
+
+    set_label_long_mode(s_title, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+    set_label_long_mode(s_footer, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+    lv_label_set_text(s_title, menu->title[0] ? menu->title : "MENU");
+
+    for (uint8_t i = 0; i < SYSTEM_MENU_ROWS; i++) {
+        bool selected = menu->rows[i][0] == '>';
+        set_label_long_mode(s_rows[i], LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
+        lv_label_set_text(s_rows[i], menu->rows[i][0] ? menu->rows[i] : " ");
+        set_row_selected(s_rows[i], selected);
+    }
+
+    lv_label_set_text(s_footer, menu->footer[0] ? menu->footer : "S4 NEXT S5 OK");
 }
 
 static void update_overlay_view(const display_ui_state_t *state)
@@ -544,6 +579,8 @@ void display_ui_update(const display_ui_state_t *state)
     update_status_bar(state);
     if (state->overlay_active) {
         update_overlay_view(state);
+    } else if (state->menu.active) {
+        update_menu_view(state);
     } else {
         update_closed_view(state);
     }
