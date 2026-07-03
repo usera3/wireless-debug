@@ -598,6 +598,7 @@ static esp_err_t input_key_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
+    display_lvgl_clear_text_screen();
     system_menu_action_t action = system_menu_handle_key(key);
     (void)apply_action(action, SYSTEM_ACTION_SOURCE_KEY);
     display_lvgl_request_redraw();

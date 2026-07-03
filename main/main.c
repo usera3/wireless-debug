@@ -484,6 +484,7 @@ static void ui_log_heap(const char *label, void *ctx)
 static void app_button_key_received(system_key_t key, void *ctx)
 {
     (void)ctx;
+    display_lvgl_clear_text_screen();
     system_menu_action_t action = system_menu_handle_key(key);
     (void)ui_controller_apply_menu_action(action, SYSTEM_ACTION_SOURCE_KEY);
     display_lvgl_request_redraw();
