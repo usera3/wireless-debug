@@ -2,8 +2,12 @@
 #define WIFI_MANAGER_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include "esp_err.h"
 #include "system_menu.h"
+
+#define WIFI_MANAGER_SCAN_MAX_APS 8
+#define WIFI_MANAGER_QUICK_PASSWORD "12345678"
 
 typedef struct {
     system_net_mode_t mode;
@@ -14,6 +18,13 @@ typedef struct {
     bool sta_connecting;
     bool sta_connected;
 } wifi_manager_status_t;
+
+typedef struct {
+    char ssid[33];
+    int8_t rssi;
+    uint8_t authmode;
+    bool saved;
+} wifi_manager_scan_ap_t;
 
 typedef struct {
     void (*on_net_mode)(system_net_mode_t mode, void *ctx);
@@ -27,6 +38,13 @@ esp_err_t wifi_manager_init(const wifi_manager_config_t *config);
 bool wifi_manager_has_sta_config(void);
 esp_err_t wifi_manager_save_sta_config(const char *ssid, const char *password);
 esp_err_t wifi_manager_clear_sta_config(void);
+bool wifi_manager_get_saved_sta_config(char *ssid, size_t ssid_size,
+                                       char *password, size_t password_size);
+esp_err_t wifi_manager_scan(wifi_manager_scan_ap_t *out, size_t capacity,
+                            size_t *out_count);
+esp_err_t wifi_manager_connect_sta(const char *ssid, const char *password,
+                                   bool save_on_success);
+esp_err_t wifi_manager_quick_connect(const char *ssid);
 void wifi_manager_schedule_net_mode(system_net_mode_t mode);
 esp_err_t wifi_manager_request_net_mode(system_net_mode_t mode);
 void wifi_manager_get_status(wifi_manager_status_t *out);

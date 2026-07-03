@@ -12,32 +12,90 @@
       body {
         min-height: 100vh;
         margin: 0;
-        display: grid;
-        place-items: center;
         background: #101820;
         color: #eef5f7;
         font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
 
       main {
-        width: min(420px, calc(100vw - 32px));
-        padding: 18px;
+        width: min(460px, 100%);
+        min-height: 100vh;
+        margin: 0 auto;
+        padding: 18px 16px 24px;
       }
 
       h1 {
-        margin: 0 0 4px;
+        margin: 0 0 12px;
         font-size: 20px;
         letter-spacing: 0;
       }
 
-      .sub {
-        margin: 0 0 16px;
+      .toolbar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      .status {
+        min-height: 42px;
+        padding: 9px 11px;
+        border: 1px solid #344a55;
+        border-radius: 8px;
+        background: #16232b;
+        color: #c8d9df;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        word-break: break-word;
+      }
+
+      button {
+        min-height: 42px;
+        border: 1px solid #3d5563;
+        border-radius: 8px;
+        background: #1c2a33;
+        color: #f8fbfc;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
+
+      .scan-list {
+        display: grid;
+        gap: 8px;
+        margin: 0 0 14px;
+      }
+
+      .ap {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        width: 100%;
+        padding: 9px 10px;
+        text-align: left;
+      }
+
+      .ssid {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .meta {
         color: #9fb2bd;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        white-space: nowrap;
       }
 
       label {
         display: block;
-        margin: 12px 0 6px;
+        margin: 11px 0 6px;
         color: #c8d9df;
         font-weight: 700;
       }
@@ -60,18 +118,6 @@
         margin-top: 16px;
       }
 
-      button {
-        min-height: 46px;
-        border: 1px solid #3d5563;
-        border-radius: 8px;
-        background: #1c2a33;
-        color: #f8fbfc;
-        font: inherit;
-        font-weight: 700;
-        cursor: pointer;
-        touch-action: manipulation;
-      }
-
       button.primary {
         background: #176b5f;
         border-color: #2c9b8d;
@@ -81,24 +127,18 @@
         background: #59343c;
         border-color: #8d5360;
       }
-
-      .status {
-        min-height: 44px;
-        margin-top: 14px;
-        padding: 10px 12px;
-        border: 1px solid #324956;
-        border-radius: 8px;
-        background: #16232b;
-        color: #c8d9df;
-        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-        word-break: break-word;
-      }
     </style>
   </head>
   <body>
     <main>
       <h1>STA 配网</h1>
-      <p class="sub">保存路由器 Wi-Fi 后，再回到菜单选择 STA。</p>
+
+      <div class="toolbar">
+        <div id="status" class="status">loading...</div>
+        <button id="scan" type="button">扫描</button>
+      </div>
+
+      <div id="apList" class="scan-list"></div>
 
       <form id="form">
         <label for="ssid">Wi-Fi 名称</label>
@@ -108,12 +148,10 @@
         <input id="password" name="password" maxlength="64" type="password" autocomplete="current-password" />
 
         <div class="actions">
-          <button class="primary" type="submit">保存</button>
-          <button class="danger" id="clear" type="button">清除</button>
+          <button class="primary" id="connect" type="submit">连接并保存</button>
+          <button class="danger" id="clear" type="button">清除配置</button>
         </div>
       </form>
-
-      <div id="status" class="status">loading...</div>
     </main>
 
     <script>
@@ -121,20 +159,115 @@
         const form = document.getElementById("form");
         const ssidEl = document.getElementById("ssid");
         const passwordEl = document.getElementById("password");
+        const scanEl = document.getElementById("scan");
         const clearEl = document.getElementById("clear");
+        const connectEl = document.getElementById("connect");
         const statusEl = document.getElementById("status");
+        const apListEl = document.getElementById("apList");
+        let pollTimer = 0;
+
+        function setBusy(busy) {
+          scanEl.disabled = busy;
+          connectEl.disabled = busy;
+          clearEl.disabled = busy;
+        }
+
+        function setStatus(text) {
+          statusEl.textContent = text;
+        }
+
+        async function jsonFetch(path, options = {}) {
+          const resp = await fetch(path, { cache: "no-store", ...options });
+          return resp.json();
+        }
+
+        function stopPolling() {
+          if (pollTimer) {
+            clearInterval(pollTimer);
+            pollTimer = 0;
+          }
+        }
 
         async function loadStatus() {
-          try {
-            const resp = await fetch("/api/wifi/status", { cache: "no-store" });
-            const data = await resp.json();
-            if (data.sta_ssid) ssidEl.value = data.sta_ssid;
-            statusEl.textContent = data.sta_configured
-              ? `saved: ${data.sta_ssid || "-"}`
-              : "STA not configured";
-          } catch (err) {
-            statusEl.textContent = `status failed: ${err.message}`;
+          const data = await jsonFetch("/api/wifi/status");
+          if (data.sta_ssid && !ssidEl.value) ssidEl.value = data.sta_ssid;
+          if (data.sta_connected) {
+            setStatus(`connected: ${data.sta_ssid || "-"} ${data.sta_ip || ""}`);
+          } else if (data.sta_connecting) {
+            setStatus(`connecting: ${data.sta_ssid || "-"}`);
+          } else if (data.sta_configured) {
+            setStatus(`saved: ${data.sta_ssid || "-"}`);
+          } else {
+            setStatus(`AP ready: ${data.ap_ssid || "ESP32-S3_AP"}`);
           }
+          return data;
+        }
+
+        function renderAps(aps) {
+          apListEl.textContent = "";
+          if (!aps.length) {
+            const empty = document.createElement("div");
+            empty.className = "status";
+            empty.textContent = "no wifi found";
+            apListEl.appendChild(empty);
+            return;
+          }
+          for (const ap of aps) {
+            const row = document.createElement("button");
+            row.className = "ap";
+            row.type = "button";
+            row.innerHTML = `<span class="ssid"></span><span class="meta"></span>`;
+            row.querySelector(".ssid").textContent = ap.ssid || "(hidden)";
+            row.querySelector(".meta").textContent = `${ap.rssi}dBm${ap.saved ? " saved" : ""}`;
+            row.addEventListener("click", () => {
+              ssidEl.value = ap.ssid || "";
+              setStatus(`selected: ${ap.ssid || "-"}`);
+            });
+            apListEl.appendChild(row);
+          }
+        }
+
+        async function scanWifi() {
+          setBusy(true);
+          setStatus("scanning...");
+          try {
+            const data = await jsonFetch("/api/wifi/scan");
+            if (!data.ok) {
+              setStatus(`scan failed: ${data.msg || "unknown"}`);
+              return;
+            }
+            renderAps(data.aps || []);
+            setStatus(`found: ${(data.aps || []).length}`);
+          } catch (err) {
+            setStatus(`scan failed: ${err.message}`);
+          } finally {
+            setBusy(false);
+          }
+        }
+
+        function pollConnect(targetSsid) {
+          stopPolling();
+          let left = 20;
+          pollTimer = setInterval(async () => {
+            try {
+              const data = await loadStatus();
+              if (data.sta_connected) {
+                stopPolling();
+                setBusy(false);
+              } else if (!data.sta_connecting) {
+                stopPolling();
+                setBusy(false);
+                setStatus(`failed: ${targetSsid || data.sta_ssid || "-"}`);
+              }
+            } catch (err) {
+              setStatus(`status failed: ${err.message}`);
+            }
+            left -= 1;
+            if (left <= 0) {
+              stopPolling();
+              setBusy(false);
+            }
+          }, 1500);
         }
 
         form.addEventListener("submit", async (event) => {
@@ -142,46 +275,51 @@
           const ssid = ssidEl.value.trim();
           const password = passwordEl.value;
           if (!ssid) {
-            statusEl.textContent = "missing ssid";
+            setStatus("missing ssid");
             return;
           }
-          statusEl.textContent = "saving...";
+          setBusy(true);
+          setStatus("connecting...");
           try {
-            const resp = await fetch("/api/wifi/sta", {
+            const data = await jsonFetch("/api/wifi/connect", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ ssid, password }),
-              cache: "no-store",
+              body: JSON.stringify({ ssid, password, save: true }),
             });
-            const data = await resp.json();
-            statusEl.textContent = data.ok
-              ? `saved: ${data.ssid}; go back and select STA`
-              : `save failed: ${data.msg || "unknown"}`;
+            if (!data.ok) {
+              setBusy(false);
+              setStatus(`connect failed: ${data.msg || "unknown"}`);
+              return;
+            }
+            pollConnect(ssid);
           } catch (err) {
-            statusEl.textContent = `save failed: ${err.message}`;
+            setBusy(false);
+            setStatus(`connect failed: ${err.message}`);
           }
         });
 
         clearEl.addEventListener("click", async () => {
-          statusEl.textContent = "clearing...";
+          setBusy(true);
+          setStatus("clearing...");
           try {
-            const resp = await fetch("/api/wifi/sta", {
-              method: "DELETE",
-              cache: "no-store",
-            });
-            const data = await resp.json();
+            const data = await jsonFetch("/api/wifi/sta", { method: "DELETE" });
             if (data.ok) {
               passwordEl.value = "";
-              statusEl.textContent = "STA config cleared";
+              setStatus("STA config cleared");
             } else {
-              statusEl.textContent = `clear failed: ${data.msg || "unknown"}`;
+              setStatus(`clear failed: ${data.msg || "unknown"}`);
             }
           } catch (err) {
-            statusEl.textContent = `clear failed: ${err.message}`;
+            setStatus(`clear failed: ${err.message}`);
+          } finally {
+            setBusy(false);
           }
         });
 
-        loadStatus();
+        scanEl.addEventListener("click", scanWifi);
+
+        loadStatus().catch((err) => setStatus(`status failed: ${err.message}`));
+        scanWifi();
       })();
     </script>
   </body>

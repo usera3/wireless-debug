@@ -14,6 +14,8 @@
 typedef enum {
     MENU_PAGE_ROOT,
     MENU_PAGE_NETWORK,
+    MENU_PAGE_STA,
+    MENU_PAGE_WIFI_LIST,
     MENU_PAGE_COMM,
     MENU_PAGE_UART,
     MENU_PAGE_MORE,
@@ -22,6 +24,20 @@ typedef enum {
     MENU_PAGE_SYSTEM,
     MENU_PAGE_COUNT,
 } menu_page_t;
+
+typedef enum {
+    NET_ITEM_AP,
+    NET_ITEM_STA,
+    NET_ITEM_CLEAR_STA,
+    NET_ITEM_COUNT,
+} network_item_t;
+
+typedef enum {
+    STA_ITEM_QUICK,
+    STA_ITEM_WEB_SETUP,
+    STA_ITEM_SAVED,
+    STA_ITEM_COUNT,
+} sta_item_t;
 
 typedef enum {
     ROOT_ITEM_NETWORK,
@@ -55,6 +71,8 @@ typedef struct {
     uint32_t uart_baud;
     bool ble_ready;
     char message[SYSTEM_MENU_TEXT_LEN];
+    system_menu_wifi_ap_t wifi_aps[SYSTEM_MENU_WIFI_MAX_APS];
+    uint8_t wifi_ap_count;
     bool feedback_active;
     int64_t feedback_until_us;
     char feedback_title[SYSTEM_MENU_TEXT_LEN];
@@ -138,7 +156,11 @@ static uint8_t item_count_for_page(menu_page_t page)
 {
     switch (page) {
     case MENU_PAGE_NETWORK:
-        return 3;
+        return NET_ITEM_COUNT;
+    case MENU_PAGE_STA:
+        return STA_ITEM_COUNT;
+    case MENU_PAGE_WIFI_LIST:
+        return s_menu.wifi_ap_count;
     case MENU_PAGE_COMM:
         return 3;
     case MENU_PAGE_UART:
@@ -190,6 +212,10 @@ static menu_page_t more_item_page(uint8_t selected)
 static menu_page_t parent_page(menu_page_t page)
 {
     switch (page) {
+    case MENU_PAGE_WIFI_LIST:
+        return MENU_PAGE_STA;
+    case MENU_PAGE_STA:
+        return MENU_PAGE_NETWORK;
     case MENU_PAGE_BLE:
     case MENU_PAGE_DISPLAY:
     case MENU_PAGE_SYSTEM:
@@ -295,14 +321,36 @@ static void page_item_label(menu_page_t page, uint8_t index,
 
     switch (page) {
     case MENU_PAGE_NETWORK:
-        if (index == 0) {
+        if (index == NET_ITEM_AP) {
             snprintf(label, label_size, "AP Mode");
             snprintf(value, value_size, "%s", s_menu.net_mode == SYSTEM_NET_AP ? "ON" : "");
-        } else if (index == 1) {
+        } else if (index == NET_ITEM_STA) {
             snprintf(label, label_size, "STA Mode");
-            snprintf(value, value_size, "%s", s_menu.net_mode == SYSTEM_NET_STA ? "ON" : "");
+            snprintf(value, value_size, ">");
         } else {
             snprintf(label, label_size, "Clear STA");
+        }
+        break;
+    case MENU_PAGE_STA:
+        if (index == STA_ITEM_QUICK) {
+            snprintf(label, label_size, "Quick STA");
+            snprintf(value, value_size, "scan");
+        } else if (index == STA_ITEM_WEB_SETUP) {
+            snprintf(label, label_size, "Web Setup");
+            snprintf(value, value_size, "AP");
+        } else {
+            snprintf(label, label_size, "Saved STA");
+            snprintf(value, value_size, "%s", s_menu.net_mode == SYSTEM_NET_STA ? "ON" : "");
+        }
+        break;
+    case MENU_PAGE_WIFI_LIST:
+        if (index < s_menu.wifi_ap_count) {
+            snprintf(label, label_size, "%s%s",
+                     s_menu.wifi_aps[index].saved ? "*" : "",
+                     s_menu.wifi_aps[index].ssid);
+            snprintf(value, value_size, "%d", (int)s_menu.wifi_aps[index].rssi);
+        } else {
+            snprintf(label, label_size, "-");
         }
         break;
     case MENU_PAGE_COMM:
@@ -365,6 +413,10 @@ static const char *page_title(menu_page_t page)
     switch (page) {
     case MENU_PAGE_NETWORK:
         return "NETWORK";
+    case MENU_PAGE_STA:
+        return "STA MODE";
+    case MENU_PAGE_WIFI_LIST:
+        return "WIFI LIST";
     case MENU_PAGE_COMM:
         return "COMM MODE";
     case MENU_PAGE_UART:
@@ -388,6 +440,10 @@ static const char *page_path(menu_page_t page)
     switch (page) {
     case MENU_PAGE_NETWORK:
         return "MENU/NET";
+    case MENU_PAGE_STA:
+        return "MENU/STA";
+    case MENU_PAGE_WIFI_LIST:
+        return "MENU/WIFI";
     case MENU_PAGE_COMM:
         return "MENU/COMM";
     case MENU_PAGE_UART:
@@ -412,9 +468,14 @@ static system_menu_action_t action_for_selected_locked(void)
 
     switch (s_menu.page) {
     case MENU_PAGE_NETWORK:
-        if (selected == 0) return SYSTEM_ACTION_NET_AP;
-        if (selected == 1) return SYSTEM_ACTION_NET_STA;
+        if (selected == NET_ITEM_AP) return SYSTEM_ACTION_NET_AP;
         return SYSTEM_ACTION_NET_STA_CLEAR;
+    case MENU_PAGE_STA:
+        if (selected == STA_ITEM_QUICK) return SYSTEM_ACTION_NET_STA_QUICK;
+        if (selected == STA_ITEM_WEB_SETUP) return SYSTEM_ACTION_NET_STA_WEB_SETUP;
+        return SYSTEM_ACTION_NET_STA;
+    case MENU_PAGE_WIFI_LIST:
+        return SYSTEM_ACTION_NET_STA_QUICK_CONNECT;
     case MENU_PAGE_COMM:
         if (selected == 0) return SYSTEM_ACTION_COMM_AUTO;
         if (selected == 1) return SYSTEM_ACTION_COMM_WIFI;
@@ -507,8 +568,14 @@ system_menu_action_t system_menu_handle_key(system_key_t key)
     case SYSTEM_KEY_OK:
         if (s_menu.page == MENU_PAGE_ROOT) {
             s_menu.page = root_item_page(s_menu.selected[MENU_PAGE_ROOT]);
+            set_message_locked("-");
+        } else if (s_menu.page == MENU_PAGE_NETWORK &&
+                   s_menu.selected[MENU_PAGE_NETWORK] == NET_ITEM_STA) {
+            s_menu.page = MENU_PAGE_STA;
+            set_message_locked("-");
         } else if (s_menu.page == MENU_PAGE_MORE) {
             s_menu.page = more_item_page(s_menu.selected[MENU_PAGE_MORE]);
+            set_message_locked("-");
         } else {
             action = action_for_selected_locked();
         }
@@ -583,16 +650,30 @@ void system_menu_get_snapshot(system_menu_snapshot_t *out)
 
     snprintf(out->title, sizeof(out->title), "%s", page_title(s_menu.page));
     snprintf(out->path, sizeof(out->path), "%s", page_path(s_menu.page));
-    snprintf(out->footer, sizeof(out->footer), "S4 NEXT S5 OK");
+    if (s_menu.message[0] != '\0' && strcmp(s_menu.message, "-") != 0) {
+        snprintf(out->footer, sizeof(out->footer), "%s", s_menu.message);
+    } else {
+        snprintf(out->footer, sizeof(out->footer), "%s",
+                 s_menu.page == MENU_PAGE_WIFI_LIST ? "S4 NEXT S5 CONN" : "S4 NEXT S5 OK");
+    }
 
     for (uint8_t row = 0; row < SYSTEM_MENU_ROWS; row++) {
         uint8_t item = (uint8_t)(out->scroll_top + row);
         if (item < out->item_count) {
-            char label[24];
-            char value[16];
-            page_item_label(s_menu.page, item, label, sizeof(label), value, sizeof(value));
-            make_row(out->rows[row], sizeof(out->rows[row]),
-                     item == out->selected, label, value);
+            if (s_menu.page == MENU_PAGE_WIFI_LIST) {
+                const system_menu_wifi_ap_t *ap = &s_menu.wifi_aps[item];
+                snprintf(out->rows[row], sizeof(out->rows[row]), "%c%d%c %s",
+                         item == out->selected ? '>' : ' ',
+                         (int)ap->rssi,
+                         ap->saved ? '*' : ' ',
+                         ap->ssid);
+            } else {
+                char label[24];
+                char value[16];
+                page_item_label(s_menu.page, item, label, sizeof(label), value, sizeof(value));
+                make_row(out->rows[row], sizeof(out->rows[row]),
+                         item == out->selected, label, value);
+            }
         } else {
             snprintf(out->rows[row], sizeof(out->rows[row]), " ");
         }
@@ -634,6 +715,53 @@ void system_menu_set_message(const char *message)
     menu_lock();
     set_message_locked(message);
     menu_unlock();
+}
+
+void system_menu_set_wifi_scan_results(const system_menu_wifi_ap_t *aps,
+                                       uint8_t count)
+{
+    menu_lock();
+    if (count > SYSTEM_MENU_WIFI_MAX_APS) {
+        count = SYSTEM_MENU_WIFI_MAX_APS;
+    }
+    if (aps == NULL) {
+        count = 0;
+    }
+    memset(s_menu.wifi_aps, 0, sizeof(s_menu.wifi_aps));
+    for (uint8_t i = 0; i < count; i++) {
+        snprintf(s_menu.wifi_aps[i].ssid, sizeof(s_menu.wifi_aps[i].ssid),
+                 "%s", aps[i].ssid);
+        s_menu.wifi_aps[i].rssi = aps[i].rssi;
+        s_menu.wifi_aps[i].saved = aps[i].saved;
+    }
+    s_menu.wifi_ap_count = count;
+    s_menu.selected[MENU_PAGE_WIFI_LIST] = 0;
+    s_menu.active = true;
+    s_menu.page = count > 0 ? MENU_PAGE_WIFI_LIST : MENU_PAGE_STA;
+    set_message_locked(count > 0 ? "-" : "NO WIFI");
+    s_menu.event_count++;
+    menu_unlock();
+}
+
+bool system_menu_get_selected_wifi_ssid(char *out, size_t out_size)
+{
+    bool ok = false;
+
+    if (out == NULL || out_size == 0) {
+        return false;
+    }
+    out[0] = '\0';
+
+    menu_lock();
+    uint8_t selected = s_menu.selected[MENU_PAGE_WIFI_LIST];
+    if (s_menu.page == MENU_PAGE_WIFI_LIST &&
+        selected < s_menu.wifi_ap_count &&
+        s_menu.wifi_aps[selected].ssid[0] != '\0') {
+        snprintf(out, out_size, "%s", s_menu.wifi_aps[selected].ssid);
+        ok = true;
+    }
+    menu_unlock();
+    return ok;
 }
 
 void system_menu_show_action_result(system_menu_action_t action,
@@ -684,6 +812,12 @@ const char *system_menu_action_name(system_menu_action_t action)
         return "net_ap";
     case SYSTEM_ACTION_NET_STA:
         return "net_sta";
+    case SYSTEM_ACTION_NET_STA_QUICK:
+        return "net_sta_quick";
+    case SYSTEM_ACTION_NET_STA_WEB_SETUP:
+        return "net_sta_web_setup";
+    case SYSTEM_ACTION_NET_STA_QUICK_CONNECT:
+        return "net_sta_quick_connect";
     case SYSTEM_ACTION_NET_STA_CLEAR:
         return "net_sta_clear";
     case SYSTEM_ACTION_COMM_AUTO:
@@ -721,6 +855,12 @@ const char *system_menu_action_title(system_menu_action_t action)
         return "WIFI AP";
     case SYSTEM_ACTION_NET_STA:
         return "WIFI STA";
+    case SYSTEM_ACTION_NET_STA_QUICK:
+        return "QUICK STA";
+    case SYSTEM_ACTION_NET_STA_WEB_SETUP:
+        return "WEB SETUP";
+    case SYSTEM_ACTION_NET_STA_QUICK_CONNECT:
+        return "STA CONNECT";
     case SYSTEM_ACTION_NET_STA_CLEAR:
         return "CLEAR STA";
     case SYSTEM_ACTION_COMM_AUTO:

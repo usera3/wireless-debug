@@ -14,7 +14,7 @@
 #include "freertos/task.h"
 #include "nvs.h"
 
-#define WIFI_MANAGER_PASS "12345678"
+#define WIFI_MANAGER_PASS WIFI_MANAGER_QUICK_PASSWORD
 #define WIFI_MANAGER_CHANNEL 1
 #define WIFI_MANAGER_MAX_STA_CONN 4
 #define WIFI_MANAGER_STA_CONNECT_TIMEOUT_MS 10000
@@ -36,9 +36,15 @@ static system_net_mode_t s_net_mode = SYSTEM_NET_AP;
 static bool s_driver_started;
 static bool s_sta_connecting;
 static bool s_sta_connected;
+static bool s_save_sta_on_connect;
+static bool s_restore_sta_on_fail;
 static char s_ap_ssid[33];
 static char s_sta_ssid[33];
 static char s_sta_pass[65];
+static char s_pending_save_ssid[33];
+static char s_pending_save_pass[65];
+static char s_restore_sta_ssid[33];
+static char s_restore_sta_pass[65];
 static char s_sta_ip[16] = "-";
 
 static void report_net_mode(system_net_mode_t mode)
@@ -79,6 +85,25 @@ static void unlock_mode(void)
     if (s_mode_mutex != NULL) {
         xSemaphoreGive(s_mode_mutex);
     }
+}
+
+static void clear_pending_save_locked(void)
+{
+    s_save_sta_on_connect = false;
+    s_restore_sta_on_fail = false;
+    s_pending_save_ssid[0] = '\0';
+    s_pending_save_pass[0] = '\0';
+    s_restore_sta_ssid[0] = '\0';
+    s_restore_sta_pass[0] = '\0';
+}
+
+static void restore_pending_sta_config_locked(void)
+{
+    if (s_restore_sta_on_fail) {
+        snprintf(s_sta_ssid, sizeof(s_sta_ssid), "%s", s_restore_sta_ssid);
+        snprintf(s_sta_pass, sizeof(s_sta_pass), "%s", s_restore_sta_pass);
+    }
+    clear_pending_save_locked();
 }
 
 static esp_err_t configure_ap_netif_no_gateway(void)
@@ -123,6 +148,35 @@ static esp_err_t configure_ap_netif_no_gateway(void)
 bool wifi_manager_has_sta_config(void)
 {
     return s_sta_ssid[0] != '\0';
+}
+
+bool wifi_manager_get_saved_sta_config(char *ssid, size_t ssid_size,
+                                       char *password, size_t password_size)
+{
+    bool has_config = false;
+
+    if (lock_mode(pdMS_TO_TICKS(50)) == pdTRUE) {
+        const char *cfg_ssid = s_restore_sta_on_fail ? s_restore_sta_ssid : s_sta_ssid;
+        const char *cfg_pass = s_restore_sta_on_fail ? s_restore_sta_pass : s_sta_pass;
+        has_config = cfg_ssid[0] != '\0';
+        if (ssid != NULL && ssid_size > 0) {
+            snprintf(ssid, ssid_size, "%s", cfg_ssid);
+        }
+        if (password != NULL && password_size > 0) {
+            snprintf(password, password_size, "%s", cfg_pass);
+        }
+        unlock_mode();
+        return has_config;
+    }
+
+    has_config = s_sta_ssid[0] != '\0';
+    if (ssid != NULL && ssid_size > 0) {
+        snprintf(ssid, ssid_size, "%s", s_sta_ssid);
+    }
+    if (password != NULL && password_size > 0) {
+        snprintf(password, password_size, "%s", s_sta_pass);
+    }
+    return has_config;
 }
 
 static esp_err_t load_sta_config(void)
@@ -234,6 +288,7 @@ esp_err_t wifi_manager_clear_sta_config(void)
             s_sta_pass[0] = '\0';
             s_sta_connected = false;
             s_sta_connecting = false;
+            clear_pending_save_locked();
             snprintf(s_sta_ip, sizeof(s_sta_ip), "-");
             unlock_mode();
         } else {
@@ -241,6 +296,7 @@ esp_err_t wifi_manager_clear_sta_config(void)
             s_sta_pass[0] = '\0';
             s_sta_connected = false;
             s_sta_connecting = false;
+            clear_pending_save_locked();
             snprintf(s_sta_ip, sizeof(s_sta_ip), "-");
         }
     }
@@ -249,6 +305,7 @@ esp_err_t wifi_manager_clear_sta_config(void)
 
 static void set_ap_state_locked(void)
 {
+    restore_pending_sta_config_locked();
     s_net_mode = SYSTEM_NET_AP;
     s_sta_connecting = false;
     s_sta_connected = false;
@@ -371,6 +428,167 @@ static esp_err_t start_sta_locked(void)
     return ESP_OK;
 }
 
+esp_err_t wifi_manager_scan(wifi_manager_scan_ap_t *out, size_t capacity,
+                            size_t *out_count)
+{
+    if (out == NULL || capacity == 0 || out_count == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *out_count = 0;
+    memset(out, 0, sizeof(out[0]) * capacity);
+
+    if (s_mode_mutex == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (xSemaphoreTake(s_mode_mutex, pdMS_TO_TICKS(5000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    if (!s_driver_started) {
+        esp_err_t mode_ret = esp_wifi_set_mode(WIFI_MODE_APSTA);
+        if (mode_ret == ESP_OK) {
+            mode_ret = esp_wifi_start();
+        }
+        if (mode_ret != ESP_OK) {
+            xSemaphoreGive(s_mode_mutex);
+            return mode_ret;
+        }
+        s_driver_started = true;
+    } else {
+        wifi_mode_t mode = WIFI_MODE_NULL;
+        esp_err_t mode_ret = esp_wifi_get_mode(&mode);
+        if (mode_ret == ESP_OK && mode == WIFI_MODE_AP) {
+            mode_ret = esp_wifi_set_mode(WIFI_MODE_APSTA);
+        }
+        if (mode_ret != ESP_OK) {
+            xSemaphoreGive(s_mode_mutex);
+            return mode_ret;
+        }
+    }
+
+    wifi_scan_config_t scan_config = {
+        .show_hidden = false,
+    };
+    esp_err_t ret = esp_wifi_scan_start(&scan_config, true);
+    if (ret != ESP_OK) {
+        xSemaphoreGive(s_mode_mutex);
+        return ret;
+    }
+
+    uint16_t ap_count = 0;
+    ret = esp_wifi_scan_get_ap_num(&ap_count);
+    if (ret != ESP_OK) {
+        xSemaphoreGive(s_mode_mutex);
+        return ret;
+    }
+
+    uint16_t fetch_count = ap_count;
+    if (fetch_count > WIFI_MANAGER_SCAN_MAX_APS * 2U) {
+        fetch_count = WIFI_MANAGER_SCAN_MAX_APS * 2U;
+    }
+    wifi_ap_record_t records[WIFI_MANAGER_SCAN_MAX_APS * 2U];
+    memset(records, 0, sizeof(records));
+    ret = esp_wifi_scan_get_ap_records(&fetch_count, records);
+    if (ret != ESP_OK) {
+        xSemaphoreGive(s_mode_mutex);
+        return ret;
+    }
+
+    char saved_ssid[33];
+    snprintf(saved_ssid, sizeof(saved_ssid), "%s", s_sta_ssid);
+    size_t written = 0;
+    for (uint16_t i = 0; i < fetch_count && written < capacity; i++) {
+        if (records[i].ssid[0] == '\0') {
+            continue;
+        }
+        bool duplicate = false;
+        for (size_t j = 0; j < written; j++) {
+            if (strcmp(out[j].ssid, (const char *)records[i].ssid) == 0) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (duplicate) {
+            continue;
+        }
+        snprintf(out[written].ssid, sizeof(out[written].ssid), "%s", records[i].ssid);
+        out[written].rssi = records[i].rssi;
+        out[written].authmode = records[i].authmode;
+        out[written].saved = saved_ssid[0] != '\0' && strcmp(out[written].ssid, saved_ssid) == 0;
+        written++;
+    }
+
+    *out_count = written;
+    xSemaphoreGive(s_mode_mutex);
+    return ESP_OK;
+}
+
+esp_err_t wifi_manager_connect_sta(const char *ssid, const char *password,
+                                   bool save_on_success)
+{
+    if (ssid == NULL || ssid[0] == '\0' || strlen(ssid) > 32) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (password == NULL) {
+        password = "";
+    }
+    if (strlen(password) > 64) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (s_mode_mutex == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (xSemaphoreTake(s_mode_mutex, pdMS_TO_TICKS(3000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    s_save_sta_on_connect = save_on_success;
+    if (save_on_success) {
+        snprintf(s_restore_sta_ssid, sizeof(s_restore_sta_ssid), "%s", s_sta_ssid);
+        snprintf(s_restore_sta_pass, sizeof(s_restore_sta_pass), "%s", s_sta_pass);
+        s_restore_sta_on_fail = true;
+        snprintf(s_pending_save_ssid, sizeof(s_pending_save_ssid), "%s", ssid);
+        snprintf(s_pending_save_pass, sizeof(s_pending_save_pass), "%s", password);
+    } else {
+        s_restore_sta_on_fail = false;
+        s_pending_save_ssid[0] = '\0';
+        s_pending_save_pass[0] = '\0';
+        s_restore_sta_ssid[0] = '\0';
+        s_restore_sta_pass[0] = '\0';
+    }
+    snprintf(s_sta_ssid, sizeof(s_sta_ssid), "%s", ssid);
+    snprintf(s_sta_pass, sizeof(s_sta_pass), "%s", password);
+
+    esp_err_t ret = start_sta_locked();
+    if (ret != ESP_OK) {
+        restore_pending_sta_config_locked();
+        (void)start_ap_locked();
+        report_message("STA FAIL AP");
+        report_status("sta_fail");
+    }
+
+    xSemaphoreGive(s_mode_mutex);
+    return ret;
+}
+
+esp_err_t wifi_manager_quick_connect(const char *ssid)
+{
+    if (ssid == NULL || ssid[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char saved_ssid[33];
+    char saved_pass[65];
+    bool use_saved = wifi_manager_get_saved_sta_config(saved_ssid, sizeof(saved_ssid),
+                                                       saved_pass, sizeof(saved_pass)) &&
+                     strcmp(saved_ssid, ssid) == 0;
+    return wifi_manager_connect_sta(ssid,
+                                    use_saved ? saved_pass : WIFI_MANAGER_QUICK_PASSWORD,
+                                    !use_saved);
+}
+
 esp_err_t wifi_manager_request_net_mode(system_net_mode_t mode)
 {
     if (s_mode_mutex == NULL) {
@@ -431,6 +649,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                    (s_sta_connecting || s_sta_connected);
             s_sta_connecting = false;
             s_sta_connected = false;
+            restore_pending_sta_config_locked();
             snprintf(s_sta_ip, sizeof(s_sta_ip), "-");
             unlock_mode();
             if (should_fallback) {
@@ -446,7 +665,20 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             s_sta_connected = true;
             esp_timer_stop(s_sta_fallback_timer);
             snprintf(s_sta_ip, sizeof(s_sta_ip), IPSTR, IP2STR(&event->ip_info.ip));
+            bool should_save = s_save_sta_on_connect && s_pending_save_ssid[0] != '\0';
+            char save_ssid[33];
+            char save_pass[65];
+            snprintf(save_ssid, sizeof(save_ssid), "%s", s_pending_save_ssid);
+            snprintf(save_pass, sizeof(save_pass), "%s", s_pending_save_pass);
+            clear_pending_save_locked();
             unlock_mode();
+            if (should_save) {
+                esp_err_t save_ret = wifi_manager_save_sta_config(save_ssid, save_pass);
+                if (save_ret != ESP_OK) {
+                    ESP_LOGW(TAG, "Failed to persist STA config: %s",
+                             esp_err_to_name(save_ret));
+                }
+            }
         }
         ESP_LOGI(TAG, "STA got IP: %s", s_sta_ip);
         report_net_mode(SYSTEM_NET_STA);

@@ -2,10 +2,12 @@
 #define SYSTEM_MENU_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #define SYSTEM_MENU_ROWS 4
 #define SYSTEM_MENU_TEXT_LEN 48
+#define SYSTEM_MENU_WIFI_MAX_APS 8
 
 typedef enum {
     SYSTEM_KEY_NEXT,
@@ -34,6 +36,9 @@ typedef enum {
     SYSTEM_ACTION_NONE,
     SYSTEM_ACTION_NET_AP,
     SYSTEM_ACTION_NET_STA,
+    SYSTEM_ACTION_NET_STA_QUICK,
+    SYSTEM_ACTION_NET_STA_WEB_SETUP,
+    SYSTEM_ACTION_NET_STA_QUICK_CONNECT,
     SYSTEM_ACTION_NET_STA_CLEAR,
     SYSTEM_ACTION_COMM_AUTO,
     SYSTEM_ACTION_COMM_WIFI,
@@ -47,6 +52,12 @@ typedef enum {
     SYSTEM_ACTION_STATS_RESET,
     SYSTEM_ACTION_DISPLAY_INFO,
 } system_menu_action_t;
+
+typedef struct {
+    char ssid[33];
+    int8_t rssi;
+    bool saved;
+} system_menu_wifi_ap_t;
 
 typedef struct {
     bool active;
@@ -76,6 +87,9 @@ void system_menu_set_comm_mode(system_comm_mode_t mode);
 void system_menu_set_uart_baud(uint32_t baud);
 void system_menu_set_ble_ready(bool ready);
 void system_menu_set_message(const char *message);
+void system_menu_set_wifi_scan_results(const system_menu_wifi_ap_t *aps,
+                                       uint8_t count);
+bool system_menu_get_selected_wifi_ssid(char *out, size_t out_size);
 void system_menu_show_action_result(system_menu_action_t action,
                                     const char *status,
                                     const char *detail,

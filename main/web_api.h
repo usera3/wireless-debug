@@ -19,6 +19,10 @@ typedef struct {
     void (*get_wifi_status)(wifi_manager_status_t *out, void *ctx);
     esp_err_t (*save_wifi_sta_config)(const char *ssid, const char *password, void *ctx);
     esp_err_t (*clear_wifi_sta_config)(void *ctx);
+    esp_err_t (*wifi_scan)(wifi_manager_scan_ap_t *out, size_t capacity,
+                           size_t *out_count, void *ctx);
+    esp_err_t (*wifi_connect_sta)(const char *ssid, const char *password,
+                                  bool save_on_success, void *ctx);
     void (*request_wifi_net_mode)(system_net_mode_t mode, void *ctx);
     bool (*wifi_client_connected)(void *ctx);
     bool (*ble_is_started)(void *ctx);

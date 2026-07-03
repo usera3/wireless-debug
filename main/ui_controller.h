@@ -5,11 +5,16 @@
 #include <stdint.h>
 #include "esp_err.h"
 #include "system_menu.h"
+#include "wifi_manager.h"
 
 typedef struct {
     bool (*wifi_has_sta_config)(void *ctx);
+    void (*wifi_get_status)(wifi_manager_status_t *out, void *ctx);
     void (*wifi_schedule_net_mode)(system_net_mode_t mode, void *ctx);
     esp_err_t (*wifi_clear_sta_config)(void *ctx);
+    esp_err_t (*wifi_scan)(wifi_manager_scan_ap_t *out, size_t capacity,
+                           size_t *out_count, void *ctx);
+    esp_err_t (*wifi_quick_connect)(const char *ssid, void *ctx);
     esp_err_t (*set_uart_baud)(uint32_t baud, void *ctx);
     bool (*ble_is_started)(void *ctx);
     esp_err_t (*ble_start)(void *ctx);

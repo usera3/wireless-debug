@@ -377,6 +377,20 @@ static esp_err_t web_api_clear_wifi_sta_config(void *ctx)
     return wifi_manager_clear_sta_config();
 }
 
+static esp_err_t web_api_wifi_scan(wifi_manager_scan_ap_t *out, size_t capacity,
+                                   size_t *out_count, void *ctx)
+{
+    (void)ctx;
+    return wifi_manager_scan(out, capacity, out_count);
+}
+
+static esp_err_t web_api_wifi_connect_sta(const char *ssid, const char *password,
+                                          bool save_on_success, void *ctx)
+{
+    (void)ctx;
+    return wifi_manager_connect_sta(ssid, password, save_on_success);
+}
+
 static void web_api_request_wifi_net_mode(system_net_mode_t mode, void *ctx)
 {
     (void)ctx;
@@ -437,6 +451,12 @@ static bool ui_wifi_has_sta_config(void *ctx)
     return wifi_manager_has_sta_config();
 }
 
+static void ui_wifi_get_status(wifi_manager_status_t *out, void *ctx)
+{
+    (void)ctx;
+    wifi_manager_get_status(out);
+}
+
 static void ui_wifi_schedule_net_mode(system_net_mode_t mode, void *ctx)
 {
     (void)ctx;
@@ -447,6 +467,19 @@ static esp_err_t ui_wifi_clear_sta_config(void *ctx)
 {
     (void)ctx;
     return wifi_manager_clear_sta_config();
+}
+
+static esp_err_t ui_wifi_scan(wifi_manager_scan_ap_t *out, size_t capacity,
+                              size_t *out_count, void *ctx)
+{
+    (void)ctx;
+    return wifi_manager_scan(out, capacity, out_count);
+}
+
+static esp_err_t ui_wifi_quick_connect(const char *ssid, void *ctx)
+{
+    (void)ctx;
+    return wifi_manager_quick_connect(ssid);
 }
 
 static esp_err_t ui_set_uart_baud(uint32_t baud, void *ctx)
@@ -530,6 +563,8 @@ static void start_webserver(void)
         .get_wifi_status = web_api_get_wifi_status,
         .save_wifi_sta_config = web_api_save_wifi_sta_config,
         .clear_wifi_sta_config = web_api_clear_wifi_sta_config,
+        .wifi_scan = web_api_wifi_scan,
+        .wifi_connect_sta = web_api_wifi_connect_sta,
         .request_wifi_net_mode = web_api_request_wifi_net_mode,
         .wifi_client_connected = web_api_wifi_client_connected,
         .ble_is_started = web_api_ble_is_started,
@@ -629,8 +664,11 @@ void app_main(void)
 
     ui_controller_config_t ui_config = {
         .wifi_has_sta_config = ui_wifi_has_sta_config,
+        .wifi_get_status = ui_wifi_get_status,
         .wifi_schedule_net_mode = ui_wifi_schedule_net_mode,
         .wifi_clear_sta_config = ui_wifi_clear_sta_config,
+        .wifi_scan = ui_wifi_scan,
+        .wifi_quick_connect = ui_wifi_quick_connect,
         .set_uart_baud = ui_set_uart_baud,
         .ble_is_started = ui_ble_is_started,
         .ble_start = ui_ble_start,

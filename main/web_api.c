@@ -295,6 +295,12 @@ static const char *menu_action_name(system_menu_action_t action)
         return "net_ap";
     case SYSTEM_ACTION_NET_STA:
         return "net_sta";
+    case SYSTEM_ACTION_NET_STA_QUICK:
+        return "net_sta_quick";
+    case SYSTEM_ACTION_NET_STA_WEB_SETUP:
+        return "net_sta_web_setup";
+    case SYSTEM_ACTION_NET_STA_QUICK_CONNECT:
+        return "net_sta_quick_connect";
     case SYSTEM_ACTION_NET_STA_CLEAR:
         return "net_sta_clear";
     case SYSTEM_ACTION_COMM_AUTO:
@@ -376,6 +382,26 @@ static esp_err_t save_wifi_sta_config(const char *ssid, const char *password)
         return ESP_ERR_INVALID_STATE;
     }
     return ctx->save_wifi_sta_config(ssid, password, ctx->ctx);
+}
+
+static esp_err_t wifi_scan_aps(wifi_manager_scan_ap_t *out, size_t capacity,
+                               size_t *out_count)
+{
+    const web_api_context_t *ctx = api_ctx();
+    if (ctx->wifi_scan == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return ctx->wifi_scan(out, capacity, out_count, ctx->ctx);
+}
+
+static esp_err_t wifi_connect_sta(const char *ssid, const char *password,
+                                  bool save_on_success)
+{
+    const web_api_context_t *ctx = api_ctx();
+    if (ctx->wifi_connect_sta == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return ctx->wifi_connect_sta(ssid, password, save_on_success, ctx->ctx);
 }
 
 static bool wifi_client_connected(void)
@@ -572,6 +598,100 @@ static esp_err_t wifi_sta_delete_handler(httpd_req_t *req)
 static esp_err_t wifi_sta_options_handler(httpd_req_t *req)
 {
     return http_send_options(req, "POST, DELETE, OPTIONS", "Content-Type");
+}
+
+static esp_err_t wifi_scan_handler(httpd_req_t *req)
+{
+    wifi_manager_scan_ap_t aps[WIFI_MANAGER_SCAN_MAX_APS];
+    size_t count = 0;
+
+    http_prepare_json(req);
+    esp_err_t err = wifi_scan_aps(aps, WIFI_MANAGER_SCAN_MAX_APS, &count);
+    if (err != ESP_OK) {
+        char resp[96];
+        snprintf(resp, sizeof(resp), "{\"ok\":false,\"msg\":\"scan failed:%d\"}", err);
+        httpd_resp_sendstr(req, resp);
+        return ESP_OK;
+    }
+
+    httpd_resp_sendstr_chunk(req, "{\"ok\":true,\"aps\":[");
+    for (size_t i = 0; i < count; i++) {
+        char ssid[80];
+        char item[176];
+        json_escape_string(aps[i].ssid, ssid, sizeof(ssid));
+        snprintf(item, sizeof(item),
+                 "%s{\"ssid\":\"%s\",\"rssi\":%d,\"auth\":%u,\"saved\":%s}",
+                 i == 0 ? "" : ",",
+                 ssid,
+                 (int)aps[i].rssi,
+                 (unsigned)aps[i].authmode,
+                 aps[i].saved ? "true" : "false");
+        httpd_resp_sendstr_chunk(req, item);
+    }
+    httpd_resp_sendstr_chunk(req, "]}");
+    httpd_resp_sendstr_chunk(req, NULL);
+    return ESP_OK;
+}
+
+static esp_err_t wifi_connect_handler(httpd_req_t *req)
+{
+    http_prepare_json(req);
+
+    if (req->content_len == 0 || req->content_len > 256) {
+        httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"invalid body\"}");
+        return ESP_OK;
+    }
+
+    char body[257] = {0};
+    int ret = httpd_req_recv(req, body, req->content_len);
+    if (ret <= 0) {
+        httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"recv error\"}");
+        return ESP_OK;
+    }
+
+    char ssid[33] = {0};
+    char password[65] = {0};
+    bool save_on_success = true;
+    if (!parse_json_string_field(body, "ssid", ssid, sizeof(ssid)) || ssid[0] == '\0') {
+        httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"missing ssid\"}");
+        return ESP_OK;
+    }
+    parse_json_string_field(body, "password", password, sizeof(password));
+    (void)parse_json_bool_field(body, "save", &save_on_success);
+    (void)parse_json_bool_field(body, "save_on_success", &save_on_success);
+
+    esp_err_t err = wifi_connect_sta(ssid, password, save_on_success);
+    if (err != ESP_OK) {
+        char resp[96];
+        snprintf(resp, sizeof(resp), "{\"ok\":false,\"msg\":\"connect failed:%d\"}", err);
+        httpd_resp_sendstr(req, resp);
+        return ESP_OK;
+    }
+
+    system_menu_set_message("STA CONNECTING");
+    display_port_set_status("wifi_connect");
+    display_lvgl_set_status("sta_conn");
+    display_lvgl_set_wifi_ssid(ssid);
+
+    char esc_ssid[80];
+    char resp[160];
+    json_escape_string(ssid, esc_ssid, sizeof(esc_ssid));
+    snprintf(resp, sizeof(resp),
+             "{\"ok\":true,\"state\":\"connecting\",\"ssid\":\"%s\",\"save\":%s}",
+             esc_ssid,
+             save_on_success ? "true" : "false");
+    httpd_resp_sendstr(req, resp);
+    return ESP_OK;
+}
+
+static esp_err_t wifi_scan_options_handler(httpd_req_t *req)
+{
+    return http_send_options(req, "GET, OPTIONS", "Content-Type");
+}
+
+static esp_err_t wifi_connect_options_handler(httpd_req_t *req)
+{
+    return http_send_options(req, "POST, OPTIONS", "Content-Type");
 }
 
 static esp_err_t input_key_handler(httpd_req_t *req)
@@ -2091,7 +2211,8 @@ static esp_err_t device_capabilities_handler(httpd_req_t *req)
                        "\"domain\":\"motor wireless diagnostics\","
                        "\"limits\":{\"display_text\":512,\"uart_baud_min\":1200,"
                        "\"uart_baud_max\":5000000},"
-                       "\"actions\":[\"wifi_ap\",\"wifi_sta\",\"ble_start\","
+                       "\"actions\":[\"wifi_ap\",\"wifi_sta\",\"wifi_scan\","
+                       "\"wifi_connect\",\"ble_start\","
                        "\"set_comm_mode\",\"set_uart_baud\",\"query_status\","
                        "\"uart_tx_text\",\"uart_tx_hex\",\"ble_tx_text\","
                        "\"ble_tx_hex\",\"display_text\",\"display_scroll\","
@@ -2140,6 +2261,8 @@ static esp_err_t device_capabilities_handler(httpd_req_t *req)
                        "{\"method\":\"POST\",\"path\":\"/api/motor/params/read\"},"
                        "{\"method\":\"POST\",\"path\":\"/api/motor/params/write\"},"
                        "{\"method\":\"GET\",\"path\":\"/api/wifi/status\"},"
+                       "{\"method\":\"GET\",\"path\":\"/api/wifi/scan\"},"
+                       "{\"method\":\"POST\",\"path\":\"/api/wifi/connect\",\"body\":\"{ssid,password,save?}\"},"
                        "{\"method\":\"POST\",\"path\":\"/api/wifi/sta\"},"
                        "{\"method\":\"DELETE\",\"path\":\"/api/wifi/sta\"},"
                        "{\"method\":\"POST\",\"path\":\"/api/wifi/mode\",\"body\":\"{mode:ap|sta}\"},"
@@ -2265,6 +2388,10 @@ esp_err_t web_api_register_handlers(httpd_handle_t server, const web_api_context
     REGISTER_API("/api/uart/baud", HTTP_POST, uart_baud_handler);
     REGISTER_API("/api/uart/baud", HTTP_OPTIONS, uart_baud_options_handler);
     REGISTER_API("/api/wifi/status", HTTP_GET, wifi_status_handler);
+    REGISTER_API("/api/wifi/scan", HTTP_GET, wifi_scan_handler);
+    REGISTER_API("/api/wifi/scan", HTTP_OPTIONS, wifi_scan_options_handler);
+    REGISTER_API("/api/wifi/connect", HTTP_POST, wifi_connect_handler);
+    REGISTER_API("/api/wifi/connect", HTTP_OPTIONS, wifi_connect_options_handler);
     REGISTER_API("/api/wifi/sta", HTTP_POST, wifi_sta_config_handler);
     REGISTER_API("/api/wifi/sta", HTTP_DELETE, wifi_sta_delete_handler);
     REGISTER_API("/api/wifi/sta", HTTP_OPTIONS, wifi_sta_options_handler);
