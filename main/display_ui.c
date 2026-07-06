@@ -229,10 +229,10 @@ static void update_closed_view(const display_ui_state_t *state)
     format_wifi_ip(ip, sizeof(ip), menu->net_mode, state->ssid);
 
     lv_label_set_text(s_title, state->firmware[0] ? state->firmware : "v?");
-    lv_label_set_text_fmt(s_rows[0], "WIFI %s", system_menu_net_name(menu->net_mode));
-    lv_label_set_text_fmt(s_rows[1], "IP   %s", ip);
-    lv_label_set_text_fmt(s_rows[2], "UART %s", baud);
-    lv_label_set_text_fmt(s_rows[3], "BLE  %s",
+    lv_label_set_text_fmt(s_rows[0], "WiFi:%s", system_menu_net_name(menu->net_mode));
+    lv_label_set_text_fmt(s_rows[1], "IP:%s", ip);
+    lv_label_set_text_fmt(s_rows[2], "UART:%s", baud);
+    lv_label_set_text_fmt(s_rows[3], "BLE:%s",
                           (menu->ble_ready || state->ble_ready) ? "ON" : "OFF");
     for (uint8_t i = 0; i < SYSTEM_MENU_ROWS; i++) {
         set_row_selected(s_rows[i], false);
