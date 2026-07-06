@@ -145,126 +145,6 @@ static void set_row_selected(lv_obj_t *row, bool selected)
     }
 }
 
-static const char *comm_short(system_comm_mode_t mode)
-{
-    switch (mode) {
-    case SYSTEM_COMM_WIFI:
-        return "W";
-    case SYSTEM_COMM_BLE:
-        return "B";
-    case SYSTEM_COMM_AUTO:
-    default:
-        return "A";
-    }
-}
-
-static const char *status_compact(const char *status)
-{
-    if (status == NULL || status[0] == '\0') {
-        return "-";
-    }
-    if (strcmp(status, "lvgl_on") == 0 ||
-        strcmp(status, "auto") == 0 ||
-        strcmp(status, "baud_ok") == 0) {
-        return "OK";
-    }
-    if (strcmp(status, "mode_wifi_auto") == 0 ||
-        strcmp(status, "menu_wifi") == 0) {
-        return "WIFI";
-    }
-    if (strcmp(status, "mode_ble_auto") == 0 ||
-        strcmp(status, "menu_ble") == 0) {
-        return "BLE";
-    }
-    if (strcmp(status, "menu_auto") == 0) {
-        return "AUTO";
-    }
-    if (strcmp(status, "ap_on") == 0) {
-        return "AP";
-    }
-    if (strcmp(status, "ap_switch") == 0 ||
-        strcmp(status, "menu_ap") == 0) {
-        return "AP...";
-    }
-    if (strcmp(status, "sta_on") == 0) {
-        return "STA";
-    }
-    if (strcmp(status, "sta_switch") == 0 ||
-        strcmp(status, "menu_sta") == 0) {
-        return "STA...";
-    }
-    if (strcmp(status, "ws_rx") == 0) {
-        return "WS RX";
-    }
-    if (strcmp(status, "ble_rx") == 0) {
-        return "BLE RX";
-    }
-    if (strcmp(status, "ble_on") == 0) {
-        return "BLE";
-    }
-    if (strcmp(status, "sta_conn") == 0) {
-        return "STA...";
-    }
-    if (strcmp(status, "sta_cfg") == 0 ||
-        strcmp(status, "sta_clear") == 0 ||
-        strcmp(status, "sta_need_cfg") == 0 ||
-        strcmp(status, "menu_sta_clear") == 0 ||
-        strcmp(status, "menu_sta_pending") == 0) {
-        return "CFG";
-    }
-    if (strcmp(status, "ble_start") == 0) {
-        return "BLE...";
-    }
-    if (strcmp(status, "heap_info") == 0) {
-        return "HEAP";
-    }
-    if (strcmp(status, "sta_lost") == 0 ||
-        strcmp(status, "sta_fail") == 0 ||
-        strcmp(status, "ble_fail") == 0) {
-        return "WARN";
-    }
-    return status;
-}
-
-static uint64_t total_error_count(const comm_stats_snapshot_t *s)
-{
-    return s->uart_tx_failures +
-           s->uart_overflows +
-           s->ble_notify_failures +
-           s->ble_no_subscriber_drops +
-           s->ble_alloc_failures +
-           s->wifi_tx_failures +
-           s->wifi_no_client_drops +
-           s->wifi_pool_exhausted +
-           s->wifi_queue_full +
-           s->wifi_httpd_queue_failures +
-           s->wifi_rx_failures +
-           s->route_idle_drops +
-           s->route_unavailable_drops +
-           s->route_partial_drops;
-}
-
-static unsigned long count_k(uint64_t value)
-{
-    return (unsigned long)(value / 1000ULL);
-}
-
-static void format_count(char *out, size_t out_size, uint64_t value)
-{
-    if (out == NULL || out_size == 0) {
-        return;
-    }
-    if (value >= 1000000000ULL) {
-        snprintf(out, out_size, "1G+");
-    } else if (value >= 1000000ULL) {
-        snprintf(out, out_size, "%luM", (unsigned long)(value / 1000000ULL));
-    } else if (value >= 10000ULL) {
-        snprintf(out, out_size, "%luK", count_k(value));
-    } else {
-        snprintf(out, out_size, "%lu", (unsigned long)value);
-    }
-}
-
 static void format_baud(char *out, size_t out_size, uint32_t baud)
 {
     if (out == NULL || out_size == 0) {
@@ -283,25 +163,38 @@ static void format_baud(char *out, size_t out_size, uint32_t baud)
     }
 }
 
-static void format_wifi_label(char *out, size_t out_size, const char *ssid)
+static bool is_ipv4_label(const char *text)
 {
-    const char *label = ssid;
+    uint8_t dots = 0;
+    uint8_t digits = 0;
 
+    if (text == NULL || text[0] == '\0') {
+        return false;
+    }
+    for (const char *p = text; *p != '\0'; p++) {
+        if (*p >= '0' && *p <= '9') {
+            digits++;
+        } else if (*p == '.') {
+            dots++;
+        } else {
+            return false;
+        }
+    }
+    return dots == 3 && digits >= 4;
+}
+
+static void format_wifi_ip(char *out, size_t out_size,
+                           system_net_mode_t mode, const char *label)
+{
     if (out == NULL || out_size == 0) {
         return;
     }
-
-    if (label == NULL || label[0] == '\0' || strcmp(label, "-") == 0) {
-        snprintf(out, out_size, "-");
-        return;
-    }
-
-    if (strncmp(label, "ESP32-S3_AP_", 12) == 0) {
-        snprintf(out, out_size, "AP%.4s", label + 12);
-    } else if (strncmp(label, "ESP32-S3_", 9) == 0) {
-        snprintf(out, out_size, "%.6s", label + 9);
+    if (mode == SYSTEM_NET_AP) {
+        snprintf(out, out_size, "192.168.4.1");
+    } else if (is_ipv4_label(label)) {
+        snprintf(out, out_size, "%s", label);
     } else {
-        snprintf(out, out_size, "%.6s", label);
+        snprintf(out, out_size, "-");
     }
 }
 
@@ -310,12 +203,14 @@ static void update_status_bar(const display_ui_state_t *state)
     char left[16];
     char mid[16];
     char right[16];
+    char baud[8];
     const system_menu_snapshot_t *menu = &state->menu;
 
-    snprintf(left, sizeof(left), "NET:%s", system_menu_net_name(menu->net_mode));
-    snprintf(mid, sizeof(mid), "COM:%s", comm_short(menu->comm_mode));
-    snprintf(right, sizeof(right), "BLE:%s",
-             (menu->ble_ready || state->ble_ready) ? "ON" : "--");
+    format_baud(baud, sizeof(baud), state->baud);
+    snprintf(left, sizeof(left), "W:%s", system_menu_net_name(menu->net_mode));
+    snprintf(mid, sizeof(mid), "U:%s", baud);
+    snprintf(right, sizeof(right), "B:%s",
+             (menu->ble_ready || state->ble_ready) ? "ON" : "OFF");
 
     lv_label_set_text(s_status_left, left);
     lv_label_set_text(s_status_mid, mid);
@@ -325,47 +220,24 @@ static void update_status_bar(const display_ui_state_t *state)
 static void update_closed_view(const display_ui_state_t *state)
 {
     const system_menu_snapshot_t *menu = &state->menu;
-    const comm_stats_snapshot_t *stats = &state->stats;
-    char baud[8];
-    char wifi[8];
-    char uart_rx[8];
-    char uart_tx[8];
-    char ble_rx[8];
-    char ble_tx[8];
-    char wifi_rx[8];
-    char wifi_tx[8];
-    uint64_t errors = total_error_count(stats);
-    uint32_t minutes = state->uptime_s / 60U;
+    char baud[12];
+    char ip[18];
 
     set_standard_layout();
 
     format_baud(baud, sizeof(baud), state->baud);
-    format_wifi_label(wifi, sizeof(wifi), state->ssid);
-    format_count(uart_rx, sizeof(uart_rx), stats->uart_rx_frames);
-    format_count(uart_tx, sizeof(uart_tx), stats->uart_tx_bytes);
-    format_count(ble_rx, sizeof(ble_rx), stats->ble_rx_frames);
-    format_count(ble_tx, sizeof(ble_tx), stats->ble_tx_bytes);
-    format_count(wifi_rx, sizeof(wifi_rx), stats->wifi_rx_frames);
-    format_count(wifi_tx, sizeof(wifi_tx), stats->wifi_tx_sent_bytes);
+    format_wifi_ip(ip, sizeof(ip), menu->net_mode, state->ssid);
 
     lv_label_set_text(s_title, state->firmware[0] ? state->firmware : "v?");
-    lv_label_set_text_fmt(s_rows[0], "U%s %s/%s",
-                          baud, uart_rx, uart_tx);
-    lv_label_set_text_fmt(s_rows[1], "B%s %s/%s",
-                          (menu->ble_ready || state->ble_ready) ? "ON" : "--",
-                          ble_rx, ble_tx);
-    lv_label_set_text_fmt(s_rows[2], "W%s %s/%s",
-                          wifi, wifi_rx, wifi_tx);
-    lv_label_set_text_fmt(s_rows[3], "H %lu/%luK",
-                          (unsigned long)state->heap_internal_kb,
-                          (unsigned long)state->heap_min_internal_kb);
+    lv_label_set_text_fmt(s_rows[0], "WIFI %s", system_menu_net_name(menu->net_mode));
+    lv_label_set_text_fmt(s_rows[1], "IP   %s", ip);
+    lv_label_set_text_fmt(s_rows[2], "UART %s", baud);
+    lv_label_set_text_fmt(s_rows[3], "BLE  %s",
+                          (menu->ble_ready || state->ble_ready) ? "ON" : "OFF");
     for (uint8_t i = 0; i < SYSTEM_MENU_ROWS; i++) {
         set_row_selected(s_rows[i], false);
     }
-    lv_label_set_text_fmt(s_footer, "%s E%lu U%lum",
-                          status_compact(state->status),
-                          (unsigned long)errors,
-                          (unsigned long)minutes);
+    lv_label_set_text(s_footer, "S5 MENU");
 }
 
 static void update_menu_view(const display_ui_state_t *state)
