@@ -22,6 +22,8 @@ static lv_obj_t *s_footer;
 #define UI_ROW_H        8
 #define UI_FOOTER_Y     56
 #define UI_MARGIN_X     2
+#define HOME_ROW_Y      0
+#define HOME_ROW_STEP   10
 #define OVERLAY_CJK_COL_UNITS 20
 #define OVERLAY_CJK_ROW_H 12
 #define OVERLAY_ROW_BYTES 80
@@ -74,6 +76,19 @@ static void set_standard_layout(void)
         lv_obj_set_style_text_font(s_rows[i], DISPLAY_LVGL_FONT, 0);
         lv_obj_set_height(s_rows[i], UI_ROW_H);
         lv_obj_set_y(s_rows[i], UI_ROW_Y + i * UI_ROW_H);
+        set_label_long_mode(s_rows[i], LV_LABEL_LONG_MODE_CLIP);
+    }
+    set_label_long_mode(s_title, LV_LABEL_LONG_MODE_CLIP);
+    set_label_long_mode(s_footer, LV_LABEL_LONG_MODE_CLIP);
+    s_overlay_text_layout = false;
+}
+
+static void set_home_layout(void)
+{
+    for (uint8_t i = 0; i < SYSTEM_MENU_ROWS; i++) {
+        lv_obj_set_style_text_font(s_rows[i], DISPLAY_LVGL_FONT, 0);
+        lv_obj_set_height(s_rows[i], UI_ROW_H);
+        lv_obj_set_y(s_rows[i], HOME_ROW_Y + i * HOME_ROW_STEP);
         set_label_long_mode(s_rows[i], LV_LABEL_LONG_MODE_CLIP);
     }
     set_label_long_mode(s_title, LV_LABEL_LONG_MODE_CLIP);
@@ -223,12 +238,15 @@ static void update_closed_view(const display_ui_state_t *state)
     char baud[12];
     char ip[18];
 
-    set_standard_layout();
+    set_home_layout();
 
     format_baud(baud, sizeof(baud), state->baud);
     format_wifi_ip(ip, sizeof(ip), menu->net_mode, state->ssid);
 
-    lv_label_set_text(s_title, state->firmware[0] ? state->firmware : "v?");
+    lv_label_set_text(s_status_left, " ");
+    lv_label_set_text(s_status_mid, " ");
+    lv_label_set_text(s_status_right, " ");
+    lv_label_set_text(s_title, " ");
     lv_label_set_text_fmt(s_rows[0], "WiFi:%s", system_menu_net_name(menu->net_mode));
     lv_label_set_text_fmt(s_rows[1], "IP:%s", ip);
     lv_label_set_text_fmt(s_rows[2], "UART:%s", baud);
