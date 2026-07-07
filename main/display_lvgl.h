@@ -1,6 +1,7 @@
 #ifndef DISPLAY_LVGL_H
 #define DISPLAY_LVGL_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
 
@@ -14,7 +15,7 @@ void display_lvgl_set_text_screen(const char *title, const char *line1,
                                    const char *line2, const char *line3,
                                    const char *line4, const char *footer);
 void display_lvgl_set_text_scroll(const char *title, const char *text, const char *footer);
-void display_lvgl_clear_text_screen(void);
+bool display_lvgl_clear_text_screen(void);
 void display_lvgl_request_redraw(void);
 
 #endif /* DISPLAY_LVGL_H */

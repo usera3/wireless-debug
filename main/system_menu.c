@@ -431,7 +431,7 @@ static const char *page_title(menu_page_t page)
         return "SYSTEM";
     case MENU_PAGE_ROOT:
     default:
-        return "MENU";
+        return "";
     }
 }
 
@@ -549,7 +549,7 @@ system_menu_action_t system_menu_handle_key(system_key_t key)
         if (key == SYSTEM_KEY_OK) {
             s_menu.active = true;
             s_menu.page = MENU_PAGE_ROOT;
-            set_message_locked("MENU OPEN");
+            set_message_locked("-");
         }
         s_menu.event_count++;
         menu_unlock();

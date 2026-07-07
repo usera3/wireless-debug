@@ -517,8 +517,19 @@ static void ui_log_heap(const char *label, void *ctx)
 static void app_button_key_received(system_key_t key, void *ctx)
 {
     (void)ctx;
-    display_lvgl_clear_text_screen();
-    system_menu_action_t action = system_menu_handle_key(key);
+    system_menu_snapshot_t menu_before;
+    system_menu_get_snapshot(&menu_before);
+
+    bool cleared_text = display_lvgl_clear_text_screen();
+    system_menu_action_t action = SYSTEM_ACTION_NONE;
+    if (cleared_text && !menu_before.active && key == SYSTEM_KEY_NEXT) {
+        (void)system_menu_handle_key(SYSTEM_KEY_OK);
+    } else {
+        action = system_menu_handle_key(key);
+    }
+    if (cleared_text) {
+        display_port_set_status("key_menu");
+    }
     (void)ui_controller_apply_menu_action(action, SYSTEM_ACTION_SOURCE_KEY);
     display_lvgl_request_redraw();
 }

@@ -213,23 +213,11 @@ static void format_wifi_ip(char *out, size_t out_size,
     }
 }
 
-static void update_status_bar(const display_ui_state_t *state)
+static void clear_status_bar(void)
 {
-    char left[16];
-    char mid[16];
-    char right[16];
-    char baud[8];
-    const system_menu_snapshot_t *menu = &state->menu;
-
-    format_baud(baud, sizeof(baud), state->baud);
-    snprintf(left, sizeof(left), "W:%s", system_menu_net_name(menu->net_mode));
-    snprintf(mid, sizeof(mid), "U:%s", baud);
-    snprintf(right, sizeof(right), "B:%s",
-             (menu->ble_ready || state->ble_ready) ? "ON" : "OFF");
-
-    lv_label_set_text(s_status_left, left);
-    lv_label_set_text(s_status_mid, mid);
-    lv_label_set_text(s_status_right, right);
+    lv_label_set_text(s_status_left, " ");
+    lv_label_set_text(s_status_mid, " ");
+    lv_label_set_text(s_status_right, " ");
 }
 
 static void update_closed_view(const display_ui_state_t *state)
@@ -243,9 +231,6 @@ static void update_closed_view(const display_ui_state_t *state)
     format_baud(baud, sizeof(baud), state->baud);
     format_wifi_ip(ip, sizeof(ip), menu->net_mode, state->ssid);
 
-    lv_label_set_text(s_status_left, " ");
-    lv_label_set_text(s_status_mid, " ");
-    lv_label_set_text(s_status_right, " ");
     lv_label_set_text(s_title, " ");
     lv_label_set_text_fmt(s_rows[0], "WiFi:%s", system_menu_net_name(menu->net_mode));
     lv_label_set_text_fmt(s_rows[1], "IP:%s", ip);
@@ -268,7 +253,7 @@ static void update_menu_view(const display_ui_state_t *state)
 
     set_label_long_mode(s_title, LV_LABEL_LONG_MODE_CLIP);
     set_label_long_mode(s_footer, LV_LABEL_LONG_MODE_CLIP);
-    lv_label_set_text(s_title, menu->title[0] ? menu->title : "MENU");
+    lv_label_set_text(s_title, menu->title[0] ? menu->title : " ");
 
     for (uint8_t i = 0; i < SYSTEM_MENU_ROWS; i++) {
         bool selected = menu->rows[i][0] == '>';
@@ -442,10 +427,10 @@ void display_ui_build(lv_obj_t *screen)
     lv_obj_set_size(s_root, UI_W, UI_H);
     make_plain_box(s_root);
 
-    s_status_left = make_label(s_root, UI_MARGIN_X, UI_STATUS_Y, 42, 8, "NET:AP");
-    s_status_mid = make_label(s_root, 43, UI_STATUS_Y, 42, 8, "COM:A");
+    s_status_left = make_label(s_root, UI_MARGIN_X, UI_STATUS_Y, 42, 8, " ");
+    s_status_mid = make_label(s_root, 43, UI_STATUS_Y, 42, 8, " ");
     lv_obj_set_style_text_align(s_status_mid, LV_TEXT_ALIGN_CENTER, 0);
-    s_status_right = make_label(s_root, 86, UI_STATUS_Y, 40, 8, "BLE:--");
+    s_status_right = make_label(s_root, 86, UI_STATUS_Y, 40, 8, " ");
     lv_obj_set_style_text_align(s_status_right, LV_TEXT_ALIGN_RIGHT, 0);
 
     s_title = make_label(s_root, UI_MARGIN_X, UI_TITLE_Y, 124, 8, "v?");
@@ -466,7 +451,7 @@ void display_ui_update(const display_ui_state_t *state)
         return;
     }
 
-    update_status_bar(state);
+    clear_status_bar();
     if (state->overlay_active) {
         update_overlay_view(state);
     } else if (state->menu.active) {

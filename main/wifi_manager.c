@@ -470,6 +470,10 @@ esp_err_t wifi_manager_scan(wifi_manager_scan_ap_t *out, size_t capacity,
 
     wifi_scan_config_t scan_config = {
         .show_hidden = false,
+        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+        .scan_time.active.min = 10,
+        .scan_time.active.max = 30,
+        .home_chan_dwell_time = 30,
     };
     esp_err_t ret = esp_wifi_scan_start(&scan_config, true);
     if (ret != ESP_OK) {

@@ -49,6 +49,25 @@
         word-break: break-word;
       }
 
+      .hint {
+        margin: -3px 0 12px;
+        color: #8ea4af;
+        font-size: 12px;
+      }
+
+      .links {
+        display: flex;
+        gap: 10px;
+        margin: 0 0 14px;
+        flex-wrap: wrap;
+      }
+
+      .links a {
+        color: #9fc7ff;
+        text-decoration: none;
+        font-weight: 700;
+      }
+
       button {
         min-height: 42px;
         border: 1px solid #3d5563;
@@ -137,6 +156,10 @@
         <div id="status" class="status">loading...</div>
         <button id="scan" type="button">扫描</button>
       </div>
+      <p class="hint">扫描或连接时 AP 热点可能会短暂断开；重新连回 ESP32 后本页会继续刷新。</p>
+      <div class="links">
+        <a href="/orig/i.html">返回 Wireless Debug</a>
+      </div>
 
       <div id="apList" class="scan-list"></div>
 
@@ -176,8 +199,18 @@
           statusEl.textContent = text;
         }
 
-        async function jsonFetch(path, options = {}) {
-          const resp = await fetch(path, { cache: "no-store", ...options });
+        async function jsonFetch(path, options = {}, timeoutMs = 4500) {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), timeoutMs);
+          let resp;
+          try {
+            resp = await fetch(path, { cache: "no-store", signal: controller.signal, ...options });
+          } finally {
+            clearTimeout(timer);
+          }
+          if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}`);
+          }
           return resp.json();
         }
 
@@ -234,13 +267,17 @@
         async function scanWifi() {
           stopPolling();
           setBusy(true);
-          setStatus("scanning...");
+          setStatus("scanning... AP may reconnect");
           let data = null;
           let lastError = "";
+          let refreshRequested = false;
+          const deadline = Date.now() + 90000;
 
-          for (let left = 18; left > 0; left -= 1) {
+          while (Date.now() < deadline) {
             try {
-              data = await jsonFetch(left === 18 ? "/api/wifi/scan?refresh=1" : "/api/wifi/scan");
+              const path = refreshRequested ? "/api/wifi/scan" : "/api/wifi/scan?refresh=1";
+              refreshRequested = true;
+              data = await jsonFetch(path);
               if (!data.ok) {
                 setStatus(`scan failed: ${data.msg || "unknown"}`);
                 setBusy(false);
@@ -252,12 +289,12 @@
                 setBusy(false);
                 return;
               }
-              setStatus("scanning...");
+              setStatus("scanning... AP may reconnect");
             } catch (err) {
               lastError = err.message;
-              setStatus("scanning... reconnecting");
+              setStatus("waiting for ESP32 AP...");
             }
-            await delay(1000);
+            await delay(1500);
           }
 
           setStatus(`scan timeout${lastError ? `: ${lastError}` : ""}`);
@@ -266,7 +303,7 @@
 
         function pollConnect(targetSsid) {
           stopPolling();
-          let left = 20;
+          const deadline = Date.now() + 120000;
           pollTimer = setInterval(async () => {
             try {
               const data = await loadStatus();
@@ -279,12 +316,12 @@
                 setStatus(`failed: ${targetSsid || data.sta_ssid || "-"}`);
               }
             } catch (err) {
-              setStatus(`status failed: ${err.message}`);
+              setStatus("waiting for ESP32 AP...");
             }
-            left -= 1;
-            if (left <= 0) {
+            if (Date.now() >= deadline) {
               stopPolling();
               setBusy(false);
+              setStatus(`connect timeout: ${targetSsid || "-"}`);
             }
           }, 1500);
         }
@@ -298,7 +335,7 @@
             return;
           }
           setBusy(true);
-          setStatus("connecting...");
+          setStatus("connecting... AP may reconnect");
           try {
             const data = await jsonFetch("/api/wifi/connect", {
               method: "POST",
@@ -312,8 +349,8 @@
             }
             pollConnect(ssid);
           } catch (err) {
-            setBusy(false);
-            setStatus(`connect failed: ${err.message}`);
+            setStatus("request sent; waiting for ESP32 AP...");
+            pollConnect(ssid);
           }
         });
 
@@ -338,7 +375,6 @@
         scanEl.addEventListener("click", scanWifi);
 
         loadStatus().catch((err) => setStatus(`status failed: ${err.message}`));
-        scanWifi();
       })();
     </script>
   </body>

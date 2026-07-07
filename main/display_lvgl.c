@@ -701,9 +701,12 @@ void display_lvgl_set_text_scroll(const char *title, const char *text, const cha
     }
 }
 
-void display_lvgl_clear_text_screen(void)
+bool display_lvgl_clear_text_screen(void)
 {
+    bool was_active = false;
+
     if (s_state_mutex != NULL && xSemaphoreTake(s_state_mutex, pdMS_TO_TICKS(2)) == pdTRUE) {
+        was_active = s_state.overlay_active;
         s_state.overlay_active = false;
         s_state.overlay_title[0] = '\0';
         for (uint8_t i = 0; i < 4; i++) {
@@ -716,6 +719,8 @@ void display_lvgl_clear_text_screen(void)
         mark_dirty_locked();
         xSemaphoreGive(s_state_mutex);
     }
+
+    return was_active;
 }
 
 void display_lvgl_request_redraw(void)
