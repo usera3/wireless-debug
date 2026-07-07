@@ -21,6 +21,8 @@ let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 // RAF 限流：缓冲区 + 动画帧句柄
 let oscBuffer: Map<number, number[]> = new Map();
 let rafHandle: number | null = null;
+let lastStoreFlushAt = 0;
+const STORE_FLUSH_INTERVAL_MS = 50;
 
 export function useOscController() {
   const {
@@ -29,14 +31,14 @@ export function useOscController() {
     setMaxChannels,
     setFrameLen,
     frameLen,
-    batchPushSamples,
-    clearWaveData,
+    appendSamples,
+    resetHistory,
     commRateLimit,
   } = useOscStore();
 
   /** 依次查询设备信息，再设置通道，最后开始采样 */
   const start = useCallback(async (channels: ChannelConfig[]) => {
-    clearWaveData();
+    resetHistory(channels);
 
     // 单请求-响应辅助：发送帧，等待 Modbus 响应（超时 1000ms）
     function sendAndWait(frame: Uint8Array): Promise<Uint8Array> {
@@ -85,7 +87,10 @@ export function useOscController() {
       // 4. 查询采样率
       const srResp = await sendAndWait(buildQuerySampleRate());
       const sr = parseFC04Response(srResp);
-      if (sr != null) setSampleRate(sr);
+      if (sr != null) {
+        setSampleRate(sr);
+        resetHistory(channels, sr);
+      }
 
       // 5. 开始采样
       wsClient.send(buildStartOsc());
@@ -101,7 +106,9 @@ export function useOscController() {
           if (!channels[idx]) return;
           const chNo = channels[idx].channelNo;
           const existing = oscBuffer.get(chNo) ?? [];
-          existing.push(...samples);
+          for (const sample of samples) {
+            existing.push(sample);
+          }
           oscBuffer.set(chNo, existing);
         });
       });
@@ -109,12 +116,15 @@ export function useOscController() {
       // RAF flush：每个动画帧把 buffer 一次性写入 store
       if (rafHandle !== null) cancelAnimationFrame(rafHandle);
       const flush = () => {
-        if (oscBuffer.size > 0) {
-          batchPushSamples(oscBuffer);
+        const now = performance.now();
+        if (oscBuffer.size > 0 && now - lastStoreFlushAt >= STORE_FLUSH_INTERVAL_MS) {
+          appendSamples(oscBuffer);
           oscBuffer = new Map();
+          lastStoreFlushAt = now;
         }
         rafHandle = requestAnimationFrame(flush);
       };
+      lastStoreFlushAt = performance.now();
       rafHandle = requestAnimationFrame(flush);
 
       // 6. 心跳 2s（模块级，切页不会停）
@@ -124,8 +134,9 @@ export function useOscController() {
       }, 1000);
     } catch (err) {
       console.error('[osc] start failed', err);
+      setRunning(false);
     }
-  }, [clearWaveData, frameLen, batchPushSamples, setFrameLen, setMaxChannels, setRunning, setSampleRate, commRateLimit]);
+  }, [frameLen, appendSamples, resetHistory, setFrameLen, setMaxChannels, setRunning, setSampleRate, commRateLimit]);
 
   const stop = useCallback(() => {
     wsClient.send(buildStopOsc());

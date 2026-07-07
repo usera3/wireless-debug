@@ -89,6 +89,16 @@ export function ConnectionPanel() {
           ESP32 默认地址：ws://192.168.4.1/ws
         </p>
 
+        <div>
+          <h3 className="text-sm font-semibold text-slate-300 mb-2">WiFi 配网</h3>
+          <a
+            href="/wifi.html"
+            className="inline-flex items-center px-3 py-2 rounded text-sm font-medium bg-slate-600 hover:bg-slate-500 text-white transition-colors"
+          >
+            打开网页配网
+          </a>
+        </div>
+
         {/* 烧录配置 */}
         <div>
           <h3 className="text-sm font-semibold text-slate-300 mb-2">烧录配置</h3>

@@ -14,6 +14,7 @@ export function exportCsv(
   columns: number[][],
   sampleIntervalSec: number,
   filename: string,
+  startTimeSec = 0,
 ) {
   const rowCount = columns.reduce((max, col) => Math.max(max, col.length), 0);
   if (rowCount === 0) return;
@@ -22,7 +23,7 @@ export function exportCsv(
   lines.push(['time_s', ...labels].join(','));
 
   for (let i = 0; i < rowCount; i++) {
-    const timeSec = (i * sampleIntervalSec).toFixed(6);
+    const timeSec = (startTimeSec + i * sampleIntervalSec).toFixed(6);
     const row = [timeSec];
     for (const col of columns) {
       row.push(i < col.length ? String(col[i]) : '');

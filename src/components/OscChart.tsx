@@ -10,20 +10,104 @@ const CHANNEL_COLORS = [
 
 type AlignedSeries = number[] | (number | null)[];
 type AlignedData = [number[], ...AlignedSeries[]];
+type ChartSeriesDef = { key: string | number; label: string };
 
+const MAX_PLOT_POINTS = 2400;
+const EMPTY_CHANNELS = new Map<number, number[]>();
 
+function getDataSpan(
+  channelNos: number[],
+  channels: Map<number, number[]>,
+  sampleOffsets?: Map<number, number>,
+): { start: number; end: number; length: number } | null {
+  let start = Number.POSITIVE_INFINITY;
+  let end = Number.NEGATIVE_INFINITY;
 
-function buildAlignedData(channelNos: number[], channels: Map<number, number[]>, sampleInterval: number): AlignedData {
-  const maxLen = channelNos.reduce((max, chNo) => Math.max(max, channels.get(chNo)?.length ?? 0), 0);
-  const xData = Array.from({ length: maxLen }, (_, i) => i * sampleInterval);
+  channelNos.forEach((chNo) => {
+    const values = channels.get(chNo) ?? [];
+    if (values.length === 0) return;
+    const offset = sampleOffsets?.get(chNo) ?? 0;
+    start = Math.min(start, offset);
+    end = Math.max(end, offset + values.length);
+  });
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  return { start, end, length: end - start };
+}
+
+function buildFullAlignedData(
+  channelNos: number[],
+  channels: Map<number, number[]>,
+  sampleInterval: number,
+  sampleOffsets?: Map<number, number>,
+): AlignedData {
+  const span = getDataSpan(channelNos, channels, sampleOffsets);
+  if (!span) return [[]];
+
+  const xData = Array.from({ length: span.length }, (_, i) => (span.start + i) * sampleInterval);
   const seriesData = channelNos.map((chNo) => {
     const values = channels.get(chNo) ?? [];
-    const aligned = new Array<number | null>(maxLen).fill(null);
+    const aligned = new Array<number | null>(span.length).fill(null);
+    const start = (sampleOffsets?.get(chNo) ?? 0) - span.start;
     for (let i = 0; i < values.length; i++) {
-      aligned[i] = values[i];
+      const alignedIndex = start + i;
+      if (alignedIndex >= 0 && alignedIndex < aligned.length) {
+        aligned[alignedIndex] = values[i];
+      }
     }
     return aligned;
   });
+
+  return [xData, ...seriesData];
+}
+
+function buildAlignedData(
+  channelNos: number[],
+  channels: Map<number, number[]>,
+  sampleInterval: number,
+  sampleOffsets?: Map<number, number>,
+): AlignedData {
+  const span = getDataSpan(channelNos, channels, sampleOffsets);
+  if (!span) return [[]];
+
+  if (span.length <= MAX_PLOT_POINTS) {
+    return buildFullAlignedData(channelNos, channels, sampleInterval, sampleOffsets);
+  }
+
+  const bucketSize = Math.max(1, Math.ceil(span.length / Math.floor(MAX_PLOT_POINTS / 2)));
+  const xData: number[] = [];
+  const seriesData = channelNos.map(() => [] as (number | null)[]);
+
+  for (let start = 0; start < span.length; start += bucketSize) {
+    const end = Math.min(span.length - 1, start + bucketSize - 1);
+    const pointOffset = xData.length;
+    xData.push((span.start + start) * sampleInterval);
+    if (end !== start) xData.push((span.start + end) * sampleInterval);
+
+    channelNos.forEach((chNo, channelIdx) => {
+      const values = channels.get(chNo) ?? [];
+      const channelStart = (sampleOffsets?.get(chNo) ?? 0) - span.start;
+      const valueStart = Math.max(start, channelStart);
+      const valueEnd = Math.min(end, channelStart + values.length - 1);
+      let min = Number.POSITIVE_INFINITY;
+      let max = Number.NEGATIVE_INFINITY;
+      for (let i = valueStart; i <= valueEnd; i++) {
+        const value = values[i - channelStart];
+        if (value == null || Number.isNaN(value)) continue;
+        if (value < min) min = value;
+        if (value > max) max = value;
+      }
+
+      const series = seriesData[channelIdx];
+      if (!Number.isFinite(min) || !Number.isFinite(max)) {
+        series[pointOffset] = null;
+        if (end !== start) series[pointOffset + 1] = null;
+      } else {
+        series[pointOffset] = min;
+        if (end !== start) series[pointOffset + 1] = max;
+      }
+    });
+  }
 
   return [xData, ...seriesData];
 }
@@ -39,7 +123,12 @@ function lowerBound(xData: number[], target: number): number {
   return lo;
 }
 
-function getVisibleYRange(data: AlignedData, xMin: number, xMax: number): { min: number; max: number } | null {
+function getVisibleYRange(
+  data: AlignedData,
+  xMin: number,
+  xMax: number,
+  visibleSeries?: boolean[],
+): { min: number; max: number } | null {
   const xData = data[0];
   if (xData.length === 0) return null;
 
@@ -54,6 +143,7 @@ function getVisibleYRange(data: AlignedData, xMin: number, xMax: number): { min:
   let max = Number.NEGATIVE_INFINITY;
 
   for (let seriesIdx = 1; seriesIdx < data.length; seriesIdx++) {
+    if (visibleSeries && visibleSeries[seriesIdx] === false) continue;
     const series = data[seriesIdx];
     for (let i = startIdx; i <= inclusiveEnd; i++) {
       const value = series[i];
@@ -74,16 +164,41 @@ function getVisibleYRange(data: AlignedData, xMin: number, xMax: number): { min:
 }
 
 interface OscChartProps {
-  channels: Map<number, number[]>;
+  channels?: Map<number, number[]>;
+  /** 已经按当前视口预处理/降采样过的数据。传入后不会再从 channels 构建。 */
+  alignedData?: AlignedData;
+  series?: ChartSeriesDef[];
   /** 采样间隔（秒），用于 x 轴时间计算 */
   sampleInterval: number;
   /** 当前示波是否仍在运行，用于同步跟随状态 */
   running?: boolean;
+  /** 跟随模式下默认显示的时间窗口（秒） */
+  windowSeconds?: number;
+  /** 外部数据源指定的 X 轴视口。 */
+  xRange?: { min: number; max: number };
+  /** 用户在图表内拖动/缩放 X 轴后回传新视口。 */
+  onXRangeChange?: (range: { min: number; max: number }) => void;
+  /** 外部触发完整视图复位：X 回到指定窗口，Y 回到自动范围。 */
+  resetViewSignal?: number;
+  /** 每个通道开头已丢弃的样本数，用于滚动窗口保持绝对时间轴 */
+  sampleOffsets?: Map<number, number>;
   /** 可选：通道号 -> 显示标签（如 alias），未提供时默认 CH{n} */
   labels?: Map<number, string>;
 }
 
-export function OscChart({ channels, sampleInterval, running = true, labels }: OscChartProps) {
+export function OscChart({
+  channels = EMPTY_CHANNELS,
+  alignedData,
+  series,
+  sampleInterval,
+  running = true,
+  windowSeconds,
+  xRange,
+  onXRangeChange,
+  resetViewSignal,
+  sampleOffsets,
+  labels,
+}: OscChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
@@ -94,15 +209,35 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
   const yModeRef = useRef<'auto' | 'manual'>('auto');
   const syncingScalesRef = useRef(false);
   const xSpanRef = useRef(1); // 当前显示窗口宽度（秒），默认1s
+  const windowSecondsRef = useRef(windowSeconds);
   const defaultYRangeRef = useRef({ min: -5000, max: 5000 });
-  // 自动模式下已应用的 Y 范围（只增不减），null 表示从数据重新计算（无兜底）
+  // 自动模式下已应用的 Y 范围。图例隐藏/恢复后要按当前可见曲线重新计算。
   const autoYRangeRef = useRef<{ min: number; max: number } | null>(null);
+  const seriesVisibilityRef = useRef<Map<string, boolean>>(new Map());
+  windowSecondsRef.current = windowSeconds;
 
-  const currentKey = `${sampleInterval}:${Array.from(channels.keys()).sort().join(',')}`;
+  const currentKey = alignedData && series
+    ? `${sampleInterval}:${series.map((item) => `${item.key}:${item.label}`).join(',')}`
+    : `${sampleInterval}:${Array.from(channels.keys()).sort().join(',')}`;
 
   // 始终持有最新的 effectiveChannels，供 effect 内部读取而不触发重建
   const effectiveChannelsRef = useRef(channels);
   effectiveChannelsRef.current = channels;
+
+  const alignedInputRef = useRef(alignedData);
+  alignedInputRef.current = alignedData;
+
+  const seriesInputRef = useRef(series);
+  seriesInputRef.current = series;
+
+  const xRangeRef = useRef(xRange);
+  xRangeRef.current = xRange;
+
+  const onXRangeChangeRef = useRef(onXRangeChange);
+  onXRangeChangeRef.current = onXRangeChange;
+
+  const sampleOffsetsRef = useRef(sampleOffsets);
+  sampleOffsetsRef.current = sampleOffsets;
 
   // 始终持有最新的 running，供事件 handler 闭包内读取
   const runningRef = useRef(running);
@@ -115,6 +250,48 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
   const getLatestX = () => alignedDataRef.current[0][alignedDataRef.current[0].length - 1] ?? 0;
 
   const getDefaultYRange = () => defaultYRangeRef.current;
+
+  const getRenderedSeriesKey = (seriesIndex: number): string | null => {
+    if (seriesIndex <= 0) return null;
+    const externalSeries = seriesInputRef.current;
+    const fallbackChannelNo = channelOrderRef.current[seriesIndex - 1];
+    const key = externalSeries?.[seriesIndex - 1]?.key ?? fallbackChannelNo ?? seriesIndex;
+    return String(key);
+  };
+
+  const recordSeriesVisibility = (plot: uPlot, seriesIndex: number | null, show: boolean) => {
+    const updateOne = (index: number) => {
+      const key = getRenderedSeriesKey(index);
+      if (key) seriesVisibilityRef.current.set(key, show);
+    };
+
+    if (seriesIndex == null) {
+      for (let index = 1; index < plot.series.length; index++) updateOne(index);
+    } else {
+      updateOne(seriesIndex);
+    }
+  };
+
+  const applyStoredSeriesVisibility = (plot: uPlot) => {
+    for (let index = 1; index < plot.series.length; index++) {
+      const key = getRenderedSeriesKey(index);
+      const expectedVisible = key ? seriesVisibilityRef.current.get(key) ?? true : true;
+      const currentVisible = plot.series[index].show !== false;
+      if (currentVisible !== expectedVisible) {
+        plot.setSeries(index, { show: expectedVisible }, false);
+      }
+    }
+  };
+
+  const isCurrentAutoYScale = (plot: uPlot) => {
+    const autoRange = autoYRangeRef.current;
+    const { min, max } = plot.scales.y;
+    if (!autoRange || min == null || max == null) return false;
+
+    const span = Math.max(Math.abs(autoRange.max - autoRange.min), 1);
+    const epsilon = span * 1e-9;
+    return Math.abs(min - autoRange.min) <= epsilon && Math.abs(max - autoRange.max) <= epsilon;
+  };
 
   const getXWindow = (plot: uPlot) => {
     const { min, max } = plot.scales.x;
@@ -138,28 +315,27 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
 
   const applyAutoY = (plot: uPlot) => {
     const { min, max } = getXWindow(plot);
-    const visibleRange = getVisibleYRange(alignedDataRef.current, min, max);
-    const prev = autoYRangeRef.current;
-
-    let nextRange: { min: number; max: number };
-    if (!visibleRange) {
-      if (!prev) {
-        return; // 既无历史也无数据，不改变 Y 轴
-      }
-      nextRange = { min: prev.min, max: prev.max }; // 拷贝，避免同一引用被后续 mutate 污染
-    } else if (!prev) {
-      nextRange = visibleRange; // 双击后首次：纯数据，无兜底
-    } else {
-      // 只增不减
-      nextRange = { min: Math.min(visibleRange.min, prev.min), max: Math.max(visibleRange.max, prev.max) };
-    }
-
+    const visibleRange = getVisibleYRange(
+      alignedDataRef.current,
+      min,
+      max,
+      plot.series.map((series) => series.show !== false),
+    );
+    const nextRange = visibleRange ? { min: visibleRange.min, max: visibleRange.max } : getDefaultYRange();
     autoYRangeRef.current = nextRange;
+    yModeRef.current = 'auto';
     plot.setScale('y', nextRange);
+    yModeRef.current = 'auto';
   };
 
   const moveToLatestView = (plot: uPlot) => {
     plot.setScale('x', computeXView());
+  };
+
+  const emitXRangeChange = (plot: uPlot) => {
+    const { min, max } = plot.scales.x;
+    if (min == null || max == null || max <= min) return;
+    onXRangeChangeRef.current?.({ min, max });
   };
 
   const getAxisRegion = (plot: uPlot, clientX: number, clientY: number): 'x' | 'y' | null => {
@@ -180,8 +356,8 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
     return null;
   };
 
-  /** 严格坐标轴条带（不包含绘图区内部），用于平移拖拽 */
-  const getAxisStripRegion = (plot: uPlot, clientX: number, clientY: number): 'x' | 'y' | null => {
+  /** 判断指针所在区域：plot 绘图区 / x 轴条带 / y 轴条带 */
+  const getPanZone = (plot: uPlot, clientX: number, clientY: number): 'plot' | 'x' | 'y' | null => {
     const rect = plot.root.getBoundingClientRect();
     const x = clientX - rect.left;
     const y = clientY - rect.top;
@@ -192,9 +368,8 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
     const overPlotX = x >= plotLeft && x <= plotLeft + plotWidth;
     const overPlotY = y >= plotTop && y <= plotTop + plotHeight;
 
-    // 仅 Y 轴左侧条带（不在绘图区内）
+    if (overPlotX && overPlotY) return 'plot';
     if (x < plotLeft && overPlotY) return 'y';
-    // 仅 X 轴下方条带（不在绘图区内）
     if (overPlotX && !overPlotY && y > plotTop + plotHeight) return 'x';
     return null;
   };
@@ -219,20 +394,25 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
     event.preventDefault();
 
     const scaleFactor = event.deltaY < 0 ? 0.85 : 1 / 0.85;
+    let nextXRange: { min: number; max: number } | null = null;
 
     syncingScalesRef.current = true;
     plot.batch(() => {
+      applyStoredSeriesVisibility(plot);
+
       if (axis === 'x') {
         xSpanRef.current = Math.max(xSpanRef.current * scaleFactor, sampleInterval);
         if (xModeRef.current === 'following') {
-          moveToLatestView(plot);
+          nextXRange = computeXView();
+          plot.setScale('x', nextXRange);
         } else {
           // manual 模式：以鼠标在 X 轴的位置为锚点缩放当前视口
           const { min, max } = plot.scales.x;
           if (min != null && max != null) {
             const plotLeft = plot.bbox.left / uPlot.pxRatio;
             const anchor = plot.posToVal(event.clientX - plot.rect.left - plotLeft, 'x');
-            plot.setScale('x', zoomRange(min, max, anchor, scaleFactor));
+            nextXRange = zoomRange(min, max, anchor, scaleFactor);
+            plot.setScale('x', nextXRange);
           }
         }
 
@@ -253,35 +433,46 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
       }
     });
     syncingScalesRef.current = false;
+    if (nextXRange) {
+      onXRangeChangeRef.current?.(nextXRange);
+    }
   };
 
   // 拖拽平移状态（不需要 ref，只在 handler 闭包内用）
   const panStateRef = useRef<{
-    axis: 'x' | 'y';
-    startClient: number;   // mousedown 时的 clientX 或 clientY
-    startMin: number;
-    startMax: number;
+    zone: 'plot' | 'x' | 'y';
+    startX: number;
+    startY: number;
+    startXMin: number;
+    startXMax: number;
+    startYMin: number;
+    startYMax: number;
   } | null>(null);
 
   const handlePanStart = (event: MouseEvent) => {
     const plot = plotRef.current;
     if (!plot || event.button !== 0) return;
 
-    const axis = getAxisStripRegion(plot, event.clientX, event.clientY);
-    if (!axis) return;
+    const zone = getPanZone(plot, event.clientX, event.clientY);
+    if (!zone) return;
 
-    const scale = plot.scales[axis === 'x' ? 'x' : 'y'];
-    if (scale.min == null || scale.max == null) return;
+    const xScale = plot.scales.x;
+    const yScale = plot.scales.y;
+    if (xScale.min == null || xScale.max == null || yScale.min == null || yScale.max == null) return;
 
     panStateRef.current = {
-      axis,
-      startClient: axis === 'x' ? event.clientX : event.clientY,
-      startMin: scale.min,
-      startMax: scale.max,
+      zone,
+      startX: event.clientX,
+      startY: event.clientY,
+      startXMin: xScale.min,
+      startXMax: xScale.max,
+      startYMin: yScale.min,
+      startYMax: yScale.max,
     };
     event.preventDefault();
-    // 阻止 uPlot 自身的 mousedown handler，避免在轴条带上触发框选
+    // 阻止 uPlot 自身的 mousedown handler，避免拖拽时触发框选
     event.stopPropagation();
+    event.stopImmediatePropagation();
   };
 
   const handlePanMove = (event: MouseEvent) => {
@@ -289,28 +480,30 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
     const plot = plotRef.current;
     if (!pan || !plot) return;
 
-    const { axis, startClient, startMin, startMax } = pan;
-    const span = startMax - startMin;
+    event.preventDefault();
 
-    if (axis === 'x') {
-      const plotWidth = plot.bbox.width / uPlot.pxRatio;
-      if (plotWidth === 0) return;
-      const deltaClient = event.clientX - startClient;
-      const deltaVal = -(deltaClient / plotWidth) * span;
-      xModeRef.current = 'manual';
-      syncingScalesRef.current = true;
-      plot.setScale('x', { min: startMin + deltaVal, max: startMax + deltaVal });
-      syncingScalesRef.current = false;
-    } else {
-      const plotHeight = plot.bbox.height / uPlot.pxRatio;
-      if (plotHeight === 0) return;
-      const deltaClient = event.clientY - startClient;
-      // Y 轴：向上拖（deltaClient 为负）应该增大值
-      const deltaVal = (deltaClient / plotHeight) * span;
-      yModeRef.current = 'manual';
-      syncingScalesRef.current = true;
-      plot.setScale('y', { min: startMin + deltaVal, max: startMax + deltaVal });
-      syncingScalesRef.current = false;
+    const { zone, startX, startY, startXMin, startXMax, startYMin, startYMax } = pan;
+    const xSpan = startXMax - startXMin;
+    const ySpan = startYMax - startYMin;
+    const plotWidth = plot.bbox.width / uPlot.pxRatio;
+    const plotHeight = plot.bbox.height / uPlot.pxRatio;
+
+    syncingScalesRef.current = true;
+    plot.batch(() => {
+      if ((zone === 'plot' || zone === 'x') && plotWidth > 0) {
+        const deltaX = -((event.clientX - startX) / plotWidth) * xSpan;
+        xModeRef.current = 'manual';
+        plot.setScale('x', { min: startXMin + deltaX, max: startXMax + deltaX });
+      }
+      if ((zone === 'plot' || zone === 'y') && plotHeight > 0) {
+        const deltaY = ((event.clientY - startY) / plotHeight) * ySpan;
+        yModeRef.current = 'manual';
+        plot.setScale('y', { min: startYMin + deltaY, max: startYMax + deltaY });
+      }
+    });
+    syncingScalesRef.current = false;
+    if (zone === 'plot' || zone === 'x') {
+      emitXRangeChange(plot);
     }
   };
 
@@ -353,24 +546,6 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
     lastTapY: 0,
   });
 
-  /** 判断触摸点所在区域：plot 绘图区 / x 轴条带 / y 轴条带 */
-  const getTouchZone = (plot: uPlot, clientX: number, clientY: number): 'plot' | 'x' | 'y' | null => {
-    const rect = plot.root.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const y = clientY - rect.top;
-    const plotLeft = plot.bbox.left / uPlot.pxRatio;
-    const plotTop = plot.bbox.top / uPlot.pxRatio;
-    const plotWidth = plot.bbox.width / uPlot.pxRatio;
-    const plotHeight = plot.bbox.height / uPlot.pxRatio;
-    const inPlotX = x >= plotLeft && x <= plotLeft + plotWidth;
-    const inPlotY = y >= plotTop && y <= plotTop + plotHeight;
-
-    if (inPlotX && inPlotY) return 'plot';
-    if (x < plotLeft && inPlotY) return 'y';
-    if (inPlotX && y > plotTop + plotHeight) return 'x';
-    return null;
-  };
-
   const handleTouchStart = (event: TouchEvent) => {
     const plot = plotRef.current;
     if (!plot) return;
@@ -379,7 +554,7 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
 
     if (event.touches.length === 1) {
       const t = event.touches[0];
-      const zone = getTouchZone(plot, t.clientX, t.clientY);
+      const zone = getPanZone(plot, t.clientX, t.clientY);
       if (!zone) return;
 
       event.preventDefault();
@@ -431,7 +606,7 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
       const t1 = event.touches[1];
       const midX = (t0.clientX + t1.clientX) / 2;
       const midY = (t0.clientY + t1.clientY) / 2;
-      const zone = getTouchZone(plot, midX, midY) ?? 'plot';
+      const zone = getPanZone(plot, midX, midY) ?? 'plot';
 
       event.preventDefault();
 
@@ -484,6 +659,9 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
         }
       });
       syncingScalesRef.current = false;
+      if (zone === 'plot' || zone === 'x') {
+        emitXRangeChange(plot);
+      }
     } else if (event.touches.length === 2 && ts.pinch) {
       event.preventDefault();
       const t0 = event.touches[0];
@@ -517,6 +695,9 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
         }
       });
       syncingScalesRef.current = false;
+      if (zone === 'plot' || zone === 'x') {
+        emitXRangeChange(plot);
+      }
     }
   };
 
@@ -534,7 +715,7 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
         const xScale = plot.scales.x;
         const yScale = plot.scales.y;
         if (xScale.min != null && xScale.max != null && yScale.min != null && yScale.max != null) {
-          const zone = getTouchZone(plot, t.clientX, t.clientY) ?? 'plot';
+          const zone = getPanZone(plot, t.clientX, t.clientY) ?? 'plot';
           ts.pan = {
             zone,
             startX: t.clientX,
@@ -557,15 +738,28 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
   useEffect(() => {
     const container = containerRef.current;
     const effectiveChannels = effectiveChannelsRef.current;
-    if (!container || effectiveChannels.size === 0) return;
+    const externalData = alignedInputRef.current;
+    const externalSeries = seriesInputRef.current;
+    const usingExternalData = externalData != null && externalSeries != null;
+    if (!container) return;
 
-    const channelNos = Array.from(effectiveChannels.keys()).sort((a, b) => a - b);
+    const channelNos = usingExternalData
+      ? externalSeries.map((_, index) => index + 1)
+      : Array.from(effectiveChannels.keys()).sort((a, b) => a - b);
+    if (channelNos.length === 0) return;
+
     channelOrderRef.current = channelNos;
     renderedCountsRef.current = new Map(channelNos.map((chNo) => [chNo, effectiveChannels.get(chNo)?.length ?? 0]));
-    alignedDataRef.current = buildAlignedData(channelNos, effectiveChannels, sampleInterval);
+    const initialWindowSeconds = windowSecondsRef.current;
+    if (initialWindowSeconds != null) {
+      xSpanRef.current = Math.max(initialWindowSeconds, sampleInterval);
+    }
+    alignedDataRef.current = usingExternalData
+      ? externalData
+      : buildAlignedData(channelNos, effectiveChannels, sampleInterval, sampleOffsetsRef.current);
     xModeRef.current = 'following';
     yModeRef.current = 'auto';
-    autoYRangeRef.current = getDefaultYRange(); // 启动时以 ±5000 为初始累积基准
+    autoYRangeRef.current = getDefaultYRange();
 
     plotRef.current?.destroy();
     resizeObserverRef.current?.disconnect();
@@ -643,7 +837,10 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
             value: (_self, rawValue) => `${Number(rawValue).toFixed(6)} s`,
           },
           ...channelNos.map((chNo, i) => ({
-            label: labelsRef.current?.get(chNo) ?? `CH${chNo}`,
+            label: usingExternalData
+              ? externalSeries[i]?.label ?? `CH${chNo}`
+              : labelsRef.current?.get(chNo) ?? `CH${chNo}`,
+            show: seriesVisibilityRef.current.get(String(usingExternalData ? externalSeries[i]?.key ?? chNo : chNo)) ?? true,
             stroke: CHANNEL_COLORS[i % CHANNEL_COLORS.length],
             width: 2,
             spanGaps: false,
@@ -652,31 +849,73 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
         ],
         hooks: {
           setScale: [
-            (_self, scaleKey) => {
+            (self, scaleKey) => {
               if (syncingScalesRef.current) return;
+              if (scaleKey === 'x') {
+                emitXRangeChange(self);
+              }
               if (scaleKey === 'y') {
+                if (isCurrentAutoYScale(self)) return;
                 yModeRef.current = 'manual';
               }
             },
           ],
+          setSeries: [
+            (self, seriesIdx, opts) => {
+              if (opts.show != null) {
+                recordSeriesVisibility(self, seriesIdx, opts.show);
+              }
+              if (yModeRef.current !== 'auto') return;
+              requestAnimationFrame(() => {
+                if (plotRef.current !== self || yModeRef.current !== 'auto') return;
+                syncingScalesRef.current = true;
+                self.batch(() => applyAutoY(self));
+                syncingScalesRef.current = false;
+              });
+            },
+          ],
           ready: [
             (self) => {
-              self.setScale('x', { min: 0, max: xSpanRef.current });
-              const defY = getDefaultYRange();
-              self.setScale('y', { min: defY.min, max: defY.max });
+              syncingScalesRef.current = true;
+              self.batch(() => {
+                applyStoredSeriesVisibility(self);
+                self.setScale('x', xRangeRef.current ?? { min: 0, max: xSpanRef.current });
+                applyAutoY(self);
+              });
+              syncingScalesRef.current = false;
               self.root.addEventListener('wheel', handleWheelZoom, { passive: false });
-              self.root.addEventListener('mousedown', handlePanStart);
+              self.root.addEventListener('mousedown', handlePanStart, true);
               window.addEventListener('mousemove', handlePanMove);
               window.addEventListener('mouseup', handlePanEnd);
               // 用稳定的 wrapper 代理到最新 handler，保证 remove 时引用一致
               const onTouchStart = (e: TouchEvent) => touchHandlersRef.current.handleTouchStart(e);
               const onTouchMove = (e: TouchEvent) => touchHandlersRef.current.handleTouchMove(e);
               const onTouchEnd = (e: TouchEvent) => touchHandlersRef.current.handleTouchEnd(e);
+              const onLegendClick = (e: MouseEvent) => {
+                const target = e.target;
+                if (!(target instanceof HTMLElement) || !target.closest('.u-legend')) return;
+
+                const refreshVisibleSeries = () => {
+                  if (plotRef.current !== self) return;
+                  yModeRef.current = 'auto';
+                  syncingScalesRef.current = true;
+                  self.batch(() => {
+                    applyAutoY(self);
+                    self.redraw();
+                  });
+                  syncingScalesRef.current = false;
+                };
+
+                requestAnimationFrame(refreshVisibleSeries);
+                window.setTimeout(refreshVisibleSeries, 50);
+              };
               self.root.addEventListener('touchstart', onTouchStart, { passive: false });
               self.root.addEventListener('touchmove', onTouchMove, { passive: false });
               self.root.addEventListener('touchend', onTouchEnd);
+              self.root.addEventListener('click', onLegendClick, true);
               // 将 wrapper 挂到 root 上，供 cleanup 取用
               (self.root as HTMLElement & { _touchHandlers?: { onTouchStart: (e: TouchEvent) => void; onTouchMove: (e: TouchEvent) => void; onTouchEnd: (e: TouchEvent) => void } })._touchHandlers = { onTouchStart, onTouchMove, onTouchEnd };
+              (self.root as HTMLElement & { _legendClickHandler?: (e: MouseEvent) => void })._legendClickHandler = onLegendClick;
             },
           ],
         },
@@ -699,7 +938,7 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
 
     return () => {
       plot.root.removeEventListener('wheel', handleWheelZoom);
-      plot.root.removeEventListener('mousedown', handlePanStart);
+      plot.root.removeEventListener('mousedown', handlePanStart, true);
       window.removeEventListener('mousemove', handlePanMove);
       window.removeEventListener('mouseup', handlePanEnd);
       const th = (plot.root as HTMLElement & { _touchHandlers?: { onTouchStart: (e: TouchEvent) => void; onTouchMove: (e: TouchEvent) => void; onTouchEnd: (e: TouchEvent) => void } })._touchHandlers;
@@ -707,6 +946,10 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
         plot.root.removeEventListener('touchstart', th.onTouchStart);
         plot.root.removeEventListener('touchmove', th.onTouchMove);
         plot.root.removeEventListener('touchend', th.onTouchEnd);
+      }
+      const legendClickHandler = (plot.root as HTMLElement & { _legendClickHandler?: (e: MouseEvent) => void })._legendClickHandler;
+      if (legendClickHandler) {
+        plot.root.removeEventListener('click', legendClickHandler, true);
       }
       resizeObserver.disconnect();
       resizeObserverRef.current = null;
@@ -723,64 +966,19 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
 
     if (!running) {
       xModeRef.current = 'manual';
-      return;
     }
 
     const effectiveChannels = effectiveChannelsRef.current;
     const channelNos = channelOrderRef.current;
-    const currentData = alignedDataRef.current;
-    const xData = currentData[0];
-    let needsFullRebuild = xData.length === 0 && channelNos.some((chNo) => (effectiveChannels.get(chNo)?.length ?? 0) > 0);
-
-    for (const chNo of channelNos) {
-      const values = effectiveChannels.get(chNo) ?? [];
-      const renderedCount = renderedCountsRef.current.get(chNo) ?? 0;
-      if (values.length < renderedCount) {
-        needsFullRebuild = true;
-        break;
-      }
+    const externalData = alignedInputRef.current;
+    if (windowSeconds != null) {
+      xSpanRef.current = Math.max(windowSeconds, sampleInterval);
     }
-
-    if (needsFullRebuild) {
-      alignedDataRef.current = buildAlignedData(channelNos, effectiveChannels, sampleInterval);
-      renderedCountsRef.current = new Map(channelNos.map((chNo) => [chNo, effectiveChannels.get(chNo)?.length ?? 0]));
+    if (externalData != null) {
+      alignedDataRef.current = externalData;
     } else {
-      let maxLen = xData.length;
-      channelNos.forEach((chNo, channelIdx) => {
-        const values = effectiveChannels.get(chNo) ?? [];
-        const renderedCount = renderedCountsRef.current.get(chNo) ?? 0;
-        if (values.length > maxLen) {
-          maxLen = values.length;
-        }
-        if (values.length === renderedCount) return;
-
-        const seriesData = alignedDataRef.current[channelIdx + 1] as (number | null)[];
-        for (let i = renderedCount; i < values.length; i++) {
-          seriesData[i] = values[i];
-        }
-        renderedCountsRef.current.set(chNo, values.length);
-      });
-
-      if (maxLen > xData.length) {
-        for (let i = xData.length; i < maxLen; i++) {
-          xData[i] = i * sampleInterval;
-        }
-      }
-
-      channelNos.forEach((chNo, channelIdx) => {
-        const values = effectiveChannels.get(chNo) ?? [];
-        const seriesData = alignedDataRef.current[channelIdx + 1] as (number | null)[];
-        if (seriesData.length < maxLen) {
-          for (let i = seriesData.length; i < maxLen; i++) {
-            seriesData[i] = i < values.length ? values[i] : null;
-          }
-        }
-        for (let i = values.length; i < maxLen; i++) {
-          if (seriesData[i] === undefined) {
-            seriesData[i] = null;
-          }
-        }
-      });
+      alignedDataRef.current = buildAlignedData(channelNos, effectiveChannels, sampleInterval, sampleOffsetsRef.current);
+      renderedCountsRef.current = new Map(channelNos.map((chNo) => [chNo, effectiveChannels.get(chNo)?.length ?? 0]));
     }
 
     const nextData = alignedDataRef.current;
@@ -789,17 +987,41 @@ export function OscChart({ channels, sampleInterval, running = true, labels }: O
     syncingScalesRef.current = true;
     plot.batch(() => {
       plot.setData(nextData, false);
+      applyStoredSeriesVisibility(plot);
 
-      if (nextXData.length > 0 && xModeRef.current !== 'manual') {
+      if (externalData != null && xRangeRef.current) {
+        plot.setScale('x', xRangeRef.current);
+      } else if (nextXData.length > 0 && xModeRef.current !== 'manual') {
         moveToLatestView(plot);
       }
 
-      if (yModeRef.current === 'auto' && xModeRef.current !== 'manual') {
+      if (yModeRef.current === 'auto') {
         applyAutoY(plot);
       }
     });
     syncingScalesRef.current = false;
-  }, [channels, running, sampleInterval]);
+  }, [channels, alignedData, running, sampleInterval, sampleOffsets, windowSeconds, xRange]);
+
+  useEffect(() => {
+    if (resetViewSignal == null || resetViewSignal <= 0) return;
+    const plot = plotRef.current;
+    if (!plot) return;
+
+    xModeRef.current = 'following';
+    yModeRef.current = 'auto';
+    autoYRangeRef.current = null;
+
+    syncingScalesRef.current = true;
+    plot.batch(() => {
+      if (xRangeRef.current) {
+        plot.setScale('x', xRangeRef.current);
+      } else {
+        moveToLatestView(plot);
+      }
+      applyAutoY(plot);
+    });
+    syncingScalesRef.current = false;
+  }, [resetViewSignal]);
 
   return (
     <div className="border border-slate-700 rounded bg-slate-900 h-full relative overflow-hidden">

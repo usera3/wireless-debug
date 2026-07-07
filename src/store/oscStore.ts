@@ -1,4 +1,10 @@
 import { create } from 'zustand';
+import { oscHistory, OscHistoryStats } from '../lib/oscHistory';
+
+export const OSC_VIEW_WINDOW_OPTIONS = [5, 10, 30, 60];
+export const OSC_HISTORY_RETENTION_OPTIONS = [60, 300, 600, 1800];
+export const OSC_DEFAULT_VIEW_WINDOW_SECONDS = 10;
+export const OSC_DEFAULT_RETENTION_SECONDS = 300;
 
 export interface ChannelConfig {
   channelNo: number;  // 1-based
@@ -24,7 +30,12 @@ interface OscState {
   maxChannels: number;
   frameLen: number;
   channels: ChannelConfig[];
-  waveData: Map<number, number[]>;
+  historyVersion: number;
+  historyStats: OscHistoryStats;
+  viewWindowSeconds: number;
+  retentionSeconds: number;
+  viewPaused: boolean;
+  reviewEndSeconds: number | null;
   // channel config form state (persisted across tab switches)
   configRows: ChannelRowState[];
   numChannels: number;
@@ -35,46 +46,89 @@ interface OscState {
   setMaxChannels: (v: number) => void;
   setFrameLen: (v: number) => void;
   setChannels: (v: ChannelConfig[]) => void;
-  pushSamples: (channelNo: number, samples: number[]) => void;
-  batchPushSamples: (batch: Map<number, number[]>) => void;
-  clearWaveData: () => void;
+  appendSamples: (batch: Map<number, number[]>) => void;
+  resetHistory: (channels?: ChannelConfig[], sampleRate?: number) => void;
+  refreshHistoryStats: () => void;
+  setViewWindowSeconds: (v: number) => void;
+  setRetentionSeconds: (v: number) => void;
+  setViewPaused: (v: boolean) => void;
+  setReviewEndSeconds: (v: number | null) => void;
   setConfigRows: (rows: ChannelRowState[]) => void;
   setNumChannels: (n: number) => void;
   setCommRateLimit: (v: number) => void;
 }
 
-export const useOscStore = create<OscState>((set) => ({
+function normalizeWindow(seconds: number): number {
+  if (!Number.isFinite(seconds) || seconds <= 0) return OSC_DEFAULT_VIEW_WINDOW_SECONDS;
+  return Math.max(1, seconds);
+}
+
+function normalizeRetention(seconds: number): number {
+  if (!Number.isFinite(seconds) || seconds <= 0) return OSC_DEFAULT_RETENTION_SECONDS;
+  return Math.max(1, seconds);
+}
+
+export const useOscStore = create<OscState>((set, get) => ({
   running: false,
   sampleRate: 6000,
   maxChannels: 12,
   frameLen: 130,
   channels: [],
-  waveData: new Map(),
+  historyVersion: oscHistory.getStats().version,
+  historyStats: oscHistory.getStats(),
+  viewWindowSeconds: OSC_DEFAULT_VIEW_WINDOW_SECONDS,
+  retentionSeconds: OSC_DEFAULT_RETENTION_SECONDS,
+  viewPaused: false,
+  reviewEndSeconds: null,
   configRows: Array.from({ length: 4 }, (_, i) => defaultRow(i + 1)),
   numChannels: 4,
   commRateLimit: 0,
   setRunning: (v) => set({ running: v }),
-  setSampleRate: (v) => set({ sampleRate: v }),
+  setSampleRate: (v) => {
+    oscHistory.setSampleRate(v);
+    const stats = oscHistory.getStats();
+    set({ sampleRate: v, historyStats: stats, historyVersion: stats.version });
+  },
   setMaxChannels: (v) => set({ maxChannels: v }),
   setFrameLen: (v) => set({ frameLen: v }),
   setChannels: (v) => set({ channels: v }),
-  pushSamples: (channelNo, samples) =>
-    set((s) => {
-      const map = new Map(s.waveData);
-      const existing = map.get(channelNo) ?? [];
-      map.set(channelNo, [...existing, ...samples]);
-      return { waveData: map };
-    }),
-  batchPushSamples: (batch) =>
-    set((s) => {
-      const map = new Map(s.waveData);
-      batch.forEach((samples, channelNo) => {
-        const existing = map.get(channelNo) ?? [];
-        map.set(channelNo, [...existing, ...samples]);
-      });
-      return { waveData: map };
-    }),
-  clearWaveData: () => set({ waveData: new Map() }),
+  appendSamples: (batch) => {
+    if (batch.size === 0) return;
+    oscHistory.appendBatch(batch);
+    const stats = oscHistory.getStats();
+    set({ historyStats: stats, historyVersion: stats.version });
+  },
+  resetHistory: (channels, sampleRate) => {
+    const state = get();
+    const nextChannels = channels ?? state.channels;
+    const nextSampleRate = sampleRate ?? state.sampleRate;
+    oscHistory.reset(
+      nextChannels.map((channel) => channel.channelNo),
+      nextSampleRate,
+      state.retentionSeconds,
+    );
+    const stats = oscHistory.getStats();
+    set({
+      channels: nextChannels,
+      sampleRate: nextSampleRate,
+      historyStats: stats,
+      historyVersion: stats.version,
+      reviewEndSeconds: null,
+    });
+  },
+  refreshHistoryStats: () => {
+    const stats = oscHistory.getStats();
+    set({ historyStats: stats, historyVersion: stats.version });
+  },
+  setViewWindowSeconds: (v) => set({ viewWindowSeconds: normalizeWindow(v) }),
+  setRetentionSeconds: (v) => {
+    const retentionSeconds = normalizeRetention(v);
+    oscHistory.setRetentionSeconds(retentionSeconds);
+    const stats = oscHistory.getStats();
+    set({ retentionSeconds, historyStats: stats, historyVersion: stats.version });
+  },
+  setViewPaused: (v) => set({ viewPaused: v }),
+  setReviewEndSeconds: (v) => set({ reviewEndSeconds: v }),
   setConfigRows: (rows) => set({ configRows: rows }),
   setNumChannels: (n) => set({ numChannels: n }),
   setCommRateLimit: (v) => set({ commRateLimit: v }),

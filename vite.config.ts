@@ -4,6 +4,7 @@ import { compression } from 'vite-plugin-compression2'
 
 // https://vite.dev/config/
 export default defineConfig({
+  base: './',
   plugins: [
     react(),
     compression({ algorithms: ['gzip'], exclude: /\.(gz|br)$/ }),
@@ -28,6 +29,9 @@ export default defineConfig({
       output: {
         // xlsx 单独分包，动态 import 时才加载
         manualChunks: { xlsx: ['xlsx'] },
+        entryFileNames: 'a.js',
+        chunkFileNames: (chunkInfo) => (chunkInfo.name === 'xlsx' ? 'x.js' : '[name].js'),
+        assetFileNames: (assetInfo) => (assetInfo.name?.endsWith('.css') ? 'a.css' : '[name][extname]'),
       },
     },
   },
