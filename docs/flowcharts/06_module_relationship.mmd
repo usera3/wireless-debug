@@ -1,0 +1,79 @@
+flowchart LR
+    subgraph App[应用入口 main.c]
+        MAIN[app_main<br/>初始化顺序和回调装配]
+        CALLBACKS[应用回调<br/>UART/BLE/WiFi/Web API/UI]
+    end
+
+    subgraph Core[核心状态]
+        APP[app_core<br/>comm_mode + uart_baud]
+        STATS[comm_stats<br/>全局通信计数]
+        HEALTH[health_reporter<br/>串口健康日志]
+    end
+
+    subgraph DataPlane[数据面 Transport + Router]
+        UART[uart_transport<br/>UART1 驱动/组帧/写串口]
+        ROUTER[router_service<br/>UART 帧路由到 BLE 或 WiFi]
+        BLE[ble_transport<br/>NimBLE SPP GATT/Notify]
+        WST[wifi_transport<br/>WebSocket RX/TX/发送队列]
+    end
+
+    subgraph ControlPlane[控制面 HTTP/文件/WiFi]
+        WFM[wifi_manager<br/>AP/STA/NVS/事件/回退]
+        API[web_api<br/>/api 控制接口]
+        STATIC[web_static<br/>SPIFFS 静态页面和 Excel 文件]
+        HTTP[http_utils<br/>JSON/CORS/OPTIONS]
+        MOTOR[motor_diag<br/>电机诊断帧和参数表]
+    end
+
+    subgraph UI[屏幕和菜单]
+        UIC[ui_controller<br/>菜单动作协调]
+        MENU[system_menu<br/>菜单状态机]
+        LVGL[display_lvgl<br/>状态缓存/LVGL 任务]
+        DUI[display_ui<br/>128x64 UI 布局]
+        DPORT[display_port<br/>framebuffer/SSD1315 I2C]
+    end
+
+    MAIN --> APP
+    MAIN --> UART
+    MAIN --> BLE
+    MAIN --> WFM
+    MAIN --> WST
+    MAIN --> API
+    MAIN --> STATIC
+    MAIN --> UIC
+    MAIN --> LVGL
+    MAIN --> DPORT
+    MAIN --> HEALTH
+
+    UART -- 完整 UART 帧 --> CALLBACKS
+    CALLBACKS -- 普通数据 --> ROUTER
+    ROUTER -- send_ble --> BLE
+    ROUTER -- send_wifi --> WST
+    BLE -- GATT Write RX --> CALLBACKS
+    WST -- WebSocket RX --> CALLBACKS
+    CALLBACKS -- 写外部串口 --> UART
+    CALLBACKS -- 切换当前模式 --> APP
+
+    API -- 回调 --> CALLBACKS
+    API --> HTTP
+    API --> MOTOR
+    STATIC --> HTTP
+    WFM -- 状态回调 --> MENU
+    WFM -- 状态回调 --> LVGL
+
+    UIC --> APP
+    UIC --> WFM
+    UIC --> BLE
+    UIC --> UART
+    UIC --> LVGL
+    MENU --> LVGL
+    LVGL --> DUI
+    LVGL --> DPORT
+
+    UART --> STATS
+    BLE --> STATS
+    WST --> STATS
+    ROUTER --> STATS
+    STATS --> API
+    STATS --> LVGL
+    STATS --> HEALTH

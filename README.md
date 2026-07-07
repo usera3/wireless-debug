@@ -106,6 +106,12 @@ idf.py -p PORT flash
 
 or use the generated `build/flash_args` file with `esptool`.
 
+For the cloud-PC development and local flashing workflow, see:
+
+```text
+docs/CLOUD_LOCAL_WORKFLOW.md
+```
+
 ## Display Configuration
 
 Current defaults are defined in `main/display_port.h`:
@@ -163,7 +169,7 @@ Common endpoints:
 | `/api/uart/baud` | GET/POST | query or set UART baud |
 | `/api/uart/tx` | POST | send UART data |
 | `/api/wifi/status` | GET | WiFi status |
-| `/api/wifi/scan` | GET | scan nearby APs |
+| `/api/wifi/scan` | GET | scan nearby APs, returns scan timing fields |
 | `/api/wifi/connect` | POST | connect STA with SSID/password |
 | `/api/wifi/sta` | POST/DELETE | save or clear STA credentials |
 | `/api/wifi/mode` | POST | switch AP/STA mode |

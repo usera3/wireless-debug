@@ -31,6 +31,25 @@ static web_wifi_scan_state_t s_wifi_scan_state = WEB_WIFI_SCAN_IDLE;
 static wifi_manager_scan_ap_t s_wifi_scan_aps[WIFI_MANAGER_SCAN_MAX_APS];
 static size_t s_wifi_scan_count;
 static esp_err_t s_wifi_scan_error = ESP_OK;
+static int64_t s_wifi_scan_started_us;
+static int64_t s_wifi_scan_finished_us;
+
+static int64_t scan_elapsed_ms(void)
+{
+    if (s_wifi_scan_started_us <= 0) {
+        return 0;
+    }
+    int64_t end_us = s_wifi_scan_finished_us > 0 ? s_wifi_scan_finished_us : esp_timer_get_time();
+    return (end_us - s_wifi_scan_started_us) / 1000;
+}
+
+static int64_t scan_duration_ms(void)
+{
+    if (s_wifi_scan_started_us <= 0 || s_wifi_scan_finished_us <= 0) {
+        return 0;
+    }
+    return (s_wifi_scan_finished_us - s_wifi_scan_started_us) / 1000;
+}
 
 static const web_api_context_t *api_ctx(void)
 {
@@ -642,6 +661,7 @@ static void wifi_scan_task(void *arg)
 
     if (s_wifi_scan_mutex != NULL &&
         xSemaphoreTake(s_wifi_scan_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        s_wifi_scan_finished_us = esp_timer_get_time();
         memset(s_wifi_scan_aps, 0, sizeof(s_wifi_scan_aps));
         if (err == ESP_OK) {
             if (count > WIFI_MANAGER_SCAN_MAX_APS) {
@@ -681,6 +701,8 @@ static esp_err_t wifi_scan_start_async(bool force)
         s_wifi_scan_state = WEB_WIFI_SCAN_SCANNING;
         s_wifi_scan_count = 0;
         s_wifi_scan_error = ESP_OK;
+        s_wifi_scan_started_us = esp_timer_get_time();
+        s_wifi_scan_finished_us = 0;
         memset(s_wifi_scan_aps, 0, sizeof(s_wifi_scan_aps));
         should_start = true;
     }
@@ -693,6 +715,7 @@ static esp_err_t wifi_scan_start_async(bool force)
         if (xSemaphoreTake(s_wifi_scan_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
             s_wifi_scan_state = WEB_WIFI_SCAN_FAIL;
             s_wifi_scan_error = ESP_ERR_NO_MEM;
+            s_wifi_scan_finished_us = esp_timer_get_time();
             xSemaphoreGive(s_wifi_scan_mutex);
         }
         return ESP_ERR_NO_MEM;
@@ -717,6 +740,8 @@ static esp_err_t wifi_scan_handler(httpd_req_t *req)
     size_t count = 0;
     web_wifi_scan_state_t state = WEB_WIFI_SCAN_IDLE;
     esp_err_t scan_error = ESP_OK;
+    int64_t elapsed_ms = 0;
+    int64_t duration_ms = 0;
     bool refresh = wifi_scan_refresh_requested(req);
 
     http_prepare_json(req);
@@ -756,20 +781,29 @@ static esp_err_t wifi_scan_handler(httpd_req_t *req)
     }
     memcpy(aps, s_wifi_scan_aps, sizeof(aps[0]) * count);
     scan_error = s_wifi_scan_error;
+    elapsed_ms = scan_elapsed_ms();
+    duration_ms = scan_duration_ms();
     xSemaphoreGive(s_wifi_scan_mutex);
 
     if (state == WEB_WIFI_SCAN_FAIL) {
-        char resp[112];
+        char resp[160];
         snprintf(resp, sizeof(resp),
-                 "{\"ok\":false,\"state\":\"fail\",\"msg\":\"scan failed:%d\",\"aps\":[]}",
-                 scan_error);
+                 "{\"ok\":false,\"state\":\"fail\",\"msg\":\"scan failed:%d\","
+                 "\"elapsed_ms\":%lld,\"duration_ms\":%lld,\"aps\":[]}",
+                 scan_error,
+                 (long long)elapsed_ms,
+                 (long long)duration_ms);
         httpd_resp_sendstr(req, resp);
         return ESP_OK;
     }
 
-    char head[96];
-    snprintf(head, sizeof(head), "{\"ok\":true,\"state\":\"%s\",\"aps\":[",
-             wifi_scan_state_name(state));
+    char head[144];
+    snprintf(head, sizeof(head),
+             "{\"ok\":true,\"state\":\"%s\",\"elapsed_ms\":%lld,"
+             "\"duration_ms\":%lld,\"aps\":[",
+             wifi_scan_state_name(state),
+             (long long)elapsed_ms,
+             (long long)duration_ms);
     httpd_resp_sendstr_chunk(req, head);
     for (size_t i = 0; i < count; i++) {
         char ssid[80];

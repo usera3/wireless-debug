@@ -156,7 +156,7 @@
         <div id="status" class="status">loading...</div>
         <button id="scan" type="button">扫描</button>
       </div>
-      <p class="hint">扫描或连接时 AP 热点可能会短暂断开；重新连回 ESP32 后本页会继续刷新。</p>
+      <p class="hint">扫描中，ESP32 热点会短暂不可用；电脑重新连回 ESP32 后本页会继续刷新。</p>
       <div class="links">
         <a href="/orig/i.html">返回 Wireless Debug</a>
       </div>
@@ -218,6 +218,18 @@
           return new Promise((resolve) => setTimeout(resolve, ms));
         }
 
+        function formatNetworkError(err) {
+          const name = err && err.name ? String(err.name) : "";
+          const message = err && err.message ? String(err.message) : String(err || "");
+          if (
+            name === "AbortError" ||
+            /abort|network|failed to fetch|timed out|timeout/i.test(message)
+          ) {
+            return "等待 ESP32 热点恢复";
+          }
+          return message || "等待 ESP32 热点恢复";
+        }
+
         function stopPolling() {
           if (pollTimer) {
             clearInterval(pollTimer);
@@ -264,20 +276,32 @@
           }
         }
 
+        function formatScanTiming(data) {
+          const duration = Number(data && data.duration_ms);
+          const elapsed = Number(data && data.elapsed_ms);
+          if (Number.isFinite(duration) && duration > 0) {
+            return `，扫描耗时 ${Math.round(duration)}ms`;
+          }
+          if (Number.isFinite(elapsed) && elapsed > 0) {
+            return `，已等待 ${Math.round(elapsed)}ms`;
+          }
+          return "";
+        }
+
         async function scanWifi() {
           stopPolling();
           setBusy(true);
-          setStatus("scanning... AP may reconnect");
+          setStatus("扫描中，ESP32 热点会短暂不可用");
           let data = null;
           let lastError = "";
           let refreshRequested = false;
-          const deadline = Date.now() + 90000;
+          const deadline = Date.now() + 150000;
 
           while (Date.now() < deadline) {
             try {
               const path = refreshRequested ? "/api/wifi/scan" : "/api/wifi/scan?refresh=1";
               refreshRequested = true;
-              data = await jsonFetch(path);
+              data = await jsonFetch(path, {}, 12000);
               if (!data.ok) {
                 setStatus(`scan failed: ${data.msg || "unknown"}`);
                 setBusy(false);
@@ -285,19 +309,23 @@
               }
               if (data.state === "done") {
                 renderAps(data.aps || []);
-                setStatus(`found: ${(data.aps || []).length}`);
+                setStatus(`found: ${(data.aps || []).length}${formatScanTiming(data)}`);
                 setBusy(false);
                 return;
               }
-              setStatus("scanning... AP may reconnect");
+              setStatus(`扫描中，ESP32 热点会短暂不可用${formatScanTiming(data)}`);
             } catch (err) {
-              lastError = err.message;
-              setStatus("waiting for ESP32 AP...");
+              lastError = formatNetworkError(err);
+              setStatus(`${lastError}，继续等待扫描结果...`);
             }
             await delay(1500);
           }
 
-          setStatus(`scan timeout${lastError ? `: ${lastError}` : ""}`);
+          setStatus(
+            lastError
+              ? `扫描超时：${lastError}，请确认电脑已重新连接 ESP32 热点后重试`
+              : "扫描超时：请确认电脑已重新连接 ESP32 热点后重试"
+          );
           setBusy(false);
         }
 
@@ -316,7 +344,7 @@
                 setStatus(`failed: ${targetSsid || data.sta_ssid || "-"}`);
               }
             } catch (err) {
-              setStatus("waiting for ESP32 AP...");
+              setStatus(`${formatNetworkError(err)}...`);
             }
             if (Date.now() >= deadline) {
               stopPolling();

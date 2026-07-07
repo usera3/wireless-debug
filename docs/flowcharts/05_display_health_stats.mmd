@@ -1,0 +1,84 @@
+flowchart TD
+    subgraph DisplayStack[显示刷新链路]
+        A0[任何模块调用 display_lvgl_set_*] --> A1[获取 s_state_mutex]
+        A1 --> A2[更新 display_ui_state 字段<br/>mode/status/baud/ssid/BLE/text overlay]
+        A2 --> A3[同步 system_menu 字段<br/>comm/baud/ble_ready]
+        A3 --> A4[mark_dirty_locked<br/>update_count++]
+
+        B0[display_lvgl_task<br/>每 20ms] --> B1[获取 LVGL mutex]
+        B1 --> B2[refresh_ui_from_state]
+        B2 --> B3{距离上次统计刷新 >=1s?}
+        B3 -- 是 --> B4[读取 uptime/heap/comm_stats<br/>mark dirty]
+        B3 -- 否 --> B5{overlay_scroll 到 2.5s?}
+        B4 --> B5
+        B5 -- 是 --> B6[overlay_scroll_tick++<br/>mark dirty]
+        B5 -- 否 --> B7[复制 state<br/>清除 dirty 标志]
+        B6 --> B7
+        B7 --> B8[system_menu_get_snapshot<br/>合并菜单快照]
+        B8 --> B9{dirty?}
+        B9 -- 否 --> B10[只调用 lv_timer_handler]
+        B9 -- 是 --> B11[display_ui_update]
+        B11 --> B12{overlay_active?}
+        B12 -- 是 --> B13[显示文本/滚动覆盖页]
+        B12 -- 否 --> B14[显示常态状态面板<br/>UART/BLE/WiFi 计数, heap, 错误数, uptime]
+        B13 --> B15[LVGL 产生 flush]
+        B14 --> B15
+        B15 --> B16[display_lvgl_flush_cb<br/>RGB565 转 1-bit mono]
+        B16 --> B17[display_port_flush_mono]
+        B17 --> B18[更新 framebuffer 和 flush stats]
+        B18 --> B19{SSD1315 panel ready?}
+        B19 -- 是 --> B20[I2C 按 page 写入 OLED]
+        B19 -- 否 --> B21[仅保留 framebuffer/stats]
+        B20 --> B10
+        B21 --> B10
+
+        C0[HTTP GET /api/display/status] --> C1[display_port_get_stats<br/>返回 backend/status/flush_count/last_area]
+        C2[HTTP GET /api/display/framebuffer] --> C3[display_port_copy_framebuffer<br/>返回 1024B 单色 framebuffer]
+    end
+
+    subgraph MenuFlow[菜单按键到显示]
+        M0[HTTP POST /api/input/key] --> M1[system_menu_handle_key]
+        M1 --> M2{菜单是否打开?}
+        M2 -- 否且 key=OK --> M3[active=true<br/>message=MENU OPEN]
+        M2 -- 是且 key=NEXT --> M4[selected 在 AP/STA 间循环]
+        M2 -- 是且 key=OK --> M5[commit_selected<br/>返回 NET_AP 或 NET_STA action]
+        M2 -- 是且 key=BACK --> M6[active=false<br/>MENU CLOSED]
+        M3 --> M7[display_lvgl_request_redraw]
+        M4 --> M7
+        M5 --> M8[ui_controller_apply_menu_action]
+        M6 --> M7
+        M8 --> M9[调度 WiFi 模式 / 设置 comm mode / 设置 baud / 启 BLE]
+        M9 --> M10[更新 display_port status 和 LVGL status]
+        M10 --> M7
+    end
+
+    subgraph Stats[通信统计计数器]
+        S0[UART RX/TX] --> S1[comm_stats_uart_*]
+        S2[BLE RX/TX/错误] --> S3[comm_stats_ble_*]
+        S4[WiFi RX/TX/队列错误] --> S5[comm_stats_wifi_*]
+        S6[router 丢弃/部分丢弃] --> S7[comm_stats_route_*]
+        S1 --> S8[临界区 portMUX 保护的全局计数]
+        S3 --> S8
+        S5 --> S8
+        S7 --> S8
+        S8 --> S9[comm_stats_get_snapshot]
+        S9 --> S10[显示刷新 /api/comm/stats /api/device/status / health_reporter]
+        S11[DELETE /api/comm/stats] --> S12[comm_stats_reset]
+    end
+
+    subgraph Health[健康报告任务]
+        H0[health_reporter_start] --> H1[创建 health_report_task]
+        H1 --> H2[读取初始 comm_stats]
+        H2 --> H3[立即输出 HEALTH OK]
+        H3 --> H4[每 30s 延迟]
+        H4 --> H5[读取当前 comm_stats]
+        H5 --> H6[计算 total_error_count 和 total_io_count]
+        H6 --> H7{错误数变化?}
+        H7 -- 是 --> H8[输出 HEALTH ALERT<br/>带所有计数和 heap]
+        H7 -- 否 --> H9{IO 有变化或完全无变化?}
+        H9 -- 是 --> H10[输出 HEALTH OK]
+        H9 -- 否 --> H11[本轮不输出]
+        H8 --> H4
+        H10 --> H4
+        H11 --> H4
+    end

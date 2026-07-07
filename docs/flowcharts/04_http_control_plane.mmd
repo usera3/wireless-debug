@@ -1,0 +1,126 @@
+flowchart TD
+    subgraph WebServer[start_webserver 注册入口]
+        A0[start_webserver] --> A1[wifi_transport_init<br/>注册 WebSocket RX 回调]
+        A1 --> A2[httpd_start]
+        A2 --> A3[web_api_register_handlers]
+        A3 --> A4[wifi_transport_register_ws /ws]
+        A4 --> A5[web_static_register_handlers<br/>Excel API + /* 静态页面]
+    end
+
+    subgraph APICommon[HTTP API 通用处理]
+        B0[浏览器/上位机请求 /api/...] --> B1[HTTP server 分派到 handler]
+        B1 --> B2[http_prepare_json<br/>Content-Type JSON<br/>CORS *<br/>Connection close]
+        B2 --> B3{方法/路径对应的业务 handler}
+        B3 --> B4[读取 body 或 query]
+        B4 --> B5[手写 JSON 字段解析/校验]
+        B5 --> B6{参数合法?}
+        B6 -- 否 --> B7[返回 ok=false + msg]
+        B6 -- 是 --> B8[通过 web_api_context_t 回调到主程序/模块]
+        B8 --> B9[返回 JSON 结果]
+    end
+
+    subgraph UARTAPI[UART 控制 API]
+        U0[GET /api/uart/baud] --> U1[get_uart_baud -> app_core_get_uart_baud]
+        U1 --> U2[返回 baud JSON]
+        U3[POST /api/uart/baud<br/>body: baud] --> U4[校验 1200..5000000]
+        U4 --> U5[main.set_uart_baud]
+        U5 --> U6[uart_transport_set_baud]
+        U6 --> U7[app_core_set_uart_baud<br/>display status baud_ok]
+        U7 --> U8[返回 ok true]
+        U9[POST /api/uart/tx<br/>body: text 或 hex] --> U10[解析 text/hex 为 bytes]
+        U10 --> U11[send_uart_frame -> uart_transport_write]
+        U11 --> U12[返回 bytes]
+    end
+
+    subgraph CommAPI[通信模式和统计 API]
+        C0[GET /api/comm/mode] --> C1[system_menu_get_snapshot]
+        C1 --> C2[返回 mode + uart_baud]
+        C3[POST /api/comm/mode<br/>body: mode auto/wifi/ble] --> C4[映射为 menu action]
+        C4 --> C5[ui_controller_apply_menu_action]
+        C5 --> C6[app_core_set_comm_mode<br/>必要时启动 BLE<br/>更新显示]
+        C7[GET /api/comm/stats] --> C8[comm_stats_get_snapshot]
+        C8 --> C9[返回 UART/BLE/WiFi/route 计数]
+        C10[DELETE /api/comm/stats] --> C11[comm_stats_reset]
+    end
+
+    subgraph WiFiAPI[WiFi 控制 API]
+        W0[GET /api/wifi/status] --> W1[wifi_manager_get_status]
+        W1 --> W2[返回 AP/STA/连接/IP 状态]
+        W3[POST /api/wifi/sta<br/>body: ssid,password] --> W4[wifi_manager_save_sta_config]
+        W4 --> W5[NVS 保存 wifi_sta:ssid/pass<br/>更新显示 sta_cfg]
+        W6[DELETE /api/wifi/sta] --> W7[wifi_manager_clear_sta_config]
+        W7 --> W8[NVS 清除 STA 配置<br/>菜单置 AP]
+        W9[POST /api/wifi/mode<br/>body: mode ap/sta] --> W10[wifi_manager_schedule_net_mode]
+        W10 --> W11[异步切换 AP 或 STA/APSTA]
+        W12[GET /api/ws/status] --> W13[wifi_transport_client_connected]
+    end
+
+    subgraph BLEAPI[BLE 控制 API]
+        L0[GET /api/ble/status] --> L1[ble_spp_transport_is_started<br/>ble_spp_transport_has_subscribers]
+        L1 --> L2[返回 started/subscribed]
+        L3[POST /api/ble/start] --> L4[ble_spp_transport_start]
+        L4 --> L5[启动 NimBLE + GATT + 广播]
+        L6[POST /api/ble/tx<br/>body: text 或 hex] --> L7[解析 bytes]
+        L7 --> L8[ble_spp_transport_send]
+        L8 --> L9[Notify 给订阅者<br/>返回 sent]
+    end
+
+    subgraph DisplayMenuAPI[菜单与显示 API]
+        D0[GET /api/input/keys] --> D1[返回支持键 next/ok/back]
+        D2[POST /api/input/key<br/>body: key] --> D3[system_menu_handle_key]
+        D3 --> D4[得到 system_menu_action]
+        D4 --> D5[ui_controller_apply_menu_action]
+        D5 --> D6[display_lvgl_request_redraw]
+        D7[GET /api/menu/status] --> D8[system_menu_get_snapshot]
+        D9[POST /api/display/text] --> D10[display_lvgl_set_text_screen]
+        D11[POST /api/display/scroll] --> D12[display_lvgl_set_text_scroll]
+        D13[DELETE /api/display/text] --> D14[display_lvgl_clear_text_screen]
+        D15[GET /api/display/status] --> D16[display_port_get_stats]
+        D17[GET /api/display/framebuffer] --> D18[display_port_copy_framebuffer<br/>返回 raw framebuffer]
+    end
+
+    subgraph DeviceHealthAPI[设备能力和健康 API]
+        H0[GET /api/device/status] --> H1[聚合 system_menu + display + comm_stats + motor params]
+        H2[GET /api/device/capabilities] --> H3[返回设备 profile/limits/actions/http 列表]
+        H4[GET /api/system/health] --> H5[返回 uptime/heap/restart_reason]
+    end
+
+    subgraph MotorAPI[电机诊断/示波器 API]
+        M0[GET /api/motor/diag/capabilities] --> M1[返回 Modbus-like 诊断能力]
+        M2[POST /api/motor/diag/read] --> M3[校验 address/count/slave/send]
+        M3 --> M4[motor_diag_build_read<br/>FC 0x03 + CRC16]
+        M5[POST /api/motor/diag/write] --> M6[校验 address/value/type/decimals/signed/slave/send]
+        M6 --> M7[按 u16/i16/scaled/float32 构造写帧]
+        M8[POST /api/motor/osc/query/channel/start/stop/heartbeat/rate] --> M9[构造 osc 相关控制帧<br/>FC 0x04/0x71/0x72/0x08/0x73/0x75]
+        M10[GET/POST/DELETE /api/motor/params] --> M11[查询/注册/清空内存参数表]
+        M12[POST /api/motor/params/read 或 write] --> M13[按 alias 查参数<br/>读写帧构造<br/>写入前检查 read_only 和范围]
+        M4 --> M14{send=true?}
+        M7 --> M14
+        M9 --> M14
+        M13 --> M14
+        M14 -- 是 --> M15[send_uart_frame -> uart_transport_write<br/>显示 diag_tx]
+        M14 -- 否 --> M16[只返回 hex frame]
+        M15 --> M17[返回 ok/sent/send_error/frame]
+        M16 --> M17
+    end
+
+    subgraph StaticExcel[静态页面和 Excel 文件]
+        S0[GET /*] --> S1[映射 /spiffs 路径<br/>/ -> /index.html]
+        S1 --> S2{存在 .gz?}
+        S2 -- 是 --> S3[设置 Content-Encoding gzip<br/>chunk 发送]
+        S2 -- 否 --> S4[打开原始文件并按 MIME chunk 发送]
+        S4 --> S5{文件存在?}
+        S5 -- 否 --> S6[404 File not found]
+        S7[GET /api/excel/list] --> S8[列出 /spiffs/excel 常规文件]
+        S9[POST /api/excel/upload<br/>Header X-Filename] --> S10[校验文件名和 <=512KB]
+        S10 --> S11[写入 /spiffs/excel/name]
+        S12[DELETE /api/excel/delete?name=...] --> S13[校验 name 后 remove 文件]
+    end
+
+    B3 -. UART .-> UARTAPI
+    B3 -. Comm .-> CommAPI
+    B3 -. WiFi .-> WiFiAPI
+    B3 -. BLE .-> BLEAPI
+    B3 -. Display/Menu .-> DisplayMenuAPI
+    B3 -. Device/Health .-> DeviceHealthAPI
+    B3 -. Motor .-> MotorAPI

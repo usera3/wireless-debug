@@ -318,7 +318,7 @@ static esp_err_t start_ap_locked(void)
     esp_timer_stop(s_sta_fallback_timer);
     set_ap_state_locked();
 
-    esp_err_t ret = esp_wifi_set_mode(WIFI_MODE_AP);
+    esp_err_t ret = esp_wifi_set_mode(WIFI_MODE_APSTA);
     if (ret != ESP_OK) {
         return ret;
     }
@@ -350,6 +350,12 @@ static esp_err_t start_ap_locked(void)
             return ret;
         }
         s_driver_started = true;
+    } else {
+        esp_err_t disconnect_ret = esp_wifi_disconnect();
+        if (disconnect_ret != ESP_OK && disconnect_ret != ESP_ERR_WIFI_NOT_CONNECT) {
+            ESP_LOGW(TAG, "STA disconnect while returning to AP failed: %s",
+                     esp_err_to_name(disconnect_ret));
+        }
     }
 
     report_net_mode(SYSTEM_NET_AP);
@@ -446,14 +452,20 @@ esp_err_t wifi_manager_scan(wifi_manager_scan_ap_t *out, size_t capacity,
         return ESP_ERR_TIMEOUT;
     }
 
+    esp_err_t ret = ESP_OK;
+    wifi_ap_record_t *records = NULL;
+    int64_t scan_started_us = 0;
+    int64_t scan_duration_ms = 0;
+    uint16_t ap_count = 0;
+    uint16_t fetch_count = 0;
     if (!s_driver_started) {
         esp_err_t mode_ret = esp_wifi_set_mode(WIFI_MODE_APSTA);
         if (mode_ret == ESP_OK) {
             mode_ret = esp_wifi_start();
         }
         if (mode_ret != ESP_OK) {
-            xSemaphoreGive(s_mode_mutex);
-            return mode_ret;
+            ret = mode_ret;
+            goto finish;
         }
         s_driver_started = true;
     } else {
@@ -463,8 +475,8 @@ esp_err_t wifi_manager_scan(wifi_manager_scan_ap_t *out, size_t capacity,
             mode_ret = esp_wifi_set_mode(WIFI_MODE_APSTA);
         }
         if (mode_ret != ESP_OK) {
-            xSemaphoreGive(s_mode_mutex);
-            return mode_ret;
+            ret = mode_ret;
+            goto finish;
         }
     }
 
@@ -475,34 +487,31 @@ esp_err_t wifi_manager_scan(wifi_manager_scan_ap_t *out, size_t capacity,
         .scan_time.active.max = 30,
         .home_chan_dwell_time = 30,
     };
-    esp_err_t ret = esp_wifi_scan_start(&scan_config, true);
+    scan_started_us = esp_timer_get_time();
+    ret = esp_wifi_scan_start(&scan_config, true);
+    scan_duration_ms = (esp_timer_get_time() - scan_started_us) / 1000;
     if (ret != ESP_OK) {
-        xSemaphoreGive(s_mode_mutex);
-        return ret;
+        goto finish;
     }
 
-    uint16_t ap_count = 0;
     ret = esp_wifi_scan_get_ap_num(&ap_count);
     if (ret != ESP_OK) {
-        xSemaphoreGive(s_mode_mutex);
-        return ret;
+        goto finish;
     }
 
-    uint16_t fetch_count = ap_count;
+    fetch_count = ap_count;
     if (fetch_count > WIFI_MANAGER_SCAN_MAX_APS * 2U) {
         fetch_count = WIFI_MANAGER_SCAN_MAX_APS * 2U;
     }
     size_t record_capacity = fetch_count > 0 ? fetch_count : 1U;
-    wifi_ap_record_t *records = calloc(record_capacity, sizeof(*records));
+    records = calloc(record_capacity, sizeof(*records));
     if (records == NULL) {
-        xSemaphoreGive(s_mode_mutex);
-        return ESP_ERR_NO_MEM;
+        ret = ESP_ERR_NO_MEM;
+        goto finish;
     }
     ret = esp_wifi_scan_get_ap_records(&fetch_count, records);
     if (ret != ESP_OK) {
-        free(records);
-        xSemaphoreGive(s_mode_mutex);
-        return ret;
+        goto finish;
     }
 
     char saved_ssid[33];
@@ -530,9 +539,24 @@ esp_err_t wifi_manager_scan(wifi_manager_scan_ap_t *out, size_t capacity,
     }
 
     *out_count = written;
+
+finish:
+    if (scan_started_us > 0) {
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "WiFi scan finished: duration=%lldms found=%u returned=%u",
+                     (long long)scan_duration_ms,
+                     (unsigned)ap_count,
+                     (unsigned)*out_count);
+        } else {
+            ESP_LOGW(TAG, "WiFi scan failed: %s duration=%lldms found=%u",
+                     esp_err_to_name(ret),
+                     (long long)scan_duration_ms,
+                     (unsigned)ap_count);
+        }
+    }
     free(records);
     xSemaphoreGive(s_mode_mutex);
-    return ESP_OK;
+    return ret;
 }
 
 esp_err_t wifi_manager_connect_sta(const char *ssid, const char *password,

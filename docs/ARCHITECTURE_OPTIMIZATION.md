@@ -75,6 +75,6 @@
 
 ## 最近构建验证
 
-- 2026-06-30：ESP-IDF 6.0 Windows 环境构建通过。
+- 2026-07-07：ESP-IDF 6.0 Windows 环境构建通过。
 - 生成镜像：`D:/Users/sunqi39/Desktop/wireless_debug-main/build/uart_ble_wifi.bin`
-- 镜像大小：`0x123ad0`，app 分区剩余 `0x5c530`（24%）。
+- 镜像大小：`0x170c80`，app 分区剩余 `0x10f380`（42%）。

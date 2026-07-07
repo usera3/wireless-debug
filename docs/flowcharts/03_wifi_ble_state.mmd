@@ -1,0 +1,95 @@
+flowchart TD
+    subgraph WiFiManager[wifi_manager AP/STA 状态机]
+        A0[wifi_manager_init] --> A1[创建 AP 和 STA netif]
+        A1 --> A2[AP DHCP 不发布 gateway/DNS]
+        A2 --> A3[esp_wifi_init + 注册事件]
+        A3 --> A4[创建 STA fallback timer: 10s]
+        A4 --> A5[load_sta_config<br/>NVS wifi_sta:ssid/pass]
+        A5 --> A6{NVS 无 STA 且默认 STA 开启?}
+        A6 -- 是 --> A7[使用默认 STA<br/>vivo X300 / 88888888]
+        A6 -- 否 --> A8[保留 NVS 或空配置]
+        A7 --> A9[生成 AP SSID]
+        A8 --> A9
+        A9 --> A10{开机启动 STA 且有配置?}
+        A10 -- 是 --> S0[start_sta_locked]
+        A10 -- 否 --> P0[start_ap_locked]
+
+        P0 --> P1[停止 fallback timer]
+        P1 --> P2[状态: mode=AP<br/>sta_connecting=false<br/>sta_connected=false<br/>sta_ip='-']
+        P2 --> P3[esp_wifi_set_mode WIFI_MODE_APSTA<br/>AP 逻辑状态下底层仍保留 STA 接口]
+        P3 --> P4[配置 SoftAP<br/>SSID=ESP32-S3_AP_XXXX<br/>pass=12345678<br/>channel=1]
+        P4 --> P5[必要时 esp_wifi_start]
+        P5 --> P6[回调更新菜单/显示<br/>AP MODE READY, ap_on]
+
+        S0 --> S1{已有 STA SSID?}
+        S1 -- 否 --> S2[返回 INVALID_STATE]
+        S2 --> S3[start_ap_locked<br/>显示 STA NEED CFG 或 STA FAIL AP]
+        S1 -- 是 --> S4[停止 fallback timer]
+        S4 --> S5[状态: mode=STA<br/>connecting=true<br/>connected=false]
+        S5 --> S6[esp_wifi_set_mode WIFI_MODE_APSTA]
+        S6 --> S7[配置 AP + STA]
+        S7 --> S8[必要时 esp_wifi_start]
+        S8 --> S9[esp_wifi_connect]
+        S9 --> S10[启动 10s fallback timer]
+        S10 --> S11[回调更新菜单/显示<br/>STA CONNECTING, sta_conn]
+
+        S10 --> E0{IP_EVENT_STA_GOT_IP}
+        E0 --> E1[connecting=false<br/>connected=true<br/>停止 fallback timer<br/>保存 sta_ip]
+        E1 --> E2[回调更新菜单/显示<br/>STA CONNECTED, sta_on]
+
+        S10 --> T0{fallback timer 超时}
+        T0 --> T1[wifi_manager_schedule_net_mode AP]
+        T1 --> P0
+
+        E1 --> D0{WIFI_EVENT_STA_DISCONNECTED}
+        S10 --> D0
+        D0 --> D1[connecting=false<br/>connected=false<br/>sta_ip='-']
+        D1 --> D2{当时处于 STA 且正在/已经连接?}
+        D2 -- 是 --> D3[显示 STA LOST AP<br/>调度回 AP]
+        D3 --> P0
+        D2 -- 否 --> D4[只更新状态]
+
+        M0[HTTP/API/菜单/AT 命令请求网络模式] --> M1[wifi_manager_schedule_net_mode]
+        M1 --> M2[创建 wifi_mode_sw 任务<br/>延迟 250ms]
+        M2 --> M3[wifi_manager_request_net_mode]
+        M3 --> M4{目标模式}
+        M4 -- AP --> P0
+        M4 -- STA --> S0
+    end
+
+    subgraph BLEState[ble_transport NimBLE SPP 状态机]
+        B0[ble_spp_transport_init] --> B1[保存应用回调]
+        B1 --> B2{ble_spp_transport_start}
+        B2 --> B3[获取启动互斥锁<br/>防止重复启动]
+        B3 --> B4{s_started?}
+        B4 -- 是 --> B5[直接返回 OK]
+        B4 -- 否 --> B6[report_status ble_start<br/>记录 heap]
+        B6 --> B7[nimble_port_init]
+        B7 --> B8{初始化成功?}
+        B8 -- 否 --> B9[ready=false<br/>status=ble_fail<br/>返回错误]
+        B8 -- 是 --> B10[清空订阅表]
+        B10 --> B11[设置 reset_cb / sync_cb]
+        B11 --> B12[禁用 bonding/MITM/SC]
+        B12 --> B13[gatt_svr_init<br/>注册 SPP service/characteristic]
+        B13 --> B14{GATT 成功?}
+        B14 -- 否 --> B15[ready=false<br/>status=gatt_fail<br/>nimble_port_deinit]
+        B14 -- 是 --> B16[nimble_port_freertos_init<br/>创建 host task]
+        B16 --> B17[s_started=true<br/>记录 heap]
+
+        B17 --> C0{BLE host sync}
+        C0 --> C1[推断本机地址类型]
+        C1 --> C2[读取 BLE MAC]
+        C2 --> C3[设置设备名 NimBLE_XXXX]
+        C3 --> C4[开始广播<br/>service UUID 0xABF0]
+        C4 --> C5[ready=true<br/>status=ble_adv]
+
+        C5 --> G0{GAP CONNECT}
+        G0 --> G1{连接成功?}
+        G1 -- 是且允许多连接 --> C4
+        G1 -- 否或多连接 --> C4
+        G0 --> G2{GAP SUBSCRIBE}
+        G2 --> G3[按 conn_handle 记录 notify 订阅状态]
+        G0 --> G4{GAP DISCONNECT}
+        G4 --> G5[清除 conn_handle 订阅]
+        G5 --> C4
+    end
