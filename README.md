@@ -110,6 +110,7 @@ For the cloud-PC development and local flashing workflow, see:
 
 ```text
 docs/CLOUD_LOCAL_WORKFLOW.md
+docs/CLOUD_CODEX_USAGE.md
 ```
 
 ## Display Configuration
