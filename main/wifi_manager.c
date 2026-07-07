@@ -25,6 +25,9 @@
 #define WIFI_MANAGER_DEFAULT_STA_SSID "vivo X300"
 #define WIFI_MANAGER_DEFAULT_STA_PASS "88888888"
 #define WIFI_MANAGER_START_STA_ON_BOOT 1
+#define WIFI_MANAGER_SCAN_ACTIVE_MIN_MS 10
+#define WIFI_MANAGER_SCAN_ACTIVE_MAX_MS 30
+#define WIFI_MANAGER_SCAN_HOME_DWELL_MS 150
 
 static const char *TAG = "wifi_manager";
 
@@ -483,9 +486,14 @@ esp_err_t wifi_manager_scan(wifi_manager_scan_ap_t *out, size_t capacity,
     wifi_scan_config_t scan_config = {
         .show_hidden = false,
         .scan_type = WIFI_SCAN_TYPE_ACTIVE,
-        .scan_time.active.min = 10,
-        .scan_time.active.max = 30,
-        .home_chan_dwell_time = 30,
+        .scan_time.active.min = WIFI_MANAGER_SCAN_ACTIVE_MIN_MS,
+        .scan_time.active.max = WIFI_MANAGER_SCAN_ACTIVE_MAX_MS,
+        /*
+         * In APSTA mode the radio leaves the SoftAP channel while scanning.
+         * Use the maximum allowed home-channel dwell so clients can keep
+         * receiving ESP32 AP beacons between scanned channels.
+         */
+        .home_chan_dwell_time = WIFI_MANAGER_SCAN_HOME_DWELL_MS,
     };
     scan_started_us = esp_timer_get_time();
     ret = esp_wifi_scan_start(&scan_config, true);

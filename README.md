@@ -36,6 +36,28 @@ When the board starts in AP mode:
 
 The root path redirects to `/orig/i.html`.
 
+## WiFi Scan Stability
+
+The WiFi provisioning page scans nearby APs while the PC is connected to the ESP32 SoftAP.
+Because ESP32-S3 has one WiFi radio, a full-channel scan leaves the SoftAP channel between
+channels. If the home-channel dwell is too short, Windows may stop receiving ESP32 AP beacons
+and disconnect from the ESP32 hotspot during the scan.
+
+The verified stable approach is:
+
+- Keep the driver in `WIFI_MODE_APSTA` even when the logical UI mode is AP-only.
+- Do not switch `WIFI_MODE_AP` -> `WIFI_MODE_APSTA` only for scanning, because that mode
+  transition itself can make clients reconnect.
+- Use short active scan windows, currently 10-30ms per channel.
+- Use `home_chan_dwell_time = 150ms`, the ESP-IDF allowed maximum, so the radio returns to
+  the SoftAP channel long enough for clients to keep receiving beacons.
+
+Current boot behavior uses `WIFI_MANAGER_START_STA_ON_BOOT=1`; when STA config exists, the
+logical mode starts as STA/APSTA. If the product later defaults to logical AP mode, keep the
+underlying driver in APSTA from startup with STA idle. Starting in true AP-only mode and
+switching to APSTA at scan time is less stable and should be avoided unless a one-time client
+reconnect is acceptable.
+
 ## Main Features
 
 - UART transparent transmission through BLE or WiFi.
