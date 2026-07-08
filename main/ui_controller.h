@@ -14,7 +14,10 @@ typedef struct {
     esp_err_t (*wifi_clear_sta_config)(void *ctx);
     esp_err_t (*wifi_scan)(wifi_manager_scan_ap_t *out, size_t capacity,
                            size_t *out_count, void *ctx);
-    esp_err_t (*wifi_quick_connect)(const char *ssid, void *ctx);
+    esp_err_t (*wifi_quick_connect_for_mode)(const char *ssid,
+                                             system_net_mode_t target_mode,
+                                             void *ctx);
+    esp_err_t (*wifi_begin_web_setup)(system_net_mode_t target_mode, void *ctx);
     esp_err_t (*set_uart_baud)(uint32_t baud, void *ctx);
     bool (*ble_is_started)(void *ctx);
     esp_err_t (*ble_start)(void *ctx);

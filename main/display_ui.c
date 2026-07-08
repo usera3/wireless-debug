@@ -198,19 +198,16 @@ static bool is_ipv4_label(const char *text)
     return dots == 3 && digits >= 4;
 }
 
-static void format_wifi_ip(char *out, size_t out_size,
-                           system_net_mode_t mode, const char *label)
+static const char *wifi_sta_status(const display_ui_state_t *state)
 {
-    if (out == NULL || out_size == 0) {
-        return;
+    if (state != NULL && state->wifi_sta_connected &&
+        is_ipv4_label(state->wifi_sta_ip)) {
+        return "OK";
     }
-    if (mode == SYSTEM_NET_AP) {
-        snprintf(out, out_size, "192.168.4.1");
-    } else if (is_ipv4_label(label)) {
-        snprintf(out, out_size, "%s", label);
-    } else {
-        snprintf(out, out_size, "-");
+    if (state != NULL && state->wifi_sta_connecting) {
+        return "TRY";
     }
+    return "OFF";
 }
 
 static void clear_status_bar(void)
@@ -224,19 +221,40 @@ static void update_closed_view(const display_ui_state_t *state)
 {
     const system_menu_snapshot_t *menu = &state->menu;
     char baud[12];
-    char ip[18];
 
     set_home_layout();
 
     format_baud(baud, sizeof(baud), state->baud);
-    format_wifi_ip(ip, sizeof(ip), menu->net_mode, state->ssid);
 
     lv_label_set_text(s_title, " ");
-    lv_label_set_text_fmt(s_rows[0], "WiFi:%s", system_menu_net_name(menu->net_mode));
-    lv_label_set_text_fmt(s_rows[1], "IP:%s", ip);
-    lv_label_set_text_fmt(s_rows[2], "UART:%s", baud);
-    lv_label_set_text_fmt(s_rows[3], "BLE:%s",
-                          (menu->ble_ready || state->ble_ready) ? "ON" : "OFF");
+    switch (menu->net_mode) {
+    case SYSTEM_NET_AP:
+        lv_label_set_text(s_rows[0], "WiFi:AP");
+        lv_label_set_text_fmt(s_rows[1], "IP:%s",
+                              is_ipv4_label(state->wifi_ap_ip) ? state->wifi_ap_ip : "192.168.4.1");
+        lv_label_set_text_fmt(s_rows[2], "UART:%s", baud);
+        lv_label_set_text_fmt(s_rows[3], "BLE:%s",
+                              (menu->ble_ready || state->ble_ready) ? "ON" : "OFF");
+        break;
+    case SYSTEM_NET_STA:
+        lv_label_set_text_fmt(s_rows[0], "WiFi:STA %s", wifi_sta_status(state));
+        lv_label_set_text_fmt(s_rows[1], "IP:%s",
+                              is_ipv4_label(state->wifi_sta_ip) ? state->wifi_sta_ip : "-");
+        lv_label_set_text_fmt(s_rows[2], "UART:%s", baud);
+        lv_label_set_text_fmt(s_rows[3], "BLE:%s",
+                              (menu->ble_ready || state->ble_ready) ? "ON" : "OFF");
+        break;
+    case SYSTEM_NET_APSTA:
+    default:
+        lv_label_set_text_fmt(s_rows[0], "WiFi:APSTA %s", wifi_sta_status(state));
+        lv_label_set_text_fmt(s_rows[1], "AP:%s",
+                              is_ipv4_label(state->wifi_ap_ip) ? state->wifi_ap_ip : "192.168.4.1");
+        lv_label_set_text_fmt(s_rows[2], "STA:%s",
+                              is_ipv4_label(state->wifi_sta_ip) ? state->wifi_sta_ip : "-");
+        lv_label_set_text_fmt(s_rows[3], "U:%s BLE:%s", baud,
+                              (menu->ble_ready || state->ble_ready) ? "ON" : "OFF");
+        break;
+    }
     for (uint8_t i = 0; i < SYSTEM_MENU_ROWS; i++) {
         set_row_selected(s_rows[i], false);
     }
@@ -247,9 +265,7 @@ static void update_menu_view(const display_ui_state_t *state)
 {
     const system_menu_snapshot_t *menu = &state->menu;
 
-    if (s_overlay_text_layout) {
-        set_standard_layout();
-    }
+    set_standard_layout();
 
     set_label_long_mode(s_title, LV_LABEL_LONG_MODE_CLIP);
     set_label_long_mode(s_footer, LV_LABEL_LONG_MODE_CLIP);
@@ -400,14 +416,7 @@ static void update_overlay_view(const display_ui_state_t *state)
         return;
     }
 
-    if (s_overlay_text_layout) {
-        for (uint8_t i = 0; i < SYSTEM_MENU_ROWS; i++) {
-            lv_obj_set_style_text_font(s_rows[i], DISPLAY_LVGL_FONT, 0);
-            lv_obj_set_height(s_rows[i], UI_ROW_H);
-            lv_obj_set_y(s_rows[i], UI_ROW_Y + i * UI_ROW_H);
-        }
-        s_overlay_text_layout = false;
-    }
+    set_standard_layout();
 
     for (uint8_t i = 0; i < SYSTEM_MENU_ROWS; i++) {
         lv_label_set_text(s_rows[i], state->overlay_lines[i][0] ? state->overlay_lines[i] : " ");

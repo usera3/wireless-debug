@@ -15,6 +15,7 @@ typedef enum {
     MENU_PAGE_ROOT,
     MENU_PAGE_NETWORK,
     MENU_PAGE_STA,
+    MENU_PAGE_APSTA,
     MENU_PAGE_WIFI_LIST,
     MENU_PAGE_COMM,
     MENU_PAGE_UART,
@@ -28,16 +29,21 @@ typedef enum {
 typedef enum {
     NET_ITEM_AP,
     NET_ITEM_STA,
-    NET_ITEM_CLEAR_STA,
+    NET_ITEM_APSTA,
     NET_ITEM_COUNT,
 } network_item_t;
 
 typedef enum {
     STA_ITEM_QUICK,
     STA_ITEM_WEB_SETUP,
-    STA_ITEM_SAVED,
     STA_ITEM_COUNT,
 } sta_item_t;
+
+typedef enum {
+    APSTA_ITEM_QUICK,
+    APSTA_ITEM_WEB_SETUP,
+    APSTA_ITEM_COUNT,
+} apsta_item_t;
 
 typedef enum {
     ROOT_ITEM_NETWORK,
@@ -67,6 +73,7 @@ typedef struct {
     uint8_t selected[MENU_PAGE_COUNT];
     uint32_t event_count;
     system_net_mode_t net_mode;
+    system_net_mode_t wifi_scan_target;
     system_comm_mode_t comm_mode;
     uint32_t uart_baud;
     bool ble_ready;
@@ -84,7 +91,8 @@ static system_menu_state_t s_menu = {
     .active = false,
     .page = MENU_PAGE_ROOT,
     .event_count = 0,
-    .net_mode = SYSTEM_NET_AP,
+    .net_mode = SYSTEM_NET_APSTA,
+    .wifi_scan_target = SYSTEM_NET_APSTA,
     .comm_mode = SYSTEM_COMM_AUTO,
     .uart_baud = 2000000,
     .ble_ready = false,
@@ -159,6 +167,8 @@ static uint8_t item_count_for_page(menu_page_t page)
         return NET_ITEM_COUNT;
     case MENU_PAGE_STA:
         return STA_ITEM_COUNT;
+    case MENU_PAGE_APSTA:
+        return APSTA_ITEM_COUNT;
     case MENU_PAGE_WIFI_LIST:
         return s_menu.wifi_ap_count;
     case MENU_PAGE_COMM:
@@ -213,7 +223,8 @@ static menu_page_t parent_page(menu_page_t page)
 {
     switch (page) {
     case MENU_PAGE_WIFI_LIST:
-        return MENU_PAGE_STA;
+        return s_menu.wifi_scan_target == SYSTEM_NET_APSTA ? MENU_PAGE_APSTA : MENU_PAGE_STA;
+    case MENU_PAGE_APSTA:
     case MENU_PAGE_STA:
         return MENU_PAGE_NETWORK;
     case MENU_PAGE_BLE:
@@ -326,21 +337,28 @@ static void page_item_label(menu_page_t page, uint8_t index,
             snprintf(value, value_size, "%s", s_menu.net_mode == SYSTEM_NET_AP ? "ON" : "");
         } else if (index == NET_ITEM_STA) {
             snprintf(label, label_size, "STA Mode");
-            snprintf(value, value_size, ">");
+            snprintf(value, value_size, "%s", s_menu.net_mode == SYSTEM_NET_STA ? "ON" : ">");
         } else {
-            snprintf(label, label_size, "Clear STA");
+            snprintf(label, label_size, "APSTA Mode");
+            snprintf(value, value_size, "%s", s_menu.net_mode == SYSTEM_NET_APSTA ? "ON" : ">");
         }
         break;
     case MENU_PAGE_STA:
         if (index == STA_ITEM_QUICK) {
-            snprintf(label, label_size, "Quick STA");
+            snprintf(label, label_size, "Quick Connect");
             snprintf(value, value_size, "scan");
-        } else if (index == STA_ITEM_WEB_SETUP) {
-            snprintf(label, label_size, "Web Setup");
-            snprintf(value, value_size, "AP");
         } else {
-            snprintf(label, label_size, "Saved STA");
-            snprintf(value, value_size, "%s", s_menu.net_mode == SYSTEM_NET_STA ? "ON" : "");
+            snprintf(label, label_size, "Web Setup");
+            snprintf(value, value_size, "page");
+        }
+        break;
+    case MENU_PAGE_APSTA:
+        if (index == APSTA_ITEM_QUICK) {
+            snprintf(label, label_size, "Quick Connect");
+            snprintf(value, value_size, "scan");
+        } else {
+            snprintf(label, label_size, "Web Setup");
+            snprintf(value, value_size, "page");
         }
         break;
     case MENU_PAGE_WIFI_LIST:
@@ -415,6 +433,8 @@ static const char *page_title(menu_page_t page)
         return "NETWORK";
     case MENU_PAGE_STA:
         return "STA MODE";
+    case MENU_PAGE_APSTA:
+        return "APSTA MODE";
     case MENU_PAGE_WIFI_LIST:
         return "WIFI LIST";
     case MENU_PAGE_COMM:
@@ -442,6 +462,8 @@ static const char *page_path(menu_page_t page)
         return "MENU/NET";
     case MENU_PAGE_STA:
         return "MENU/STA";
+    case MENU_PAGE_APSTA:
+        return "MENU/APSTA";
     case MENU_PAGE_WIFI_LIST:
         return "MENU/WIFI";
     case MENU_PAGE_COMM:
@@ -469,13 +491,17 @@ static system_menu_action_t action_for_selected_locked(void)
     switch (s_menu.page) {
     case MENU_PAGE_NETWORK:
         if (selected == NET_ITEM_AP) return SYSTEM_ACTION_NET_AP;
-        return SYSTEM_ACTION_NET_STA_CLEAR;
+        return SYSTEM_ACTION_NONE;
     case MENU_PAGE_STA:
         if (selected == STA_ITEM_QUICK) return SYSTEM_ACTION_NET_STA_QUICK;
-        if (selected == STA_ITEM_WEB_SETUP) return SYSTEM_ACTION_NET_STA_WEB_SETUP;
-        return SYSTEM_ACTION_NET_STA;
+        return SYSTEM_ACTION_NET_STA_WEB_SETUP;
+    case MENU_PAGE_APSTA:
+        if (selected == APSTA_ITEM_QUICK) return SYSTEM_ACTION_NET_APSTA_QUICK;
+        return SYSTEM_ACTION_NET_APSTA_WEB_SETUP;
     case MENU_PAGE_WIFI_LIST:
-        return SYSTEM_ACTION_NET_STA_QUICK_CONNECT;
+        return s_menu.wifi_scan_target == SYSTEM_NET_APSTA ?
+               SYSTEM_ACTION_NET_APSTA_QUICK_CONNECT :
+               SYSTEM_ACTION_NET_STA_QUICK_CONNECT;
     case MENU_PAGE_COMM:
         if (selected == 0) return SYSTEM_ACTION_COMM_AUTO;
         if (selected == 1) return SYSTEM_ACTION_COMM_WIFI;
@@ -571,7 +597,13 @@ system_menu_action_t system_menu_handle_key(system_key_t key)
             set_message_locked("-");
         } else if (s_menu.page == MENU_PAGE_NETWORK &&
                    s_menu.selected[MENU_PAGE_NETWORK] == NET_ITEM_STA) {
+            s_menu.wifi_scan_target = SYSTEM_NET_STA;
             s_menu.page = MENU_PAGE_STA;
+            set_message_locked("-");
+        } else if (s_menu.page == MENU_PAGE_NETWORK &&
+                   s_menu.selected[MENU_PAGE_NETWORK] == NET_ITEM_APSTA) {
+            s_menu.wifi_scan_target = SYSTEM_NET_APSTA;
+            s_menu.page = MENU_PAGE_APSTA;
             set_message_locked("-");
         } else if (s_menu.page == MENU_PAGE_MORE) {
             s_menu.page = more_item_page(s_menu.selected[MENU_PAGE_MORE]);
@@ -717,6 +749,16 @@ void system_menu_set_message(const char *message)
     menu_unlock();
 }
 
+void system_menu_set_wifi_scan_target(system_net_mode_t mode)
+{
+    if (mode != SYSTEM_NET_APSTA) {
+        mode = SYSTEM_NET_STA;
+    }
+    menu_lock();
+    s_menu.wifi_scan_target = mode;
+    menu_unlock();
+}
+
 void system_menu_set_wifi_scan_results(const system_menu_wifi_ap_t *aps,
                                        uint8_t count)
 {
@@ -737,7 +779,7 @@ void system_menu_set_wifi_scan_results(const system_menu_wifi_ap_t *aps,
     s_menu.wifi_ap_count = count;
     s_menu.selected[MENU_PAGE_WIFI_LIST] = 0;
     s_menu.active = true;
-    s_menu.page = count > 0 ? MENU_PAGE_WIFI_LIST : MENU_PAGE_STA;
+    s_menu.page = count > 0 ? MENU_PAGE_WIFI_LIST : parent_page(MENU_PAGE_WIFI_LIST);
     set_message_locked(count > 0 ? "-" : "NO WIFI");
     s_menu.event_count++;
     menu_unlock();
@@ -810,14 +852,18 @@ const char *system_menu_action_name(system_menu_action_t action)
     switch (action) {
     case SYSTEM_ACTION_NET_AP:
         return "net_ap";
-    case SYSTEM_ACTION_NET_STA:
-        return "net_sta";
     case SYSTEM_ACTION_NET_STA_QUICK:
         return "net_sta_quick";
     case SYSTEM_ACTION_NET_STA_WEB_SETUP:
         return "net_sta_web_setup";
     case SYSTEM_ACTION_NET_STA_QUICK_CONNECT:
         return "net_sta_quick_connect";
+    case SYSTEM_ACTION_NET_APSTA_QUICK:
+        return "net_apsta_quick";
+    case SYSTEM_ACTION_NET_APSTA_WEB_SETUP:
+        return "net_apsta_web_setup";
+    case SYSTEM_ACTION_NET_APSTA_QUICK_CONNECT:
+        return "net_apsta_quick_connect";
     case SYSTEM_ACTION_NET_STA_CLEAR:
         return "net_sta_clear";
     case SYSTEM_ACTION_COMM_AUTO:
@@ -853,14 +899,18 @@ const char *system_menu_action_title(system_menu_action_t action)
     switch (action) {
     case SYSTEM_ACTION_NET_AP:
         return "WIFI AP";
-    case SYSTEM_ACTION_NET_STA:
-        return "WIFI STA";
     case SYSTEM_ACTION_NET_STA_QUICK:
         return "QUICK STA";
     case SYSTEM_ACTION_NET_STA_WEB_SETUP:
-        return "WEB SETUP";
+        return "STA WEB";
     case SYSTEM_ACTION_NET_STA_QUICK_CONNECT:
         return "STA CONNECT";
+    case SYSTEM_ACTION_NET_APSTA_QUICK:
+        return "QUICK APSTA";
+    case SYSTEM_ACTION_NET_APSTA_WEB_SETUP:
+        return "APSTA WEB";
+    case SYSTEM_ACTION_NET_APSTA_QUICK_CONNECT:
+        return "APSTA CONNECT";
     case SYSTEM_ACTION_NET_STA_CLEAR:
         return "CLEAR STA";
     case SYSTEM_ACTION_COMM_AUTO:
@@ -888,7 +938,15 @@ const char *system_menu_action_title(system_menu_action_t action)
 
 const char *system_menu_net_name(system_net_mode_t mode)
 {
-    return mode == SYSTEM_NET_STA ? "STA" : "AP";
+    switch (mode) {
+    case SYSTEM_NET_STA:
+        return "STA";
+    case SYSTEM_NET_APSTA:
+        return "APSTA";
+    case SYSTEM_NET_AP:
+    default:
+        return "AP";
+    }
 }
 
 const char *system_menu_comm_name(system_comm_mode_t mode)

@@ -36,6 +36,10 @@ static display_ui_state_t s_state = {
     .status = "boot",
     .firmware = "v?",
     .ssid = "-",
+    .wifi_ap_ip = "192.168.4.1",
+    .wifi_sta_ip = "-",
+    .wifi_sta_connecting = false,
+    .wifi_sta_connected = false,
     .baud = UART_TRANSPORT_DEFAULT_BAUD,
     .ble_ready = 0,
 };
@@ -623,6 +627,23 @@ void display_lvgl_set_wifi_ssid(const char *ssid)
 {
     if (s_state_mutex != NULL && xSemaphoreTake(s_state_mutex, pdMS_TO_TICKS(2)) == pdTRUE) {
         state_update_string(s_state.ssid, sizeof(s_state.ssid), ssid);
+        mark_dirty_locked();
+        xSemaphoreGive(s_state_mutex);
+    }
+}
+
+void display_lvgl_set_wifi_state(system_net_mode_t mode, const char *ap_ip,
+                                 const char *sta_ip, bool sta_connecting,
+                                 bool sta_connected)
+{
+    if (s_state_mutex != NULL && xSemaphoreTake(s_state_mutex, pdMS_TO_TICKS(2)) == pdTRUE) {
+        system_menu_set_net_mode(mode);
+        state_update_string(s_state.wifi_ap_ip, sizeof(s_state.wifi_ap_ip),
+                            ap_ip != NULL && ap_ip[0] != '\0' ? ap_ip : "192.168.4.1");
+        state_update_string(s_state.wifi_sta_ip, sizeof(s_state.wifi_sta_ip),
+                            sta_ip != NULL && sta_ip[0] != '\0' ? sta_ip : "-");
+        s_state.wifi_sta_connecting = sta_connecting;
+        s_state.wifi_sta_connected = sta_connected;
         mark_dirty_locked();
         xSemaphoreGive(s_state_mutex);
     }

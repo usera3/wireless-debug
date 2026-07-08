@@ -24,6 +24,7 @@ typedef enum {
 typedef enum {
     SYSTEM_NET_AP,
     SYSTEM_NET_STA,
+    SYSTEM_NET_APSTA,
 } system_net_mode_t;
 
 typedef enum {
@@ -35,10 +36,12 @@ typedef enum {
 typedef enum {
     SYSTEM_ACTION_NONE,
     SYSTEM_ACTION_NET_AP,
-    SYSTEM_ACTION_NET_STA,
     SYSTEM_ACTION_NET_STA_QUICK,
     SYSTEM_ACTION_NET_STA_WEB_SETUP,
     SYSTEM_ACTION_NET_STA_QUICK_CONNECT,
+    SYSTEM_ACTION_NET_APSTA_QUICK,
+    SYSTEM_ACTION_NET_APSTA_WEB_SETUP,
+    SYSTEM_ACTION_NET_APSTA_QUICK_CONNECT,
     SYSTEM_ACTION_NET_STA_CLEAR,
     SYSTEM_ACTION_COMM_AUTO,
     SYSTEM_ACTION_COMM_WIFI,
@@ -87,6 +90,7 @@ void system_menu_set_comm_mode(system_comm_mode_t mode);
 void system_menu_set_uart_baud(uint32_t baud);
 void system_menu_set_ble_ready(bool ready);
 void system_menu_set_message(const char *message);
+void system_menu_set_wifi_scan_target(system_net_mode_t mode);
 void system_menu_set_wifi_scan_results(const system_menu_wifi_ap_t *aps,
                                        uint8_t count);
 bool system_menu_get_selected_wifi_ssid(char *out, size_t out_size);

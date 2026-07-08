@@ -14,19 +14,14 @@
 static ui_controller_config_t s_config;
 static SemaphoreHandle_t s_action_mutex;
 
-static bool wifi_has_sta_config(void)
-{
-    return s_config.wifi_has_sta_config != NULL &&
-           s_config.wifi_has_sta_config(s_config.ctx);
-}
-
 static void wifi_get_status(wifi_manager_status_t *out)
 {
     if (out == NULL) {
         return;
     }
     memset(out, 0, sizeof(*out));
-    out->mode = SYSTEM_NET_AP;
+    out->mode = SYSTEM_NET_APSTA;
+    snprintf(out->ap_ip, sizeof(out->ap_ip), "%s", WIFI_MANAGER_AP_IP);
     snprintf(out->sta_ip, sizeof(out->sta_ip), "-");
     if (s_config.wifi_get_status != NULL) {
         s_config.wifi_get_status(out, s_config.ctx);
@@ -49,12 +44,21 @@ static esp_err_t wifi_scan(wifi_manager_scan_ap_t *out, size_t capacity,
     return s_config.wifi_scan(out, capacity, out_count, s_config.ctx);
 }
 
-static esp_err_t wifi_quick_connect(const char *ssid)
+static esp_err_t wifi_quick_connect_for_mode(const char *ssid,
+                                             system_net_mode_t target_mode)
 {
-    if (s_config.wifi_quick_connect == NULL) {
+    if (s_config.wifi_quick_connect_for_mode == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
-    return s_config.wifi_quick_connect(ssid, s_config.ctx);
+    return s_config.wifi_quick_connect_for_mode(ssid, target_mode, s_config.ctx);
+}
+
+static esp_err_t wifi_begin_web_setup(system_net_mode_t target_mode)
+{
+    if (s_config.wifi_begin_web_setup == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    return s_config.wifi_begin_web_setup(target_mode, s_config.ctx);
 }
 
 static bool ble_is_started(void)
@@ -137,24 +141,44 @@ static esp_err_t apply_uart_baud_action(system_menu_action_t action,
     return err;
 }
 
-static esp_err_t apply_sta_quick_scan(system_action_source_t source)
+static const char *target_mode_label(system_net_mode_t target_mode)
+{
+    return target_mode == SYSTEM_NET_STA ? "STA" : "APSTA";
+}
+
+static system_menu_action_t quick_action_for_target(system_net_mode_t target_mode)
+{
+    return target_mode == SYSTEM_NET_STA ?
+           SYSTEM_ACTION_NET_STA_QUICK : SYSTEM_ACTION_NET_APSTA_QUICK;
+}
+
+static system_menu_action_t quick_connect_action_for_target(system_net_mode_t target_mode)
+{
+    return target_mode == SYSTEM_NET_STA ?
+           SYSTEM_ACTION_NET_STA_QUICK_CONNECT :
+           SYSTEM_ACTION_NET_APSTA_QUICK_CONNECT;
+}
+
+static esp_err_t apply_sta_quick_scan(system_action_source_t source,
+                                      system_net_mode_t target_mode)
 {
     wifi_manager_scan_ap_t scan_aps[WIFI_MANAGER_SCAN_MAX_APS];
     size_t scan_count = 0;
 
+    system_menu_set_wifi_scan_target(target_mode);
     system_menu_set_message("SCAN WIFI");
     display_port_set_status("wifi_scan");
     display_lvgl_set_status("wifi_scan");
 
     esp_err_t err = wifi_scan(scan_aps, WIFI_MANAGER_SCAN_MAX_APS, &scan_count);
     if (err != ESP_OK) {
-        action_feedback(SYSTEM_ACTION_NET_STA_QUICK, source, "FAIL", "scan wifi");
+        action_feedback(quick_action_for_target(target_mode), source, "FAIL", "scan wifi");
         return err;
     }
 
     if (scan_count == 0) {
         system_menu_set_wifi_scan_results(NULL, 0);
-        action_feedback(SYSTEM_ACTION_NET_STA_QUICK, source, "FAIL", "No WiFi");
+        action_feedback(quick_action_for_target(target_mode), source, "FAIL", "No WiFi");
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -177,33 +201,42 @@ static esp_err_t apply_sta_quick_scan(system_action_source_t source)
     return ESP_OK;
 }
 
-static esp_err_t apply_sta_quick_connect(system_action_source_t source)
+static esp_err_t apply_sta_quick_connect(system_action_source_t source,
+                                         system_net_mode_t target_mode)
 {
     char ssid[33];
     if (!system_menu_get_selected_wifi_ssid(ssid, sizeof(ssid))) {
-        action_feedback(SYSTEM_ACTION_NET_STA_QUICK_CONNECT, source, "FAIL", "No SSID");
+        action_feedback(quick_connect_action_for_target(target_mode), source, "FAIL", "No SSID");
         return ESP_ERR_INVALID_STATE;
     }
 
-    system_menu_set_net_mode(SYSTEM_NET_STA);
-    system_menu_set_message("STA CONNECTING");
-    display_port_set_status("quick_sta_conn");
-    display_lvgl_set_status("sta_conn");
+    system_menu_set_net_mode(target_mode);
+    system_menu_set_message(target_mode == SYSTEM_NET_STA ? "STA CONNECTING" : "APSTA CONNECTING");
+    display_port_set_status(target_mode == SYSTEM_NET_STA ? "quick_sta_conn" : "quick_apsta_conn");
+    display_lvgl_set_status(target_mode == SYSTEM_NET_STA ? "sta_conn" : "apsta_conn");
     display_lvgl_set_wifi_ssid(ssid);
 
-    esp_err_t err = wifi_quick_connect(ssid);
+    esp_err_t err = wifi_quick_connect_for_mode(ssid, target_mode);
     if (err == ESP_OK) {
-        action_feedback(SYSTEM_ACTION_NET_STA_QUICK_CONNECT, source, "WORKING", ssid);
+        action_feedback(quick_connect_action_for_target(target_mode), source, "WORKING", ssid);
     } else {
-        system_menu_set_net_mode(SYSTEM_NET_AP);
-        action_feedback(SYSTEM_ACTION_NET_STA_QUICK_CONNECT, source, "FAIL", "connect STA");
+        action_feedback(quick_connect_action_for_target(target_mode), source, "FAIL", "connect STA");
     }
     return err;
 }
 
-static esp_err_t apply_sta_web_setup(system_action_source_t source)
+static esp_err_t apply_sta_web_setup(system_action_source_t source,
+                                     system_net_mode_t target_mode)
 {
-    (void)source;
+    esp_err_t err = wifi_begin_web_setup(target_mode);
+    if (err != ESP_OK) {
+        action_feedback(target_mode == SYSTEM_NET_STA ?
+                        SYSTEM_ACTION_NET_STA_WEB_SETUP :
+                        SYSTEM_ACTION_NET_APSTA_WEB_SETUP,
+                        source, "FAIL", "web setup");
+        return err;
+    }
+
     wifi_manager_status_t status;
     wifi_get_status(&status);
 
@@ -211,16 +244,20 @@ static esp_err_t apply_sta_web_setup(system_action_source_t source)
     snprintf(ap_line, sizeof(ap_line), "AP:%s",
              status.ap_ssid[0] != '\0' ? status.ap_ssid : "ESP32-S3_AP");
 
-    system_menu_set_message("WEB SETUP");
+    system_menu_set_message(target_mode == SYSTEM_NET_STA ? "STA WEB SETUP" : "APSTA WEB SETUP");
     display_port_set_status("wifi_web_setup");
     display_lvgl_set_status("web_setup");
-    display_lvgl_set_text_screen("WEB SETUP",
+    display_lvgl_set_text_screen(target_mode == SYSTEM_NET_STA ? "STA WEB SETUP" : "APSTA WEB SETUP",
                                  ap_line,
                                  "PASS:12345678",
                                  "IP:192.168.4.1",
                                  "/wifi.html",
                                  "S5L BACK");
     display_lvgl_request_redraw();
+    action_feedback(target_mode == SYSTEM_NET_STA ?
+                    SYSTEM_ACTION_NET_STA_WEB_SETUP :
+                    SYSTEM_ACTION_NET_APSTA_WEB_SETUP,
+                    source, "READY", target_mode_label(target_mode));
     return ESP_OK;
 }
 
@@ -261,31 +298,23 @@ esp_err_t ui_controller_apply_menu_action(system_menu_action_t action,
         wifi_schedule_net_mode(SYSTEM_NET_AP);
         action_feedback(action, source, "WORKING", "AP mode");
         break;
-    case SYSTEM_ACTION_NET_STA:
-        if (!wifi_has_sta_config()) {
-            system_menu_set_net_mode(SYSTEM_NET_AP);
-            system_menu_set_message("STA NEED CFG");
-            display_port_set_status("menu_sta_pending");
-            display_lvgl_set_status("sta_need_cfg");
-            action_feedback(action, source, "FAIL", "No STA cfg");
-            err = ESP_ERR_INVALID_STATE;
-            break;
-        }
-        system_menu_set_net_mode(SYSTEM_NET_STA);
-        system_menu_set_message("STA SWITCHING");
-        display_port_set_status("menu_sta");
-        display_lvgl_set_status("sta_switch");
-        wifi_schedule_net_mode(SYSTEM_NET_STA);
-        action_feedback(action, source, "WORKING", "STA mode");
-        break;
     case SYSTEM_ACTION_NET_STA_QUICK:
-        err = apply_sta_quick_scan(source);
+        err = apply_sta_quick_scan(source, SYSTEM_NET_STA);
+        break;
+    case SYSTEM_ACTION_NET_APSTA_QUICK:
+        err = apply_sta_quick_scan(source, SYSTEM_NET_APSTA);
         break;
     case SYSTEM_ACTION_NET_STA_WEB_SETUP:
-        err = apply_sta_web_setup(source);
+        err = apply_sta_web_setup(source, SYSTEM_NET_STA);
+        break;
+    case SYSTEM_ACTION_NET_APSTA_WEB_SETUP:
+        err = apply_sta_web_setup(source, SYSTEM_NET_APSTA);
         break;
     case SYSTEM_ACTION_NET_STA_QUICK_CONNECT:
-        err = apply_sta_quick_connect(source);
+        err = apply_sta_quick_connect(source, SYSTEM_NET_STA);
+        break;
+    case SYSTEM_ACTION_NET_APSTA_QUICK_CONNECT:
+        err = apply_sta_quick_connect(source, SYSTEM_NET_APSTA);
         break;
     case SYSTEM_ACTION_NET_STA_CLEAR:
         if (s_config.wifi_clear_sta_config != NULL) {

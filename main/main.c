@@ -126,6 +126,7 @@ static bool app_handle_uart_wifi_command(const uint8_t *data, size_t len)
 {
     static const char status_cmd[] = "AT+WIFI?";
     static const char sta_cmd[] = "AT+WIFI=STA";
+    static const char apsta_cmd[] = "AT+WIFI=APSTA";
     static const char ap_cmd[] = "AT+WIFI=AP";
 
     if (data == NULL || len == 0) {
@@ -161,6 +162,18 @@ static bool app_handle_uart_wifi_command(const uint8_t *data, size_t len)
         wifi_manager_schedule_net_mode(SYSTEM_NET_STA);
         display_lvgl_set_status("sta_switch");
         uart_send_text("\r\nWIFI STA QUEUED\r\n");
+#else
+        uart_send_text("\r\nWIFI ERR disabled\r\n");
+#endif
+        return true;
+    }
+
+    if (len == sizeof(apsta_cmd) - 1 &&
+        memcmp(data, apsta_cmd, sizeof(apsta_cmd) - 1) == 0) {
+#if CONFIG_ENABLE_WIFI
+        wifi_manager_schedule_net_mode(SYSTEM_NET_APSTA);
+        display_lvgl_set_status("apsta_switch");
+        uart_send_text("\r\nWIFI APSTA QUEUED\r\n");
 #else
         uart_send_text("\r\nWIFI ERR disabled\r\n");
 #endif
@@ -205,6 +218,7 @@ static bool app_handle_uart_control_command(const uint8_t *data, size_t len)
                        "AT+HELP\r\n"
                        "AT+WIFI?\r\n"
                        "AT+WIFI=STA\r\n"
+                       "AT+WIFI=APSTA\r\n"
                        "AT+WIFI=AP\r\n");
         return true;
     }
@@ -385,10 +399,14 @@ static esp_err_t web_api_wifi_scan(wifi_manager_scan_ap_t *out, size_t capacity,
 }
 
 static esp_err_t web_api_wifi_connect_sta(const char *ssid, const char *password,
-                                          bool save_on_success, void *ctx)
+                                          bool save_on_success,
+                                          system_net_mode_t target_mode,
+                                          void *ctx)
 {
     (void)ctx;
-    return wifi_manager_schedule_connect_sta(ssid, password, save_on_success, 400);
+    return wifi_manager_schedule_connect_sta_for_mode(ssid, password,
+                                                     save_on_success, 400,
+                                                     target_mode);
 }
 
 static void web_api_request_wifi_net_mode(system_net_mode_t mode, void *ctx)
@@ -476,10 +494,18 @@ static esp_err_t ui_wifi_scan(wifi_manager_scan_ap_t *out, size_t capacity,
     return wifi_manager_scan(out, capacity, out_count);
 }
 
-static esp_err_t ui_wifi_quick_connect(const char *ssid, void *ctx)
+static esp_err_t ui_wifi_quick_connect_for_mode(const char *ssid,
+                                                system_net_mode_t target_mode,
+                                                void *ctx)
 {
     (void)ctx;
-    return wifi_manager_quick_connect(ssid);
+    return wifi_manager_quick_connect_for_mode(ssid, target_mode);
+}
+
+static esp_err_t ui_wifi_begin_web_setup(system_net_mode_t target_mode, void *ctx)
+{
+    (void)ctx;
+    return wifi_manager_begin_web_setup(target_mode);
 }
 
 static esp_err_t ui_set_uart_baud(uint32_t baud, void *ctx)
@@ -623,6 +649,19 @@ static void wifi_manager_label_changed(const char *label, void *ctx)
     display_lvgl_set_wifi_ssid(label);
 }
 
+static void wifi_manager_state_changed(const wifi_manager_status_t *status, void *ctx)
+{
+    (void)ctx;
+    if (status == NULL) {
+        return;
+    }
+    display_lvgl_set_wifi_state(status->mode,
+                                status->ap_ip,
+                                status->sta_ip,
+                                status->sta_connecting,
+                                status->sta_connected);
+}
+
 static void wifi_manager_status_changed(const char *status, void *ctx)
 {
     (void)ctx;
@@ -679,7 +718,8 @@ void app_main(void)
         .wifi_schedule_net_mode = ui_wifi_schedule_net_mode,
         .wifi_clear_sta_config = ui_wifi_clear_sta_config,
         .wifi_scan = ui_wifi_scan,
-        .wifi_quick_connect = ui_wifi_quick_connect,
+        .wifi_quick_connect_for_mode = ui_wifi_quick_connect_for_mode,
+        .wifi_begin_web_setup = ui_wifi_begin_web_setup,
         .set_uart_baud = ui_set_uart_baud,
         .ble_is_started = ui_ble_is_started,
         .ble_start = ui_ble_start,
@@ -736,6 +776,7 @@ void app_main(void)
         .on_net_mode = wifi_manager_net_mode_changed,
         .on_message = wifi_manager_message_changed,
         .on_wifi_label = wifi_manager_label_changed,
+        .on_wifi_state = wifi_manager_state_changed,
         .on_status = wifi_manager_status_changed,
         .ctx = NULL,
     };

@@ -33,6 +33,7 @@ static size_t s_wifi_scan_count;
 static esp_err_t s_wifi_scan_error = ESP_OK;
 static int64_t s_wifi_scan_started_us;
 static int64_t s_wifi_scan_finished_us;
+static system_net_mode_t s_web_connect_target_mode = SYSTEM_NET_APSTA;
 
 static int64_t scan_elapsed_ms(void)
 {
@@ -328,14 +329,18 @@ static const char *menu_action_name(system_menu_action_t action)
     switch (action) {
     case SYSTEM_ACTION_NET_AP:
         return "net_ap";
-    case SYSTEM_ACTION_NET_STA:
-        return "net_sta";
     case SYSTEM_ACTION_NET_STA_QUICK:
         return "net_sta_quick";
     case SYSTEM_ACTION_NET_STA_WEB_SETUP:
         return "net_sta_web_setup";
     case SYSTEM_ACTION_NET_STA_QUICK_CONNECT:
         return "net_sta_quick_connect";
+    case SYSTEM_ACTION_NET_APSTA_QUICK:
+        return "net_apsta_quick";
+    case SYSTEM_ACTION_NET_APSTA_WEB_SETUP:
+        return "net_apsta_web_setup";
+    case SYSTEM_ACTION_NET_APSTA_QUICK_CONNECT:
+        return "net_apsta_quick_connect";
     case SYSTEM_ACTION_NET_STA_CLEAR:
         return "net_sta_clear";
     case SYSTEM_ACTION_COMM_AUTO:
@@ -406,7 +411,8 @@ static void get_wifi_status(wifi_manager_status_t *out)
     }
 
     memset(out, 0, sizeof(*out));
-    out->mode = SYSTEM_NET_AP;
+    out->mode = SYSTEM_NET_APSTA;
+    snprintf(out->ap_ip, sizeof(out->ap_ip), "%s", WIFI_MANAGER_AP_IP);
     snprintf(out->sta_ip, sizeof(out->sta_ip), "-");
 }
 
@@ -430,13 +436,15 @@ static esp_err_t wifi_scan_aps(wifi_manager_scan_ap_t *out, size_t capacity,
 }
 
 static esp_err_t wifi_connect_sta(const char *ssid, const char *password,
-                                  bool save_on_success)
+                                  bool save_on_success,
+                                  system_net_mode_t target_mode)
 {
     const web_api_context_t *ctx = api_ctx();
     if (ctx->wifi_connect_sta == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
-    return ctx->wifi_connect_sta(ssid, password, save_on_success, ctx->ctx);
+    return ctx->wifi_connect_sta(ssid, password, save_on_success,
+                                 target_mode, ctx->ctx);
 }
 
 static bool wifi_client_connected(void)
@@ -559,13 +567,15 @@ static esp_err_t wifi_status_handler(httpd_req_t *req)
     get_wifi_status(&status);
     http_prepare_json(req);
 
-    char resp[320];
+    char resp[384];
     snprintf(resp, sizeof(resp),
-             "{\"mode\":\"%s\",\"ap_ssid\":\"%s\",\"sta_ssid\":\"%s\","
+             "{\"mode\":\"%s\",\"ap_ssid\":\"%s\",\"ap_ip\":\"%s\","
+             "\"sta_ssid\":\"%s\","
              "\"sta_configured\":%s,\"sta_connecting\":%s,"
              "\"sta_connected\":%s,\"sta_ip\":\"%s\"}",
              system_menu_net_name(status.mode),
              status.ap_ssid,
+             status.ap_ip,
              status.sta_ssid,
              status.sta_configured ? "true" : "false",
              status.sta_connecting ? "true" : "false",
@@ -823,6 +833,26 @@ static esp_err_t wifi_scan_handler(httpd_req_t *req)
     return ESP_OK;
 }
 
+static bool parse_wifi_net_mode(const char *mode, system_net_mode_t *out)
+{
+    if (mode == NULL || out == NULL) {
+        return false;
+    }
+    if (str_ieq(mode, "ap")) {
+        *out = SYSTEM_NET_AP;
+        return true;
+    }
+    if (str_ieq(mode, "sta")) {
+        *out = SYSTEM_NET_STA;
+        return true;
+    }
+    if (str_ieq(mode, "apsta")) {
+        *out = SYSTEM_NET_APSTA;
+        return true;
+    }
+    return false;
+}
+
 static esp_err_t wifi_connect_handler(httpd_req_t *req)
 {
     http_prepare_json(req);
@@ -841,6 +871,8 @@ static esp_err_t wifi_connect_handler(httpd_req_t *req)
 
     char ssid[33] = {0};
     char password[65] = {0};
+    char target_text[12] = {0};
+    system_net_mode_t target_mode = s_web_connect_target_mode;
     bool save_on_success = true;
     if (!parse_json_string_field(body, "ssid", ssid, sizeof(ssid)) || ssid[0] == '\0') {
         httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"missing ssid\"}");
@@ -849,8 +881,17 @@ static esp_err_t wifi_connect_handler(httpd_req_t *req)
     parse_json_string_field(body, "password", password, sizeof(password));
     (void)parse_json_bool_field(body, "save", &save_on_success);
     (void)parse_json_bool_field(body, "save_on_success", &save_on_success);
+    if (parse_json_string_field(body, "target_mode", target_text, sizeof(target_text)) ||
+        parse_json_string_field(body, "mode", target_text, sizeof(target_text))) {
+        if (!parse_wifi_net_mode(target_text, &target_mode) ||
+            target_mode == SYSTEM_NET_AP) {
+            httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"target mode must be sta/apsta\"}");
+            return ESP_OK;
+        }
+    }
+    s_web_connect_target_mode = target_mode;
 
-    esp_err_t err = wifi_connect_sta(ssid, password, save_on_success);
+    esp_err_t err = wifi_connect_sta(ssid, password, save_on_success, target_mode);
     if (err != ESP_OK) {
         char resp[96];
         snprintf(resp, sizeof(resp), "{\"ok\":false,\"msg\":\"connect failed:%d\"}", err);
@@ -858,18 +899,20 @@ static esp_err_t wifi_connect_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    system_menu_set_message("STA CONNECTING");
-    display_port_set_status("wifi_connect");
-    display_lvgl_set_status("sta_conn");
+    system_menu_set_message(target_mode == SYSTEM_NET_STA ? "STA CONNECTING" : "APSTA CONNECTING");
+    display_port_set_status(target_mode == SYSTEM_NET_STA ? "wifi_sta_connect" : "wifi_apsta_connect");
+    display_lvgl_set_status(target_mode == SYSTEM_NET_STA ? "sta_conn" : "apsta_conn");
     display_lvgl_set_wifi_ssid(ssid);
 
     char esc_ssid[80];
     char resp[160];
     json_escape_string(ssid, esc_ssid, sizeof(esc_ssid));
     snprintf(resp, sizeof(resp),
-             "{\"ok\":true,\"state\":\"connecting\",\"ssid\":\"%s\",\"save\":%s}",
+             "{\"ok\":true,\"state\":\"connecting\",\"ssid\":\"%s\",\"save\":%s,"
+             "\"target_mode\":\"%s\"}",
              esc_ssid,
-             save_on_success ? "true" : "false");
+             save_on_success ? "true" : "false",
+             system_menu_net_name(target_mode));
     httpd_resp_sendstr(req, resp);
     return ESP_OK;
 }
@@ -1367,14 +1410,21 @@ static esp_err_t wifi_mode_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    system_menu_action_t action;
-    if (strcmp(mode, "ap") == 0 || strcmp(mode, "AP") == 0) {
-        action = SYSTEM_ACTION_NET_AP;
-    } else if (strcmp(mode, "sta") == 0 || strcmp(mode, "STA") == 0) {
-        action = SYSTEM_ACTION_NET_STA;
-    } else {
-        httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"mode must be ap/sta\"}");
+    system_net_mode_t net_mode = SYSTEM_NET_APSTA;
+    if (!parse_wifi_net_mode(mode, &net_mode)) {
+        httpd_resp_sendstr(req, "{\"ok\":false,\"msg\":\"mode must be ap/sta/apsta\"}");
         return ESP_OK;
+    }
+
+    system_menu_action_t action;
+    if (net_mode == SYSTEM_NET_AP) {
+        action = SYSTEM_ACTION_NET_AP;
+    } else if (net_mode == SYSTEM_NET_STA) {
+        s_web_connect_target_mode = SYSTEM_NET_STA;
+        action = SYSTEM_ACTION_NET_STA_WEB_SETUP;
+    } else {
+        s_web_connect_target_mode = SYSTEM_NET_APSTA;
+        action = SYSTEM_ACTION_NET_APSTA_WEB_SETUP;
     }
 
     esp_err_t err = apply_action(action, SYSTEM_ACTION_SOURCE_WEB);
@@ -1384,7 +1434,13 @@ static esp_err_t wifi_mode_handler(httpd_req_t *req)
         httpd_resp_sendstr(req, resp);
         return ESP_OK;
     }
-    return http_send_json_ok(req);
+    char resp[80];
+    snprintf(resp, sizeof(resp),
+             "{\"ok\":true,\"mode\":\"%s\",\"connect_target\":\"%s\"}",
+             system_menu_net_name(net_mode),
+             system_menu_net_name(s_web_connect_target_mode));
+    httpd_resp_sendstr(req, resp);
+    return ESP_OK;
 }
 
 static esp_err_t wifi_mode_options_handler(httpd_req_t *req)
@@ -2412,7 +2468,7 @@ static esp_err_t device_capabilities_handler(httpd_req_t *req)
                        "\"domain\":\"motor wireless diagnostics\","
                        "\"limits\":{\"display_text\":512,\"uart_baud_min\":1200,"
                        "\"uart_baud_max\":5000000},"
-                       "\"actions\":[\"wifi_ap\",\"wifi_sta\",\"wifi_scan\","
+                       "\"actions\":[\"wifi_ap\",\"wifi_sta\",\"wifi_apsta\",\"wifi_scan\","
                        "\"wifi_connect\",\"ble_start\","
                        "\"set_comm_mode\",\"set_uart_baud\",\"query_status\","
                        "\"uart_tx_text\",\"uart_tx_hex\",\"ble_tx_text\","
@@ -2428,7 +2484,7 @@ static esp_err_t device_capabilities_handler(httpd_req_t *req)
                        "\"motor_param_write_checks_read_only_and_range\","
                        "\"waveform_record_requires_channel_address_mapping\"],"
                        "\"uart_commands\":[\"AT+HELP\",\"AT+WIFI?\","
-                       "\"AT+WIFI=STA\",\"AT+WIFI=AP\"],"
+                       "\"AT+WIFI=STA\",\"AT+WIFI=APSTA\",\"AT+WIFI=AP\"],"
                        "\"websocket\":{\"path\":\"/ws\",\"role\":\"uart_tunnel\"},"
                        "\"http\":["
                        "{\"method\":\"GET\",\"path\":\"/api/device/status\"},"
@@ -2463,10 +2519,10 @@ static esp_err_t device_capabilities_handler(httpd_req_t *req)
                        "{\"method\":\"POST\",\"path\":\"/api/motor/params/write\"},"
                        "{\"method\":\"GET\",\"path\":\"/api/wifi/status\"},"
                        "{\"method\":\"GET\",\"path\":\"/api/wifi/scan\"},"
-                       "{\"method\":\"POST\",\"path\":\"/api/wifi/connect\",\"body\":\"{ssid,password,save?}\"},"
+                       "{\"method\":\"POST\",\"path\":\"/api/wifi/connect\",\"body\":\"{ssid,password,save?,target_mode?}\"},"
                        "{\"method\":\"POST\",\"path\":\"/api/wifi/sta\"},"
                        "{\"method\":\"DELETE\",\"path\":\"/api/wifi/sta\"},"
-                       "{\"method\":\"POST\",\"path\":\"/api/wifi/mode\",\"body\":\"{mode:ap|sta}\"},"
+                       "{\"method\":\"POST\",\"path\":\"/api/wifi/mode\",\"body\":\"{mode:ap|sta|apsta}\"},"
                        "{\"method\":\"GET\",\"path\":\"/api/ws/status\"},"
                        "{\"method\":\"GET\",\"path\":\"/api/ble/status\"},"
                        "{\"method\":\"POST\",\"path\":\"/api/ble/start\"},"

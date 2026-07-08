@@ -22,7 +22,9 @@ typedef struct {
     esp_err_t (*wifi_scan)(wifi_manager_scan_ap_t *out, size_t capacity,
                            size_t *out_count, void *ctx);
     esp_err_t (*wifi_connect_sta)(const char *ssid, const char *password,
-                                  bool save_on_success, void *ctx);
+                                  bool save_on_success,
+                                  system_net_mode_t target_mode,
+                                  void *ctx);
     void (*request_wifi_net_mode)(system_net_mode_t mode, void *ctx);
     bool (*wifi_client_connected)(void *ctx);
     bool (*ble_is_started)(void *ctx);
