@@ -238,8 +238,8 @@ static void update_closed_view(const display_ui_state_t *state)
         break;
     case SYSTEM_NET_STA:
         lv_label_set_text_fmt(s_rows[0], "WiFi:STA %s", wifi_sta_status(state));
-        lv_label_set_text_fmt(s_rows[1], "IP:%s",
-                              is_ipv4_label(state->wifi_sta_ip) ? state->wifi_sta_ip : "-");
+        lv_label_set_text(s_rows[1],
+                          is_ipv4_label(state->wifi_sta_ip) ? state->wifi_sta_ip : "-");
         lv_label_set_text_fmt(s_rows[2], "UART:%s", baud);
         lv_label_set_text_fmt(s_rows[3], "BLE:%s",
                               (menu->ble_ready || state->ble_ready) ? "ON" : "OFF");
@@ -249,8 +249,8 @@ static void update_closed_view(const display_ui_state_t *state)
         lv_label_set_text_fmt(s_rows[0], "WiFi:APSTA %s", wifi_sta_status(state));
         lv_label_set_text_fmt(s_rows[1], "AP:%s",
                               is_ipv4_label(state->wifi_ap_ip) ? state->wifi_ap_ip : "192.168.4.1");
-        lv_label_set_text_fmt(s_rows[2], "STA:%s",
-                              is_ipv4_label(state->wifi_sta_ip) ? state->wifi_sta_ip : "-");
+        lv_label_set_text(s_rows[2],
+                          is_ipv4_label(state->wifi_sta_ip) ? state->wifi_sta_ip : "-");
         lv_label_set_text_fmt(s_rows[3], "U:%s BLE:%s", baud,
                               (menu->ble_ready || state->ble_ready) ? "ON" : "OFF");
         break;

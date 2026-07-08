@@ -45,11 +45,22 @@ assert.ok(closedView[0].includes('wifi_sta_status'),
   'OLED home must show STA connection status');
 assert.ok(/case SYSTEM_NET_AP:[\s\S]*?IP:%s[\s\S]*?state->wifi_ap_ip/.test(closedView[0]),
   'AP home view must show only the AP IP');
-assert.ok(/case SYSTEM_NET_STA:[\s\S]*?IP:%s[\s\S]*?state->wifi_sta_ip/.test(closedView[0]),
-  'STA home view must show only the STA IP');
-assert.ok(/case SYSTEM_NET_APSTA:[\s\S]*?AP:%s[\s\S]*?state->wifi_ap_ip[\s\S]*?STA:%s[\s\S]*?state->wifi_sta_ip/.test(closedView[0]),
-  'APSTA home view must show AP and STA IPs separately');
+assert.ok(/case SYSTEM_NET_STA:[\s\S]*?lv_label_set_text\(s_rows\[1\],[\s\S]*?state->wifi_sta_ip/.test(closedView[0]),
+  'STA home view must show only the raw STA IP');
+assert.ok(/case SYSTEM_NET_APSTA:[\s\S]*?AP:%s[\s\S]*?state->wifi_ap_ip[\s\S]*?lv_label_set_text\(s_rows\[2\],[\s\S]*?state->wifi_sta_ip/.test(closedView[0]),
+  'APSTA home view must show AP IP and raw STA IP separately');
 const staBlock = closedView[0].match(/case SYSTEM_NET_STA:[\s\S]*?break;/);
 assert.ok(staBlock, 'display_ui.c must contain an isolated STA home branch');
 assert.ok(!staBlock[0].includes('192.168.4.1') && !staBlock[0].includes('wifi_ap_ip'),
   'STA home view must not hard-code or fall back to the AP IP');
+assert.ok(!staBlock[0].includes('IP:%s'),
+  'STA home view must not prefix STA IP, because 192.168.137.xxx must fit on 128px OLED');
+assert.ok(/case SYSTEM_NET_STA:[\s\S]*?lv_label_set_text\(s_rows\[1\],[\s\S]*?state->wifi_sta_ip[\s\S]*?\);/.test(closedView[0]),
+  'STA home view must render the raw STA IPv4 string on its own row');
+
+const apstaBlock = closedView[0].match(/case SYSTEM_NET_APSTA:[\s\S]*?break;/);
+assert.ok(apstaBlock, 'display_ui.c must contain an APSTA home branch');
+assert.ok(!apstaBlock[0].includes('STA:%s'),
+  'APSTA home view must not prefix STA IP, because 192.168.137.xxx must fit on 128px OLED');
+assert.ok(/case SYSTEM_NET_APSTA:[\s\S]*?lv_label_set_text\(s_rows\[2\],[\s\S]*?state->wifi_sta_ip[\s\S]*?\);/.test(closedView[0]),
+  'APSTA home view must render the raw STA IPv4 string on its own row');

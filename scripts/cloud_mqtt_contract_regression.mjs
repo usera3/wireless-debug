@@ -67,6 +67,12 @@ assert.ok(kconfig.includes('config CLOUD_MQTT_ENABLE'), 'missing CLOUD_MQTT_ENAB
 assert.ok(kconfig.includes('config CLOUD_MQTT_DEVICE_ID'), 'missing CLOUD_MQTT_DEVICE_ID');
 assert.ok(kconfig.includes('config CLOUD_MQTT_URI'), 'missing CLOUD_MQTT_URI');
 assert.ok(kconfig.includes('default "esp32-001"'), 'default device ID mismatch');
+assert.ok(kconfig.includes('default "mqtt://192.168.137.1:1883"'),
+  'default MQTT URI must target the Windows hotspot gateway');
+
+const sdkconfig = readFileSync(resolve(root, 'sdkconfig'), 'utf8');
+assert.ok(sdkconfig.includes('CONFIG_CLOUD_MQTT_URI="mqtt://192.168.137.1:1883"'),
+  'sdkconfig MQTT URI must target the Windows hotspot gateway for this test build');
 
 for (const token of [
   'parse_net_mode',

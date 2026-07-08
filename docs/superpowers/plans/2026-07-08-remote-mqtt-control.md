@@ -729,12 +729,12 @@ MQTT_URL=mqtt://localhost:1883 npm run mock
 
 ## ESP32 Broker Address
 
-The real ESP32 must use the PC's LAN IP, not `localhost`.
+The real ESP32 must use the PC address reachable from the hotspot network, not `localhost`.
 
 Example:
 
 ```text
-mqtt://192.168.1.100:1883
+mqtt://192.168.137.1:1883
 ```
 
 Mosquitto listens on `0.0.0.0:1883`. If ESP32 cannot connect, allow inbound TCP port `1883` in Windows firewall.
@@ -892,7 +892,7 @@ config CLOUD_MQTT_DEVICE_ID
 
 config CLOUD_MQTT_URI
     string "Cloud MQTT broker URI"
-    default "mqtt://192.168.1.100:1883"
+    default "mqtt://192.168.137.1:1883"
 
 endmenu
 ```
