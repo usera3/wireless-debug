@@ -145,6 +145,35 @@ S5 GPIO18
 
 如果网页打不开，先确认电脑是否还连在 ESP32 热点上。WiFi 扫描或 STA 连接时，ESP32 热点可能短暂不可用，重新连回热点后页面会继续刷新。
 
+## Remote MQTT MVP
+
+远程访问 MVP 位于：
+
+```text
+tools/remote_mqtt/
+```
+
+本地验证使用 Docker Compose：
+
+```bash
+cd tools/remote_mqtt
+docker compose up
+```
+
+浏览器打开：
+
+```text
+http://localhost:3000
+```
+
+ESP32 实机测试时，把固件 MQTT URI 设置为电脑局域网地址：
+
+```text
+mqtt://<PC_LAN_IP>:1883
+```
+
+后续部署到 Ubuntu 云服务器时，把 `tools/remote_mqtt/` 复制到服务器，运行 `docker compose up -d`，开放 `1883` 和 `3000` 端口，再把固件 MQTT URI 改成云服务器 IP 或域名。
+
 ## 前端静态资源
 
 主 Web UI 的源码通常在另一个仓库：

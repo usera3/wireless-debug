@@ -46,3 +46,27 @@ docker compose up -d
 ```
 
 Open inbound ports `1883` and `3000` for the MVP. Before broader exposure, add broker username/password, web login, and TLS.
+
+## Real ESP32 Test
+
+1. Find the PC LAN IP.
+2. Set `CONFIG_CLOUD_MQTT_URI` to `mqtt://<PC_LAN_IP>:1883` through ESP-IDF menuconfig or by editing the project config for the test build.
+3. Build and flash the firmware.
+4. Put the ESP32 in STA or APSTA mode and connect it to the same LAN as the PC.
+5. Start the local stack:
+
+```bash
+cd tools/remote_mqtt
+docker compose up
+```
+
+6. Open:
+
+```text
+http://localhost:3000
+```
+
+7. Verify status updates about every 5 seconds.
+8. Send `query_status`, `set_uart_baud`, `set_comm_mode`, `ble_start`, and `display_text`.
+9. Verify every command produces an ACK in the command log.
+10. Switch ESP32 to AP mode and verify the remote page becomes offline or stale after MQTT disconnects.
