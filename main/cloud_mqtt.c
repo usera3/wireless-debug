@@ -95,14 +95,149 @@ static void publish_ack(const char *command_id, const char *type, bool ok, const
     cJSON_AddStringToObject(root, "type", type != NULL ? type : "");
     cJSON_AddStringToObject(root, "message", message != NULL ? message : "");
 
-    char topic[96];
-    make_topic(topic, sizeof(topic), "ack");
     char *payload = cJSON_PrintUnformatted(root);
     if (payload != NULL) {
-        esp_mqtt_client_publish(s_client, topic, payload, 0, 1, 0);
+        esp_mqtt_client_publish(s_client, s_ack_topic, payload, 0, 1, 0);
         cJSON_free(payload);
     }
     cJSON_Delete(root);
+}
+
+static bool parse_net_mode(const cJSON *args, system_net_mode_t *out)
+{
+    const cJSON *mode = cJSON_GetObjectItem(args, "mode");
+    if (!cJSON_IsString(mode) || out == NULL) {
+        return false;
+    }
+    if (strcmp(mode->valuestring, "ap") == 0) {
+        *out = SYSTEM_NET_AP;
+        return true;
+    }
+    if (strcmp(mode->valuestring, "sta") == 0) {
+        *out = SYSTEM_NET_STA;
+        return true;
+    }
+    if (strcmp(mode->valuestring, "apsta") == 0) {
+        *out = SYSTEM_NET_APSTA;
+        return true;
+    }
+    return false;
+}
+
+static bool parse_comm_mode(const cJSON *args, app_comm_mode_t *out)
+{
+    const cJSON *mode = cJSON_GetObjectItem(args, "mode");
+    if (!cJSON_IsString(mode) || out == NULL) {
+        return false;
+    }
+    if (strcmp(mode->valuestring, "auto") == 0) {
+        *out = APP_COMM_AUTO;
+        return true;
+    }
+    if (strcmp(mode->valuestring, "wifi") == 0) {
+        *out = APP_COMM_WIFI;
+        return true;
+    }
+    if (strcmp(mode->valuestring, "ble") == 0) {
+        *out = APP_COMM_BLE;
+        return true;
+    }
+    return false;
+}
+
+static void handle_set_wifi_mode(const char *command_id, const char *type, const cJSON *args)
+{
+    system_net_mode_t mode;
+    if (!parse_net_mode(args, &mode)) {
+        publish_ack(command_id, type, false, "mode must be ap/sta/apsta");
+        return;
+    }
+    if (s_runtime.set_wifi_mode == NULL) {
+        publish_ack(command_id, type, false, "wifi mode callback missing");
+        return;
+    }
+
+    esp_err_t err = s_runtime.set_wifi_mode(mode, s_runtime.ctx);
+    bool ok = err == ESP_OK;
+    publish_ack(command_id, type, ok, ok ? "queued" : esp_err_to_name(err));
+    if (ok) {
+        cloud_mqtt_publish_status_now();
+    }
+}
+
+static void handle_set_uart_baud(const char *command_id, const char *type, const cJSON *args)
+{
+    const cJSON *baud = cJSON_GetObjectItem(args, "baud");
+    if (!cJSON_IsNumber(baud) || baud->valuedouble < 1200 || baud->valuedouble > 5000000) {
+        publish_ack(command_id, type, false, "baud out of range");
+        return;
+    }
+    if (s_runtime.set_uart_baud == NULL) {
+        publish_ack(command_id, type, false, "uart callback missing");
+        return;
+    }
+
+    esp_err_t err = s_runtime.set_uart_baud((uint32_t)baud->valuedouble, s_runtime.ctx);
+    bool ok = err == ESP_OK;
+    publish_ack(command_id, type, ok, ok ? "applied" : esp_err_to_name(err));
+    if (ok) {
+        cloud_mqtt_publish_status_now();
+    }
+}
+
+static void handle_set_comm_mode(const char *command_id, const char *type, const cJSON *args)
+{
+    app_comm_mode_t mode;
+    if (!parse_comm_mode(args, &mode)) {
+        publish_ack(command_id, type, false, "mode must be auto/wifi/ble");
+        return;
+    }
+    if (s_runtime.set_comm_mode == NULL) {
+        publish_ack(command_id, type, false, "comm callback missing");
+        return;
+    }
+
+    esp_err_t err = s_runtime.set_comm_mode(mode, s_runtime.ctx);
+    bool ok = err == ESP_OK;
+    publish_ack(command_id, type, ok, ok ? "applied" : esp_err_to_name(err));
+    if (ok) {
+        cloud_mqtt_publish_status_now();
+    }
+}
+
+static void handle_ble_start(const char *command_id, const char *type)
+{
+    if (s_runtime.ble_start == NULL) {
+        publish_ack(command_id, type, false, "ble callback missing");
+        return;
+    }
+
+    esp_err_t err = s_runtime.ble_start(s_runtime.ctx);
+    bool ok = err == ESP_OK;
+    publish_ack(command_id, type, ok, ok ? "ble started" : esp_err_to_name(err));
+    if (ok) {
+        cloud_mqtt_publish_status_now();
+    }
+}
+
+static void handle_display_text(const char *command_id, const char *type, const cJSON *args)
+{
+    const cJSON *text = cJSON_GetObjectItem(args, "text");
+    if (!cJSON_IsString(text) || text->valuestring[0] == '\0') {
+        publish_ack(command_id, type, false, "text required");
+        return;
+    }
+    if (s_runtime.display_text == NULL) {
+        publish_ack(command_id, type, false, "display callback missing");
+        return;
+    }
+
+    esp_err_t err = s_runtime.display_text(text->valuestring, s_runtime.ctx);
+    bool ok = err == ESP_OK;
+    publish_ack(command_id, type, ok, ok ? "displayed" : esp_err_to_name(err));
+    if (ok) {
+        cloud_mqtt_publish_status_now();
+    }
 }
 
 static void handle_command(const char *payload, int payload_len)
@@ -130,16 +265,24 @@ static void handle_command(const char *payload, int payload_len)
     const cJSON *type = cJSON_GetObjectItem(root, "type");
     const char *command_id_text = cJSON_IsString(command_id) ? command_id->valuestring : "";
     const char *type_text = cJSON_IsString(type) ? type->valuestring : "";
+    const cJSON *args = cJSON_GetObjectItem(root, "args");
+    if (!cJSON_IsObject(args)) {
+        args = root;
+    }
 
     if (strcmp(type_text, "query_status") == 0) {
         cloud_mqtt_publish_status_now();
         publish_ack(command_id_text, type_text, true, "status published");
-    } else if (strcmp(type_text, "set_wifi_mode") == 0 ||
-               strcmp(type_text, "set_uart_baud") == 0 ||
-               strcmp(type_text, "set_comm_mode") == 0 ||
-               strcmp(type_text, "ble_start") == 0 ||
-               strcmp(type_text, "display_text") == 0) {
-        publish_ack(command_id_text, type_text, false, "command scaffold only");
+    } else if (strcmp(type_text, "set_wifi_mode") == 0) {
+        handle_set_wifi_mode(command_id_text, type_text, args);
+    } else if (strcmp(type_text, "set_uart_baud") == 0) {
+        handle_set_uart_baud(command_id_text, type_text, args);
+    } else if (strcmp(type_text, "set_comm_mode") == 0) {
+        handle_set_comm_mode(command_id_text, type_text, args);
+    } else if (strcmp(type_text, "ble_start") == 0) {
+        handle_ble_start(command_id_text, type_text);
+    } else if (strcmp(type_text, "display_text") == 0) {
+        handle_display_text(command_id_text, type_text, args);
     } else {
         publish_ack(command_id_text, type_text, false, "unsupported command type");
     }

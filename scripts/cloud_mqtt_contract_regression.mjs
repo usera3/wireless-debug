@@ -67,4 +67,24 @@ assert.ok(kconfig.includes('config CLOUD_MQTT_DEVICE_ID'), 'missing CLOUD_MQTT_D
 assert.ok(kconfig.includes('config CLOUD_MQTT_URI'), 'missing CLOUD_MQTT_URI');
 assert.ok(kconfig.includes('default "esp32-001"'), 'default device ID mismatch');
 
+for (const token of [
+  'parse_net_mode',
+  'parse_comm_mode',
+  'handle_set_wifi_mode',
+  'handle_set_uart_baud',
+  'handle_set_comm_mode',
+  'handle_ble_start',
+  'handle_display_text',
+  's_runtime.set_wifi_mode',
+  's_runtime.set_uart_baud',
+  's_runtime.set_comm_mode',
+  's_runtime.ble_start',
+  's_runtime.display_text',
+  'publish_ack(command_id_text, type_text, true',
+]) {
+  assert.ok(source.includes(token), `cloud_mqtt.c missing command execution token ${token}`);
+}
+
+assert.ok(!source.includes('command scaffold only'), 'command scaffold message must be removed');
+
 console.log('cloud MQTT contract regression passed');
