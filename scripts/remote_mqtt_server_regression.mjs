@@ -81,6 +81,27 @@ assert.ok(html.includes('new EventSource'), 'dashboard must use SSE');
 assert.ok(html.includes('/api/devices/${DEVICE_ID}/command'), 'dashboard must send commands to selected device');
 assert.ok(html.includes('set_wifi_mode'), 'dashboard must expose WiFi mode command');
 assert.ok(html.includes('set_uart_baud'), 'dashboard must expose UART baud command');
+for (const token of [
+  '远程设备控制台',
+  '状态总览',
+  '网络状态',
+  '通信链路',
+  '远程控制',
+  '命令日志',
+  '下发中',
+  '等待确认',
+  '设备离线时控制项会自动锁定',
+  'data-requires-online',
+  'setControlsEnabled',
+  'setCommandBusy',
+  'formatTimestamp',
+  'renderStatusSections',
+  'renderSummary',
+]) {
+  assert.ok(html.includes(token), `professional dashboard missing ${token}`);
+}
+assert.ok(!html.includes('Wireless Debug Remote</h1>'),
+  'dashboard must not keep the old demo-style English title');
 
 const readme = readFileSync(resolve(root, 'tools/remote_mqtt/README.md'), 'utf8');
 assert.ok(readme.includes('start_hotspot_mqtt_relay.bat'),
