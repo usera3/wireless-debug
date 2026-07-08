@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wireless Debug Remote</title>
+  <style>
+    :root { color-scheme: light; font-family: Arial, "Microsoft YaHei", sans-serif; }
+    body { margin: 0; background: #f4f6f8; color: #17202a; }
+    main { max-width: 980px; margin: 0 auto; padding: 24px; }
+    h1 { font-size: 24px; margin: 0 0 16px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+    .card { background: #fff; border: 1px solid #d8dee6; border-radius: 8px; padding: 14px; }
+    .row { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid #eef1f4; }
+    .row:last-child { border-bottom: 0; }
+    label { display: block; margin: 8px 0 4px; font-size: 13px; color: #4e5965; }
+    select, input, button { width: 100%; box-sizing: border-box; padding: 9px 10px; border: 1px solid #c8d0d8; border-radius: 6px; background: #fff; }
+    button { cursor: pointer; background: #145da0; color: #fff; border-color: #145da0; margin-top: 8px; }
+    button.secondary { background: #fff; color: #145da0; }
+    .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; background: #e8eef5; font-size: 13px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #a0a8b0; }
+    .dot.on { background: #1f9d55; }
+    pre { min-height: 180px; max-height: 260px; overflow: auto; background: #111827; color: #d1fae5; padding: 12px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Wireless Debug Remote</h1>
+    <p class="pill"><span id="onlineDot" class="dot"></span><span id="onlineText">offline</span></p>
+    <section class="grid">
+      <div class="card">
+        <h2>状态</h2>
+        <div id="statusRows"></div>
+      </div>
+      <div class="card">
+        <h2>控制</h2>
+        <label for="wifiMode">WiFi Mode</label>
+        <select id="wifiMode"><option value="ap">ap</option><option value="sta">sta</option><option value="apsta" selected>apsta</option></select>
+        <button data-command="set_wifi_mode">Set WiFi Mode</button>
+        <label for="uartBaud">UART Baud</label>
+        <select id="uartBaud"><option>115200</option><option>921600</option><option selected>2000000</option><option>3000000</option></select>
+        <button data-command="set_uart_baud">Set UART Baud</button>
+        <label for="commMode">Comm Mode</label>
+        <select id="commMode"><option value="auto">auto</option><option value="wifi">wifi</option><option value="ble">ble</option></select>
+        <button data-command="set_comm_mode">Set Comm Mode</button>
+        <button data-command="ble_start" class="secondary">Start BLE</button>
+        <label for="displayText">OLED Text</label>
+        <input id="displayText" value="Remote MQTT OK">
+        <button data-command="display_text">Display Text</button>
+        <button data-command="query_status" class="secondary">Query Status</button>
+      </div>
+    </section>
+    <h2>命令日志</h2>
+    <pre id="log"></pre>
+  </main>
+  <script>
+    const DEVICE_ID = 'esp32-001';
+    const statusRows = document.querySelector('#statusRows');
+    const log = document.querySelector('#log');
+    let currentDevice = null;
+    let lastAckId = null;
+
+    function writeLog(line) {
+      log.textContent = `${new Date().toLocaleTimeString()} ${line}\n${log.textContent}`.slice(0, 6000);
+    }
+
+    function row(label, value) {
+      return `<div class="row"><span>${label}</span><strong>${value ?? '-'}</strong></div>`;
+    }
+
+    function render(device) {
+      currentDevice = device;
+      const status = device?.status || {};
+      document.querySelector('#onlineDot').classList.toggle('on', !!device?.online);
+      document.querySelector('#onlineText').textContent = device?.online ? 'online' : 'offline';
+      statusRows.innerHTML = [
+        row('Device', device?.device_id || DEVICE_ID),
+        row('Broker', device?.broker_connected ? 'connected' : 'disconnected'),
+        row('Last Status', device?.status_at || '-'),
+        row('WiFi Mode', status.net_mode),
+        row('STA', status.sta_connected ? 'connected' : status.sta_connecting ? 'connecting' : 'offline'),
+        row('AP IP', status.ap_ip),
+        row('STA IP', status.sta_ip),
+        row('UART', status.uart_baud),
+        row('Comm', status.comm_mode),
+        row('BLE', status.ble_ready ? 'ready' : 'off'),
+      ].join('');
+      if (Array.isArray(device?.ack_log) && device.ack_log[0] && device.ack_log[0].command_id !== lastAckId) {
+        lastAckId = device.ack_log[0].command_id;
+        writeLog(`ACK ${device.ack_log[0].type} ${device.ack_log[0].ok ? 'ok' : 'fail'} ${device.ack_log[0].message || ''}`);
+      }
+    }
+
+    async function refresh() {
+      const res = await fetch(`/api/devices/${DEVICE_ID}/status`);
+      const data = await res.json();
+      render(data.device);
+    }
+
+    async function sendCommand(type) {
+      const args = {};
+      if (type === 'set_wifi_mode') args.mode = document.querySelector('#wifiMode').value;
+      if (type === 'set_uart_baud') args.baud = Number(document.querySelector('#uartBaud').value);
+      if (type === 'set_comm_mode') args.mode = document.querySelector('#commMode').value;
+      if (type === 'display_text') args.text = document.querySelector('#displayText').value;
+      const res = await fetch(`/api/devices/${DEVICE_ID}/command`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type, args }),
+      });
+      const data = await res.json();
+      writeLog(`${type} ${data.ok ? data.command.command_id : data.message}`);
+      await refresh();
+    }
+
+    document.querySelectorAll('button[data-command]').forEach((button) => {
+      button.addEventListener('click', () => sendCommand(button.dataset.command));
+    });
+
+    const events = new EventSource('/events');
+    events.addEventListener('status', (ev) => render(JSON.parse(ev.data)));
+    events.addEventListener('availability', (ev) => render(JSON.parse(ev.data)));
+    events.addEventListener('ack', (ev) => render(JSON.parse(ev.data).device));
+    events.addEventListener('devices', (ev) => {
+      const device = JSON.parse(ev.data).find((item) => item.device_id === DEVICE_ID);
+      if (device) render(device);
+    });
+    refresh().catch((err) => writeLog(err.message));
+    setInterval(refresh, 5000);
+  </script>
+</body>
+</html>
