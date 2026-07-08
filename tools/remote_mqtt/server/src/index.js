@@ -55,12 +55,23 @@ function isDeviceOnline(device) {
   return Date.now() - Date.parse(device.status_at) <= STALE_AFTER_MS;
 }
 
+function publicPendingCommand(command) {
+  return {
+    command_id: command.command_id,
+    device_id: command.device_id,
+    type: command.type,
+    sent_at: command.sent_at,
+  };
+}
+
 function publicDevice(device) {
   return {
     ...device,
     online: isDeviceOnline(device),
     broker_connected: brokerConnected,
-    pending_commands: [...pending.values()].filter((cmd) => cmd.device_id === device.device_id),
+    pending_commands: [...pending.values()]
+      .filter((cmd) => cmd.device_id === device.device_id)
+      .map(publicPendingCommand),
   };
 }
 
