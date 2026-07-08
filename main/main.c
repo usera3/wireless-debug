@@ -26,6 +26,7 @@
 #include "nvs_flash.h"
 #include "app_core.h"
 #include "ble_transport.h"
+#include "cloud_mqtt.h"
 #include "display_lvgl.h"
 #include "display_port.h"
 #include "health_reporter.h"
@@ -463,6 +464,107 @@ static size_t web_api_send_ble_frame(const uint8_t *data, size_t len, void *ctx)
 #endif
 }
 
+static esp_err_t cloud_set_wifi_mode(system_net_mode_t mode, void *ctx)
+{
+    (void)ctx;
+    wifi_manager_schedule_net_mode(mode);
+    display_lvgl_set_status(mode == SYSTEM_NET_AP ? "cloud_ap" :
+                            mode == SYSTEM_NET_STA ? "cloud_sta" : "cloud_apsta");
+    return ESP_OK;
+}
+
+static esp_err_t cloud_set_uart_baud(uint32_t baud, void *ctx)
+{
+    (void)ctx;
+    return set_uart_baud(baud);
+}
+
+static esp_err_t cloud_set_comm_mode(app_comm_mode_t mode, void *ctx)
+{
+    (void)ctx;
+    app_core_set_comm_mode(mode);
+    if (mode == APP_COMM_WIFI) {
+        system_menu_set_comm_mode(SYSTEM_COMM_WIFI);
+        display_lvgl_set_mode("WIFI");
+        display_port_set_status("cloud_comm_wifi");
+    } else if (mode == APP_COMM_BLE) {
+        system_menu_set_comm_mode(SYSTEM_COMM_BLE);
+        display_lvgl_set_mode("BLE");
+        display_port_set_status("cloud_comm_ble");
+    } else {
+        system_menu_set_comm_mode(SYSTEM_COMM_AUTO);
+        display_lvgl_set_mode("AUTO");
+        display_port_set_status("cloud_comm_auto");
+    }
+    display_lvgl_set_status("cloud_comm");
+    return ESP_OK;
+}
+
+static esp_err_t cloud_ble_start(void *ctx)
+{
+    (void)ctx;
+#if CONFIG_ENABLE_BLE
+    return ble_spp_transport_start();
+#else
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+}
+
+static esp_err_t cloud_display_text(const char *text, void *ctx)
+{
+    (void)ctx;
+    if (text == NULL || text[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    display_lvgl_set_text_scroll("REMOTE", text, "MQTT");
+    display_port_set_status("cloud_text");
+    return ESP_OK;
+}
+
+static void cloud_get_wifi_status(wifi_manager_status_t *out, void *ctx)
+{
+    (void)ctx;
+    wifi_manager_get_status(out);
+}
+
+static uint32_t cloud_get_uart_baud(void *ctx)
+{
+    (void)ctx;
+    return app_core_get_uart_baud();
+}
+
+static app_comm_mode_t cloud_get_comm_mode(void *ctx)
+{
+    (void)ctx;
+    return app_core_get_comm_mode();
+}
+
+static bool cloud_ble_is_started(void *ctx)
+{
+    (void)ctx;
+#if CONFIG_ENABLE_BLE
+    return ble_spp_transport_is_started();
+#else
+    return false;
+#endif
+}
+
+static bool cloud_ble_has_subscribers(void *ctx)
+{
+    (void)ctx;
+#if CONFIG_ENABLE_BLE
+    return ble_spp_transport_has_subscribers();
+#else
+    return false;
+#endif
+}
+
+static bool cloud_wifi_ws_client_connected(void *ctx)
+{
+    (void)ctx;
+    return wifi_transport_client_connected();
+}
+
 static bool ui_wifi_has_sta_config(void *ctx)
 {
     (void)ctx;
@@ -660,6 +762,7 @@ static void wifi_manager_state_changed(const wifi_manager_status_t *status, void
                                 status->sta_ip,
                                 status->sta_connecting,
                                 status->sta_connected);
+    cloud_mqtt_notify_wifi_state(status);
 }
 
 static void wifi_manager_status_changed(const char *status, void *ctx)
@@ -781,6 +884,33 @@ void app_main(void)
         .ctx = NULL,
     };
     ESP_ERROR_CHECK(wifi_manager_init(&wifi_manager_config));
+    cloud_mqtt_config_t cloud_config = {
+        .device_id = CONFIG_CLOUD_MQTT_DEVICE_ID,
+        .mqtt_uri = CONFIG_CLOUD_MQTT_URI,
+        .enabled = CONFIG_CLOUD_MQTT_ENABLE,
+    };
+    cloud_mqtt_runtime_t cloud_runtime = {
+        .set_wifi_mode = cloud_set_wifi_mode,
+        .set_uart_baud = cloud_set_uart_baud,
+        .set_comm_mode = cloud_set_comm_mode,
+        .ble_start = cloud_ble_start,
+        .display_text = cloud_display_text,
+        .get_wifi_status = cloud_get_wifi_status,
+        .get_uart_baud = cloud_get_uart_baud,
+        .get_comm_mode = cloud_get_comm_mode,
+        .ble_is_started = cloud_ble_is_started,
+        .ble_has_subscribers = cloud_ble_has_subscribers,
+        .wifi_ws_client_connected = cloud_wifi_ws_client_connected,
+        .ctx = NULL,
+    };
+    esp_err_t cloud_ret = cloud_mqtt_init(&cloud_config, &cloud_runtime);
+    if (cloud_ret != ESP_OK) {
+        ESP_LOGW(TAG, "cloud MQTT init failed: %s", esp_err_to_name(cloud_ret));
+    } else {
+        wifi_manager_status_t initial_wifi;
+        wifi_manager_get_status(&initial_wifi);
+        cloud_mqtt_notify_wifi_state(&initial_wifi);
+    }
     start_webserver();
     #endif
 

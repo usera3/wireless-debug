@@ -56,10 +56,11 @@ assert.match(source, /cJSON_PrintUnformatted/, 'status and ACK payloads must use
 const cmake = readFileSync(resolve(root, 'main/CMakeLists.txt'), 'utf8');
 assert.ok(cmake.includes('"cloud_mqtt.c"'), 'CMake must compile cloud_mqtt.c');
 assert.match(cmake, /REQUIRES[\s\S]*\bmqtt\b/, 'CMake REQUIRES must include mqtt');
-assert.match(cmake, /REQUIRES[\s\S]*\bjson\b/, 'CMake REQUIRES must include json');
+assert.match(cmake, /REQUIRES[\s\S]*\bcjson\b/, 'CMake REQUIRES must include cjson');
 
 const manifest = readFileSync(resolve(root, 'main/idf_component.yml'), 'utf8');
 assert.match(manifest, /espressif\/mqtt:\s*\^1\.0\.0/, 'main manifest must add espressif/mqtt dependency for ESP-IDF 6');
+assert.match(manifest, /espressif\/cjson:/, 'main manifest must add espressif/cjson dependency for cJSON.h');
 
 const kconfig = readFileSync(resolve(root, 'main/Kconfig.projbuild'), 'utf8');
 assert.ok(kconfig.includes('config CLOUD_MQTT_ENABLE'), 'missing CLOUD_MQTT_ENABLE');
@@ -86,5 +87,24 @@ for (const token of [
 }
 
 assert.ok(!source.includes('command scaffold only'), 'command scaffold message must be removed');
+
+const main = readFileSync(resolve(root, 'main/main.c'), 'utf8');
+for (const token of [
+  '#include "cloud_mqtt.h"',
+  'cloud_mqtt_runtime_t cloud_runtime',
+  'cloud_mqtt_config_t cloud_config',
+  'CONFIG_CLOUD_MQTT_DEVICE_ID',
+  'CONFIG_CLOUD_MQTT_URI',
+  'CONFIG_CLOUD_MQTT_ENABLE',
+  'cloud_mqtt_init(&cloud_config, &cloud_runtime)',
+  'cloud_mqtt_notify_wifi_state(status)',
+  'cloud_set_wifi_mode',
+  'cloud_set_uart_baud',
+  'cloud_set_comm_mode',
+  'cloud_ble_start',
+  'cloud_display_text',
+]) {
+  assert.ok(main.includes(token), `main.c missing cloud MQTT wiring token ${token}`);
+}
 
 console.log('cloud MQTT contract regression passed');

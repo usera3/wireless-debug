@@ -29,11 +29,6 @@ static char s_availability_topic[CLOUD_MQTT_TOPIC_MAX_LEN];
 static char s_cmd_topic[CLOUD_MQTT_TOPIC_MAX_LEN];
 static char s_ack_topic[CLOUD_MQTT_TOPIC_MAX_LEN];
 
-static int make_topic(char *out, size_t out_size, const char *suffix)
-{
-    return snprintf(out, out_size, "wireless-debug/%s/%s", s_config.device_id, suffix);
-}
-
 static int make_topic_from_format(char *out, size_t out_size, const char *fmt)
 {
     return snprintf(out, out_size, fmt, s_config.device_id);
