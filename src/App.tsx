@@ -59,11 +59,7 @@ export default function App() {
   }[activeTab];
 
   if (runtime.mode === 'cloud-platform') {
-    return (
-      <Layout activeTab="dashboard" onTabChange={() => undefined} variant="platform">
-        <CloudPlatformPage />
-      </Layout>
-    );
+    return <CloudPlatformPage />;
   }
 
   return (

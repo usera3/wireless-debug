@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { ReactNode } from 'react';
 import {
   cloudDeviceConsolePath,
   cloudPlatformApiUrl,
@@ -10,6 +11,8 @@ import {
 
 interface DeviceListResponse {
   devices?: CloudDeviceRecord[];
+  mqtt_connected?: boolean;
+  generated_at?: string;
   summary?: {
     total?: number;
     online?: number;
@@ -17,6 +20,34 @@ interface DeviceListResponse {
     unknown?: number;
   };
 }
+
+interface CloudSummary {
+  total: number;
+  online: number;
+  offline: number;
+  unknown: number;
+}
+
+const EMPTY_SUMMARY: CloudSummary = { total: 0, online: 0, offline: 0, unknown: 0 };
+
+const NAV_GROUPS = [
+  {
+    title: '控制台',
+    items: [
+      ['OV', '仪表盘'],
+      ['DV', '设备管理'],
+      ['CN', '连接管理'],
+      ['HS', '连接历史'],
+      ['MS', '消息中心'],
+      ['CP', '能力清单'],
+      ['EV', '事件记录'],
+    ],
+  },
+  {
+    title: '系统',
+    items: [['ST', '系统设置']],
+  },
+] as const;
 
 async function fetchJson<T>(path: string): Promise<T> {
   const response = await fetch(cloudPlatformApiUrl(path), { cache: 'no-store' });
@@ -28,11 +59,32 @@ async function fetchJson<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+function normalizeSummary(data: DeviceListResponse, devices: CloudDeviceRow[]): CloudSummary {
+  return {
+    total: data.summary?.total ?? devices.length,
+    online: data.summary?.online ?? devices.filter((device) => device.cloudState === 'online').length,
+    offline: data.summary?.offline ?? devices.filter((device) => device.cloudState === 'offline').length,
+    unknown: data.summary?.unknown ?? devices.filter((device) => device.cloudState === 'unknown').length,
+  };
+}
+
+function formatGeneratedAt(value?: string): string {
+  if (!value) return '--:--:--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '--:--:--';
+  return date.toLocaleTimeString('zh-CN', { hour12: false });
+}
+
 export function CloudPlatformPage() {
   const [devices, setDevices] = useState<CloudDeviceRow[]>([]);
+  const [summary, setSummary] = useState<CloudSummary>(EMPTY_SUMMARY);
+  const [mqttConnected, setMqttConnected] = useState(false);
+  const [generatedAt, setGeneratedAt] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('');
+  const [stateFilter, setStateFilter] = useState('all');
+  const [refreshSeq, setRefreshSeq] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -40,8 +92,12 @@ export function CloudPlatformPage() {
     async function load() {
       try {
         const data = await fetchJson<DeviceListResponse>('/api/devices');
+        const rows = (data.devices || []).map(normalizeCloudDevice);
         if (!cancelled) {
-          setDevices((data.devices || []).map(normalizeCloudDevice));
+          setDevices(rows);
+          setSummary(normalizeSummary(data, rows));
+          setMqttConnected(data.mqtt_connected === true);
+          setGeneratedAt(data.generated_at || '');
           setError('');
         }
       } catch (err) {
@@ -57,125 +113,282 @@ export function CloudPlatformPage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [refreshSeq]);
 
   const visibleDevices = useMemo(() => {
     const needle = filter.trim().toLowerCase();
-    if (!needle) return devices;
-    return devices.filter((device) => [
-      device.deviceId,
-      device.displayName,
-      device.network,
-      device.staIp,
-      device.apIp,
-    ].some((value) => value.toLowerCase().includes(needle)));
-  }, [devices, filter]);
-
-  const online = devices.filter((device) => device.online).length;
-  const offline = devices.length - online;
+    return devices.filter((device) => {
+      if (stateFilter !== 'all' && device.cloudState !== stateFilter) return false;
+      if (!needle) return true;
+      return [
+        device.deviceId,
+        device.deviceMac,
+        device.displayName,
+        device.network,
+        device.staIp,
+        device.apIp,
+        device.firmware,
+      ].some((value) => value.toLowerCase().includes(needle));
+    });
+  }, [devices, filter, stateFilter]);
 
   return (
-    <section className="min-h-full bg-slate-50 text-slate-950">
-      <div className="mx-auto max-w-7xl px-6 py-8">
-        <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div>
-            <h2 className="text-2xl font-black">无线调试云端观测台</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              按设备名、网络状态和实时心跳集中管理 ESP32 无线调试终端
-            </p>
-          </div>
-          <button
-            className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold shadow-sm hover:bg-slate-50"
-            onClick={() => window.location.reload()}
-          >
-            刷新
-          </button>
-        </div>
-
-        <div className="mb-6 grid gap-4 md:grid-cols-4">
-          <Metric label="设备总数" value={devices.length} />
-          <Metric label="在线" value={online} />
-          <Metric label="离线" value={offline} />
-          <Metric label="未知" value={0} />
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white shadow-xl shadow-slate-200/60">
-          <div className="flex flex-col gap-3 border-b border-slate-200 p-5 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h3 className="text-lg font-black">设备总览</h3>
-              <p className="text-sm text-slate-500">
-                {loading ? '正在同步设备...' : `${visibleDevices.length} 台设备`}
-              </p>
-              {error && <p className="mt-1 text-sm font-bold text-rose-600">{error}</p>}
+    <div className="min-h-screen bg-slate-50 text-slate-950">
+      <div className="flex min-h-screen">
+        <aside className="hidden w-[248px] shrink-0 border-r border-slate-200 bg-white lg:flex lg:flex-col">
+          <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-8">
+            <div className="grid h-10 w-10 place-items-center rounded-lg bg-gradient-to-br from-slate-900 to-teal-500 text-sm font-black text-white">
+              WD
             </div>
-            <input
-              className="h-10 rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-teal-400"
-              value={filter}
-              onChange={(event) => setFilter(event.target.value)}
-              placeholder="搜索设备 ID / 名称 / IP"
-            />
+            <div>
+              <div className="whitespace-nowrap text-lg font-black leading-tight">Wireless Debug</div>
+              <div className="mt-1 inline-flex rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">
+                Cloud Console
+              </div>
+            </div>
           </div>
-          <div className="overflow-x-auto p-5">
-            <table className="w-full min-w-[920px] text-left text-sm">
-              <thead className="text-slate-500">
-                <tr>
-                  <th className="py-3">设备名</th>
-                  <th>控制台</th>
-                  <th>设备 ID</th>
-                  <th>状态</th>
-                  <th>网络</th>
-                  <th>STA IP</th>
-                  <th>AP IP</th>
-                  <th>BLE</th>
-                  <th>WS</th>
-                  <th>最后心跳</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleDevices.map((device) => (
-                  <tr key={device.deviceId} className="border-t border-slate-100 hover:bg-teal-50/70">
-                    <td className="py-4 font-black">{device.displayName}</td>
-                    <td>
-                      <a
-                        className="rounded-lg border border-slate-200 px-3 py-1.5 font-bold hover:bg-white"
-                        href={cloudDeviceConsolePath(device.deviceId)}
-                      >
-                        打开控制台
-                      </a>
-                    </td>
-                    <td className="font-mono text-xs">{device.deviceId}</td>
-                    <td><Status online={device.online} /></td>
-                    <td>{device.network}</td>
-                    <td>{device.staIp}</td>
-                    <td>{device.apIp}</td>
-                    <td>{device.bleState}</td>
-                    <td>{device.wsState}</td>
-                    <td>{device.health}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+
+          <nav className="flex-1 px-3 py-6">
+            {NAV_GROUPS.map((group) => (
+              <div key={group.title} className="mb-7">
+                <div className="mb-2 px-2 text-xs font-bold text-slate-400">{group.title}</div>
+                <div className="space-y-1">
+                  {group.items.map(([code, label], index) => (
+                    <button
+                      key={code}
+                      className={`flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold transition ${
+                        index === 0 && group.title === '控制台'
+                          ? 'bg-teal-50 text-teal-900'
+                          : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                      }`}
+                    >
+                      <span className="grid h-6 w-6 place-items-center rounded bg-slate-100 text-[11px] font-black text-slate-500">
+                        {code}
+                      </span>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </nav>
+        </aside>
+
+        <div className="min-w-0 flex-1">
+          <header className="flex h-[104px] items-center justify-between border-b border-slate-200 bg-white px-6 lg:px-10">
+            <div>
+              <h1 className="text-2xl font-black tracking-tight">无线调试云端观测台</h1>
+              <p className="mt-2 text-sm text-slate-500">多设备状态、历史事件、诊断回执集中查看</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <StatusBadge label={mqttConnected ? 'MQTT 已连接' : 'MQTT 未连接'} tone={mqttConnected ? 'green' : 'red'} />
+              <span className="hidden rounded-full border border-teal-100 bg-teal-50 px-4 py-2 text-sm font-bold text-teal-700 md:inline-flex">
+                同步 {formatGeneratedAt(generatedAt)}
+              </span>
+              <button
+                className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 shadow-sm transition hover:-translate-y-px hover:border-teal-200 hover:bg-teal-50 hover:text-teal-800"
+                onClick={() => setRefreshSeq((value) => value + 1)}
+              >
+                刷新
+              </button>
+              <div className="user-menu group relative">
+                <button className="flex h-10 items-center gap-3 rounded-full border border-slate-200 bg-white px-3 text-sm font-black shadow-sm transition hover:border-teal-200 hover:bg-teal-50">
+                  <span className="grid h-7 w-7 place-items-center rounded-full bg-cyan-100 text-xs text-cyan-700">AD</span>
+                  <span className="hidden sm:inline">Admin</span>
+                  <span className="text-slate-400">⌄</span>
+                </button>
+                <div className="absolute right-0 z-20 mt-2 hidden w-40 rounded-lg border border-slate-200 bg-white p-2 text-sm shadow-xl group-hover:block">
+                  <a className="block rounded-md px-3 py-2 font-bold text-slate-600 hover:bg-slate-50" href="/logout">
+                    退出登录
+                  </a>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <main className="min-h-[calc(100vh-104px)] bg-gradient-to-br from-teal-50 via-slate-50 to-blue-50 px-5 py-8 lg:px-9">
+            <section className="mx-auto max-w-[1380px]">
+              <div className="mb-7">
+                <h2 className="text-2xl font-black">仪表盘</h2>
+                <p className="mt-2 text-sm text-slate-500">按设备名、网络状态和实时心跳集中管理 ESP32 无线调试终端</p>
+              </div>
+
+              <div className="mb-8 grid gap-4 md:grid-cols-4">
+                <Metric label="设备总数" value={summary.total} />
+                <Metric label="在线" value={summary.online} />
+                <Metric label="离线" value={summary.offline} />
+                <Metric label="未知" value={summary.unknown} />
+              </div>
+
+              <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl shadow-slate-200/70">
+                <div className="flex flex-col gap-4 border-b border-slate-200 px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
+                  <div>
+                    <h3 className="text-xl font-black">设备总览</h3>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {loading ? '正在同步设备...' : `${visibleDevices.length} 台设备`}
+                    </p>
+                    {error && <p className="mt-1 text-sm font-bold text-rose-600">{error}</p>}
+                  </div>
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <input
+                      className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none transition focus:border-teal-400 focus:ring-4 focus:ring-teal-100 sm:w-64"
+                      value={filter}
+                      onChange={(event) => setFilter(event.target.value)}
+                      placeholder="搜索设备 ID / MAC / 备注 / IP"
+                    />
+                    <select
+                      className="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none transition focus:border-teal-400 focus:ring-4 focus:ring-teal-100"
+                      value={stateFilter}
+                      onChange={(event) => setStateFilter(event.target.value)}
+                    >
+                      <option value="all">全部</option>
+                      <option value="online">在线</option>
+                      <option value="offline">离线</option>
+                      <option value="unknown">未知</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto px-5 py-4">
+                  <table className="min-w-[1320px] w-full text-left text-sm">
+                    <thead className="text-slate-500">
+                      <tr>
+                        <TableHead>设备名</TableHead>
+                        <TableHead>控制台</TableHead>
+                        <TableHead>设备 ID</TableHead>
+                        <TableHead>硬件 MAC</TableHead>
+                        <TableHead>状态</TableHead>
+                        <TableHead>健康</TableHead>
+                        <TableHead>网络</TableHead>
+                        <TableHead>STA IP</TableHead>
+                        <TableHead>AP IP</TableHead>
+                        <TableHead>通信</TableHead>
+                        <TableHead>BLE</TableHead>
+                        <TableHead>WS</TableHead>
+                        <TableHead>UART</TableHead>
+                        <TableHead>固件</TableHead>
+                        <TableHead>最后心跳</TableHead>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleDevices.map((device) => (
+                        <tr
+                          key={device.deviceId}
+                          className={`border-t border-slate-100 transition hover:bg-teal-50 ${
+                            device.online ? 'bg-teal-50/60' : ''
+                          }`}
+                        >
+                          <TableCell strong>{device.displayName}</TableCell>
+                          <TableCell>
+                            <a
+                              className="inline-flex h-8 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 shadow-sm transition hover:border-teal-300 hover:bg-teal-50 hover:text-teal-800"
+                              href={cloudDeviceConsolePath(device.deviceId)}
+                              aria-label={`打开控制台 ${device.displayName}`}
+                            >
+                              控制台
+                            </a>
+                          </TableCell>
+                          <TableCell mono>{device.deviceId}</TableCell>
+                          <TableCell mono>{device.deviceMac}</TableCell>
+                          <TableCell><StatePill device={device} /></TableCell>
+                          <TableCell>{device.health}</TableCell>
+                          <TableCell>{device.network}</TableCell>
+                          <TableCell>{device.staIp}</TableCell>
+                          <TableCell>{device.apIp}</TableCell>
+                          <TableCell>{device.commMode}</TableCell>
+                          <TableCell><SignalPill value={device.bleState} /></TableCell>
+                          <TableCell><SignalPill value={device.wsState} negative={device.wsState === '未接入'} /></TableCell>
+                          <TableCell>{device.uartBaud}</TableCell>
+                          <TableCell>{device.firmware}</TableCell>
+                          <TableCell>{device.lastSeen}</TableCell>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+          </main>
         </div>
       </div>
-    </section>
+    </div>
   );
 }
 
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/50">
+    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/60 transition hover:-translate-y-0.5 hover:shadow-xl">
       <div className="text-sm font-bold text-slate-500">{label}</div>
-      <div className="mt-2 text-3xl font-black">{value}</div>
+      <div className="mt-3 text-3xl font-black">{value}</div>
     </div>
   );
 }
 
-function Status({ online }: { online: boolean }) {
+function StatusBadge({ label, tone }: { label: string; tone: 'green' | 'red' }) {
   return (
-    <span className={`inline-flex items-center gap-2 rounded-full px-2 py-1 text-xs font-bold ${online ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
-      <i className={`h-2 w-2 rounded-full ${online ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-      {online ? '在线' : '离线'}
+    <span className={`hidden items-center gap-2 rounded-full border px-4 py-2 text-sm font-bold md:inline-flex ${
+      tone === 'green'
+        ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
+        : 'border-rose-100 bg-rose-50 text-rose-700'
+    }`}>
+      <i className={`h-2 w-2 rounded-full ${tone === 'green' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+      {label}
     </span>
+  );
+}
+
+function StatePill({ device }: { device: CloudDeviceRow }) {
+  const tone = device.cloudState === 'online' ? 'green' : device.cloudState === 'offline' ? 'red' : 'gray';
+  return <SignalPill value={device.statusText} tone={tone} />;
+}
+
+function SignalPill({
+  value,
+  tone,
+  negative = false,
+}: {
+  value: string;
+  tone?: 'green' | 'red' | 'gray';
+  negative?: boolean;
+}) {
+  if (value === '-') return <span className="text-slate-400">-</span>;
+  const resolvedTone = tone || (negative || value.includes('未') ? 'red' : 'green');
+  const classes = resolvedTone === 'green'
+    ? 'bg-emerald-50 text-emerald-700'
+    : resolvedTone === 'red'
+      ? 'bg-rose-50 text-rose-700'
+      : 'bg-slate-100 text-slate-500';
+  const dot = resolvedTone === 'green'
+    ? 'bg-emerald-500'
+    : resolvedTone === 'red'
+      ? 'bg-rose-500'
+      : 'bg-slate-400';
+  return (
+    <span className={`inline-flex items-center gap-2 rounded-full px-2 py-1 text-xs font-black ${classes}`}>
+      <i className={`h-2 w-2 rounded-full ${dot}`} />
+      {value}
+    </span>
+  );
+}
+
+function TableHead({ children }: { children: ReactNode }) {
+  return <th className="whitespace-nowrap px-3 py-4 text-xs font-black">{children}</th>;
+}
+
+function TableCell({
+  children,
+  mono = false,
+  strong = false,
+}: {
+  children: ReactNode;
+  mono?: boolean;
+  strong?: boolean;
+}) {
+  return (
+    <td className={`whitespace-nowrap px-3 py-4 align-middle ${
+      mono ? 'font-mono text-xs' : ''
+    } ${strong ? 'font-black' : 'text-slate-800'}`}>
+      {children}
+    </td>
   );
 }

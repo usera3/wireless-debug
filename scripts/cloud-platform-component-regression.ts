@@ -8,6 +8,15 @@ for (const marker of [
   'cloudDeviceConsolePath',
   '设备总览',
   '打开控制台',
+  'Cloud Console',
+  'MQTT',
+  '硬件 MAC',
+  '健康',
+  '通信',
+  'UART',
+  '固件',
+  '退出登录',
+  'user-menu',
 ]) {
   assert.ok(page.includes(marker), `CloudPlatformPage missing marker: ${marker}`);
 }
@@ -15,5 +24,6 @@ for (const marker of [
 const app = readFileSync('src/App.tsx', 'utf8');
 assert.ok(app.includes('currentRuntimeInfo'), 'App must use runtime mode detection');
 assert.ok(app.includes('CloudPlatformPage'), 'App must render cloud platform page');
+assert.ok(app.includes('return <CloudPlatformPage />'), 'Cloud platform runtime should use the dedicated platform shell');
 
 console.log('cloud platform component regression passed');
