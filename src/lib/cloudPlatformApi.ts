@@ -2,6 +2,8 @@ export interface CloudDeviceRecord {
   device_id?: string;
   device_mac?: string;
   display_name?: string;
+  note?: string;
+  availability?: string;
   cloud_state?: string;
   last_seen_ms?: number;
   last_seen_at?: string;
@@ -9,18 +11,42 @@ export interface CloudDeviceRecord {
   net_mode?: string;
   sta_ip?: string;
   ap_ip?: string;
+  sta_connected?: boolean;
+  sta_configured?: boolean;
+  sta_connecting?: boolean;
   ble_ready?: boolean;
+  ble_subscribed?: boolean;
   wifi_ws_client?: boolean;
   uart_baud?: number;
   fw_version?: string;
   comm_mode?: string;
   health_score?: number;
-  last_status_json?: {
+  diagnostic_level?: string;
+  diagnostic_text?: string;
+  diagnostic_reasons?: string[];
+  uptime_ms?: number;
+  heap_free?: number;
+  heap_min_free?: number;
+  heap_largest?: number;
+  heap_internal_free?: number;
+  heap_internal_min_free?: number;
+  restart_reason?: number;
+  comm_error_total?: number;
+  display_status?: string;
+  display_backend?: string;
+  display_enabled?: boolean;
+  motor_param_count?: number;
+  motor_param_capacity?: number;
+  last_status_json?: Record<string, unknown> & {
     device_mac?: string;
     net_mode?: string;
     sta_ip?: string;
     ap_ip?: string;
+    sta_connected?: boolean;
+    sta_configured?: boolean;
+    sta_connecting?: boolean;
     ble_ready?: boolean;
+    ble_subscribed?: boolean;
     wifi_ws_client?: boolean;
     uart_baud?: number;
     fw?: string;
@@ -37,6 +63,93 @@ export interface CloudDeviceRecord {
     firmware_name?: string;
     cloud_ws_uplink?: { connected?: boolean };
   };
+}
+
+export interface CloudDeviceEvent {
+  event_type?: string;
+  payload_json?: unknown;
+  created_at?: string;
+}
+
+export interface CloudDeviceCommand {
+  command_id?: string;
+  command_type?: string;
+  args_json?: unknown;
+  state?: string;
+  ack_ok?: boolean;
+  ack_message?: string;
+  requested_by?: string;
+  created_at?: string;
+  ack_at?: string;
+  latency_ms?: number | null;
+}
+
+export interface CloudDeviceNote {
+  note?: string;
+  created_at?: string;
+}
+
+export interface CloudDeviceDetailResponse {
+  ok?: boolean;
+  device?: CloudDeviceRecord;
+  events?: CloudDeviceEvent[];
+  commands?: CloudDeviceCommand[];
+  notes?: CloudDeviceNote[];
+}
+
+export interface CloudHistorySummary {
+  status_count?: number;
+  availability_count?: number;
+  command_count?: number;
+  acked_count?: number;
+  failed_count?: number;
+  avg_latency_ms?: number | null;
+}
+
+export interface CloudStatusPoint {
+  created_at?: string;
+  uptime_ms?: number | null;
+  net_mode?: string | null;
+  sta_configured?: boolean | null;
+  sta_connecting?: boolean | null;
+  sta_connected?: boolean | null;
+  ap_ip?: string | null;
+  sta_ip?: string | null;
+  uart_baud?: number | null;
+  comm_mode?: string | null;
+  ble_ready?: boolean | null;
+  ble_subscribed?: boolean | null;
+  wifi_ws_client?: boolean | null;
+  [key: string]: unknown;
+}
+
+export interface CloudDeviceHistoryResponse {
+  ok?: boolean;
+  device_id?: string;
+  summary?: CloudHistorySummary;
+  status_points?: CloudStatusPoint[];
+  availability?: CloudDeviceEvent[];
+  commands?: CloudDeviceCommand[];
+}
+
+export interface CloudBusMessage {
+  source_type?: string;
+  source_id?: string;
+  source_display_name?: string;
+  target_type?: string;
+  target_id?: string;
+  target_display_name?: string;
+  channel?: string;
+  payload_text?: string;
+  state?: string;
+  ack_message?: string;
+  created_at?: string;
+}
+
+export interface CloudBusMessagesResponse {
+  ok?: boolean;
+  messages?: CloudBusMessage[];
+  channels?: string[];
 }
 
 export interface CloudDeviceRow {

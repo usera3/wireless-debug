@@ -33,14 +33,30 @@ function distPathForRequest(rawUrl) {
 }
 
 const server = createServer((req, res) => {
-  if (req.url === '/api/devices') {
+  const url = new URL(req.url || '/', 'http://127.0.0.1');
+  if (url.pathname === '/api/devices') {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({
+      ok: true,
+      mqtt_connected: true,
+      generated_at: new Date().toISOString(),
+      summary: { total: 1, online: 1, offline: 0, unknown: 0 },
       devices: [{
         device_id: 'wd-ac276eab7c9c',
+        device_mac: 'ac:27:6e:ab:7c:9c',
         display_name: 'ESP32-001',
         cloud_state: 'online',
+        net_mode: 'apsta',
+        sta_ip: '10.162.92.4',
+        ap_ip: '192.168.4.1',
+        comm_mode: 'auto',
+        ble_ready: true,
+        wifi_ws_client: true,
+        uart_baud: 2000000,
+        fw_version: 'wireless-debug',
+        health_score: 96,
         last_seen_ms: Date.now(),
+        status_age_seconds: 2,
         status: {
           wifi_mode: 'apsta',
           sta_ip: '10.162.92.4',
@@ -52,12 +68,120 @@ const server = createServer((req, res) => {
     }));
     return;
   }
-  if (req.url === '/cloud.html') {
+  if (url.pathname === '/api/devices/wd-ac276eab7c9c') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      ok: true,
+      device: {
+        device_id: 'wd-ac276eab7c9c',
+        device_mac: 'ac:27:6e:ab:7c:9c',
+        display_name: 'ESP32-001',
+        cloud_state: 'online',
+        last_seen_at: new Date().toISOString(),
+        health_score: 96,
+        diagnostic_level: 'normal',
+        diagnostic_text: '运行正常',
+        diagnostic_reasons: ['心跳正常'],
+        net_mode: 'apsta',
+        sta_ip: '10.162.92.4',
+        ap_ip: '192.168.4.1',
+        comm_mode: 'auto',
+        ble_ready: true,
+        wifi_ws_client: true,
+        uart_baud: 2000000,
+        fw_version: 'wireless-debug',
+        heap_free: 188000,
+        heap_min_free: 120000,
+        heap_largest: 90000,
+        restart_reason: 1,
+        display_status: 'ready',
+        display_backend: 'oled',
+        motor_param_count: 80,
+        motor_param_capacity: 128,
+        last_status_json: {
+          device_mac: 'ac:27:6e:ab:7c:9c',
+          net_mode: 'apsta',
+          sta_connected: true,
+          sta_configured: true,
+          sta_connecting: false,
+          sta_ip: '10.162.92.4',
+          ap_ip: '192.168.4.1',
+          ble_ready: true,
+          ble_subscribed: false,
+          wifi_ws_client: true,
+          uart_baud: 2000000,
+          comm_mode: 'auto',
+          uptime_ms: 380000,
+        },
+      },
+      events: [{
+        event_type: 'status',
+        payload_json: { net_mode: 'apsta', sta_ip: '10.162.92.4' },
+        created_at: new Date().toISOString(),
+      }],
+      commands: [{
+        command_id: 'cmd-smoke',
+        command_type: 'query_status',
+        state: 'ACKED',
+        ack_message: 'ok',
+        created_at: new Date().toISOString(),
+        ack_at: new Date().toISOString(),
+      }],
+      notes: [{ note: '测试样机', created_at: new Date().toISOString() }],
+    }));
+    return;
+  }
+  if (url.pathname === '/api/devices/wd-ac276eab7c9c/history') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      ok: true,
+      summary: { status_count: 2, availability_count: 1, command_count: 1, acked_count: 1, failed_count: 0, avg_latency_ms: 42 },
+      status_points: [
+        { created_at: new Date(Date.now() - 60000).toISOString(), sta_connected: false, sta_ip: '', net_mode: 'sta' },
+        { created_at: new Date().toISOString(), sta_connected: true, sta_ip: '10.162.92.4', net_mode: 'apsta' },
+      ],
+      availability: [{ payload_json: { state: 'online' }, created_at: new Date().toISOString() }],
+      commands: [{
+        command_id: 'cmd-smoke',
+        command_type: 'query_status',
+        state: 'ACKED',
+        ack_message: 'ok',
+        latency_ms: 42,
+        created_at: new Date().toISOString(),
+      }],
+    }));
+    return;
+  }
+  if (url.pathname === '/api/bus/messages') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({
+      ok: true,
+      channels: ['notify'],
+      messages: [{
+        source_type: 'cloud',
+        target_type: 'device',
+        target_id: 'wd-ac276eab7c9c',
+        target_display_name: 'ESP32-001',
+        channel: 'notify',
+        payload_text: 'hello',
+        state: 'ACKED',
+        ack_message: 'ok',
+        created_at: new Date().toISOString(),
+      }],
+    }));
+    return;
+  }
+  if (url.pathname === '/api/bus/send') {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, message_id: 'msg-smoke' }));
+    return;
+  }
+  if (url.pathname === '/cloud.html') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(htmlWithRuntime('cloud-platform'));
     return;
   }
-  if (req.url === '/remote/wd-ac276eab7c9c/orig/i.html') {
+  if (url.pathname === '/remote/wd-ac276eab7c9c/orig/i.html') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
     res.end(htmlWithRuntime('cloud-device', 'wd-ac276eab7c9c'));
     return;
@@ -103,6 +227,29 @@ try {
   await page.getByRole('button', { name: '设备管理' }).click();
   if (!(await page.getByRole('heading', { name: '设备管理' }).count())) {
     throw new Error('cloud platform navigation did not switch to device management');
+  }
+  for (const text of ['诊断摘要', '系统资源', '设备详情', '备注', '保存设备名', '刷新状态']) {
+    if (!(await page.getByText(text).count())) throw new Error(`device management missing ${text}`);
+  }
+  await page.getByRole('button', { name: '连接管理' }).click();
+  for (const text of ['连接状态', '最近状态包']) {
+    if (!(await page.getByText(text).count())) throw new Error(`connection management missing ${text}`);
+  }
+  await page.getByRole('button', { name: '连接历史' }).click();
+  for (const text of ['最近状态摘要', '命令响应']) {
+    if (!(await page.getByText(text).count())) throw new Error(`history tab missing ${text}`);
+  }
+  await page.getByRole('button', { name: '消息中心' }).click();
+  for (const text of ['云端发送', '消息流水']) {
+    if (!(await page.getByText(text).count())) throw new Error(`message center missing ${text}`);
+  }
+  await page.getByRole('button', { name: '能力清单' }).click();
+  if (!(await page.getByText('云端已开放').count())) {
+    throw new Error('capabilities tab missing cloud capability card');
+  }
+  await page.getByRole('button', { name: '事件记录' }).click();
+  for (const text of ['最近事件', '最近命令']) {
+    if (!(await page.getByText(text).count())) throw new Error(`events tab missing ${text}`);
   }
   await page.getByRole('button', { name: /Admin/ }).click();
   const logout = page.getByRole('link', { name: '退出登录' });
