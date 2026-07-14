@@ -1,21 +1,19 @@
 import { create } from 'zustand';
 import { wsClient } from '../lib/wsClient';
-import { remoteConsoleWsUrl } from '../lib/remoteConsole';
 import { resolveConnectionTarget } from '../lib/connectionTarget';
 import { selectInitialConnectionUrl } from '../lib/connectionPreference';
+import { currentRuntimeInfo } from '../lib/runtimeMode';
 
 const URL_LS_KEY = 'wireless_debug_ws_url';
 
-function defaultWsUrl(): string {
-  return import.meta.env.VITE_WS_URL ?? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
-}
-
 function initialWsUrl(): string {
+  const runtime = currentRuntimeInfo();
   return selectInitialConnectionUrl({
-    remoteUrl: remoteConsoleWsUrl(),
+    remoteUrl: runtime.mode === 'cloud-device' ? runtime.defaultConnectionUrl : null,
     savedUrl: localStorage.getItem(URL_LS_KEY),
-    defaultUrl: defaultWsUrl(),
-  });
+    defaultUrl: import.meta.env.VITE_WS_URL ?? runtime.defaultConnectionUrl,
+    allowSavedUrl: runtime.mode !== 'cloud-platform',
+  }) || '';
 }
 
 interface ConnectionState {

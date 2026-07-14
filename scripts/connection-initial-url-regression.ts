@@ -15,10 +15,21 @@ assert.equal(
   selectInitialConnectionUrl({
     remoteUrl: null,
     savedUrl: 'http://192.168.4.1',
-    defaultUrl: 'ws://192.168.4.1/ws',
+    defaultUrl: 'http://192.168.4.1',
   }),
   'http://192.168.4.1',
   'a normal local page should continue restoring the user-saved target',
+);
+
+assert.equal(
+  selectInitialConnectionUrl({
+    remoteUrl: null,
+    savedUrl: 'http://192.168.4.1',
+    defaultUrl: null,
+    allowSavedUrl: false,
+  }),
+  null,
+  'cloud platform pages must not silently reconnect to a previously saved local ESP32 target',
 );
 
 console.log('connection initial URL regression passed');
