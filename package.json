@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build && rm -f dist.zip && zip -r dist.zip dist",
+    "build:firmware-assets": "npm run build && node scripts/sync-firmware-dist.mjs",
     "lint": "eslint .",
     "test:frame-router": "esbuild scripts/frame-router-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/frame-router-regression.mjs && node node_modules/.tmp/frame-router-regression.mjs",
     "test:param-batch-read": "esbuild scripts/param-batch-read-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/param-batch-read-regression.mjs && node node_modules/.tmp/param-batch-read-regression.mjs",
@@ -16,6 +17,7 @@
     "test:connection-selection": "esbuild scripts/connection-selection-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/connection-selection-regression.mjs && node node_modules/.tmp/connection-selection-regression.mjs",
     "test:cloud-platform-api": "esbuild scripts/cloud-platform-api-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/cloud-platform-api-regression.mjs && node node_modules/.tmp/cloud-platform-api-regression.mjs",
     "test:cloud-platform-component": "esbuild scripts/cloud-platform-component-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/cloud-platform-component-regression.mjs && node node_modules/.tmp/cloud-platform-component-regression.mjs",
+    "test:html-shell": "esbuild scripts/html-shell-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/html-shell-regression.mjs && node node_modules/.tmp/html-shell-regression.mjs",
     "test:modbus-osc-sample": "esbuild scripts/modbus-osc-sample-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/modbus-osc-sample-regression.mjs && node node_modules/.tmp/modbus-osc-sample-regression.mjs",
     "test:osc-request": "esbuild scripts/osc-request-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/osc-request-regression.mjs && node node_modules/.tmp/osc-request-regression.mjs",
     "test:osc-transport": "esbuild scripts/osc-transport-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/osc-transport-regression.mjs && node node_modules/.tmp/osc-transport-regression.mjs",

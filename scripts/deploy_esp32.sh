@@ -6,15 +6,15 @@ set -e
 
 cd "$(dirname "$0")/.."
 
-echo "==> 构建前端产物..."
-npm run build
+echo "==> 构建前端产物并同步到 ESP-IDF 项目..."
+npm run build:firmware-assets
 
 echo ""
 echo "==> 产物大小："
 du -sh dist/
 echo ""
 echo "==> 各文件 gzip 前后对比："
-find dist/assets -type f ! -name "*.gz" | sort | while read -r f; do
+find dist -maxdepth 1 -type f ! -name "*.gz" ! -name "*.zip" | sort | while read -r f; do
   orig=$(wc -c < "$f")
   gz="${f}.gz"
   if [ -f "$gz" ]; then
@@ -25,6 +25,5 @@ find dist/assets -type f ! -name "*.gz" | sort | while read -r f; do
 done
 
 echo ""
-echo "==> 完成。将 dist/ 下的文件上传到 ESP32 LittleFS /www/ 目录"
-echo "    推荐使用: arduino-cli upload --fqbn esp32:esp32:esp32 --port /dev/ttyUSB0"
-echo "    或 PlatformIO: pio run --target uploadfs"
+echo "==> 完成。固件 SPIFFS 产物已同步到 ../wireless_debug-main/dist/orig"
+echo "    下一步在 ESP-IDF 项目中构建 storage.bin 并烧录。"
