@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 /* =============================================
    功能配置宏 (0=关闭, 1=开启)
@@ -22,15 +23,19 @@
 #endif
 
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_system.h"
 #include "nvs_flash.h"
 #include "app_core.h"
 #include "ble_transport.h"
 #include "cloud_mqtt.h"
+#include "cloud_ws_uplink.h"
+#include "comm_stats.h"
 #include "display_lvgl.h"
 #include "display_port.h"
 #include "health_reporter.h"
 #include "input_buttons.h"
+#include "motor_diag.h"
 #include "router_service.h"
 #include "system_menu.h"
 #include "ui_controller.h"
@@ -59,6 +64,8 @@ static void log_heap_checkpoint(const char *label);
 
 #if CONFIG_ENABLE_WIFI
 static httpd_handle_t g_server = NULL;
+static char s_cloud_device_id[64];
+static char s_cloud_device_mac[18];
 #endif
 
 static router_mode_t current_router_mode(void)
@@ -236,6 +243,8 @@ static void app_uart_frame_received(const uint8_t *data, size_t len, void *ctx)
     if (app_handle_uart_control_command(data, len)) {
         return;
     }
+
+    cloud_mqtt_publish_ws_frame(data, len);
 
     router_context_t router_ctx = {
         .current_mode = current_router_mode(),
@@ -521,6 +530,17 @@ static esp_err_t cloud_display_text(const char *text, void *ctx)
     return ESP_OK;
 }
 
+static esp_err_t cloud_send_ws_frame(const uint8_t *data, size_t len, void *ctx)
+{
+    (void)ctx;
+    if (data == NULL || len == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    display_lvgl_set_status("cloud_ws");
+    int written = uart_transport_write(data, len);
+    return written == (int)len ? ESP_OK : ESP_FAIL;
+}
+
 static void cloud_get_wifi_status(wifi_manager_status_t *out, void *ctx)
 {
     (void)ctx;
@@ -563,6 +583,66 @@ static bool cloud_wifi_ws_client_connected(void *ctx)
 {
     (void)ctx;
     return wifi_transport_client_connected();
+}
+
+static bool cloud_device_id_is_auto(const char *configured_id)
+{
+    return configured_id == NULL || configured_id[0] == '\0' ||
+           strcasecmp(configured_id, "auto") == 0;
+}
+
+static esp_err_t build_cloud_device_identity(void)
+{
+    uint8_t mac[6] = {0};
+    esp_err_t ret = esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    snprintf(s_cloud_device_mac, sizeof(s_cloud_device_mac),
+             "%02x:%02x:%02x:%02x:%02x:%02x",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+    if (cloud_device_id_is_auto(CONFIG_CLOUD_MQTT_DEVICE_ID)) {
+        snprintf(s_cloud_device_id, sizeof(s_cloud_device_id),
+                 "wd-%02x%02x%02x%02x%02x%02x",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    } else {
+        snprintf(s_cloud_device_id, sizeof(s_cloud_device_id),
+                 "%s", CONFIG_CLOUD_MQTT_DEVICE_ID);
+    }
+
+    return ESP_OK;
+}
+
+static void cloud_get_comm_stats(comm_stats_snapshot_t *out, void *ctx)
+{
+    (void)ctx;
+    comm_stats_get_snapshot(out);
+}
+
+static void cloud_get_display_stats(display_port_stats_t *out, void *ctx)
+{
+    (void)ctx;
+    display_port_get_stats(out);
+}
+
+static void cloud_get_menu_snapshot(system_menu_snapshot_t *out, void *ctx)
+{
+    (void)ctx;
+    system_menu_get_snapshot(out);
+}
+
+static uint32_t cloud_get_motor_param_count(void *ctx)
+{
+    (void)ctx;
+    return (uint32_t)motor_diag_param_count();
+}
+
+static uint32_t cloud_get_motor_param_capacity(void *ctx)
+{
+    (void)ctx;
+    return (uint32_t)motor_diag_param_capacity();
 }
 
 static bool ui_wifi_has_sta_config(void *ctx)
@@ -679,6 +759,7 @@ static void start_webserver(void)
   }
 
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+  config.task_priority = 9;
   config.uri_match_fn = httpd_uri_match_wildcard;
   config.max_uri_handlers = 96;
   /* 增大 httpd 任务栈，防止 handler 中调用链较深时栈溢出
@@ -763,6 +844,7 @@ static void wifi_manager_state_changed(const wifi_manager_status_t *status, void
                                 status->sta_connecting,
                                 status->sta_connected);
     cloud_mqtt_notify_wifi_state(status);
+    cloud_ws_uplink_notify_wifi_state(status);
 }
 
 static void wifi_manager_status_changed(const char *status, void *ctx)
@@ -884,8 +966,23 @@ void app_main(void)
         .ctx = NULL,
     };
     ESP_ERROR_CHECK(wifi_manager_init(&wifi_manager_config));
+    ESP_ERROR_CHECK(build_cloud_device_identity());
+    ESP_LOGI(TAG, "cloud MQTT identity: id=%s mac=%s",
+             s_cloud_device_id, s_cloud_device_mac);
+    cloud_ws_uplink_config_t cloud_ws_config = {
+        .base_uri = CONFIG_CLOUD_WS_UPLINK_URI,
+        .device_id = s_cloud_device_id,
+        .enabled = CONFIG_CLOUD_MQTT_ENABLE && CONFIG_CLOUD_WS_UPLINK_ENABLE,
+        .fallback = cloud_mqtt_publish_ws_fallback,
+        .fallback_ctx = NULL,
+    };
+    esp_err_t cloud_ws_ret = cloud_ws_uplink_init(&cloud_ws_config);
+    if (cloud_ws_ret != ESP_OK) {
+        ESP_LOGW(TAG, "cloud WebSocket uplink init failed: %s", esp_err_to_name(cloud_ws_ret));
+    }
     cloud_mqtt_config_t cloud_config = {
-        .device_id = CONFIG_CLOUD_MQTT_DEVICE_ID,
+        .device_id = s_cloud_device_id,
+        .device_mac = s_cloud_device_mac,
         .mqtt_uri = CONFIG_CLOUD_MQTT_URI,
         .enabled = CONFIG_CLOUD_MQTT_ENABLE,
     };
@@ -895,12 +992,18 @@ void app_main(void)
         .set_comm_mode = cloud_set_comm_mode,
         .ble_start = cloud_ble_start,
         .display_text = cloud_display_text,
+        .send_ws_frame = cloud_send_ws_frame,
         .get_wifi_status = cloud_get_wifi_status,
         .get_uart_baud = cloud_get_uart_baud,
         .get_comm_mode = cloud_get_comm_mode,
         .ble_is_started = cloud_ble_is_started,
         .ble_has_subscribers = cloud_ble_has_subscribers,
         .wifi_ws_client_connected = cloud_wifi_ws_client_connected,
+        .get_comm_stats = cloud_get_comm_stats,
+        .get_display_stats = cloud_get_display_stats,
+        .get_menu_snapshot = cloud_get_menu_snapshot,
+        .get_motor_param_count = cloud_get_motor_param_count,
+        .get_motor_param_capacity = cloud_get_motor_param_capacity,
         .ctx = NULL,
     };
     esp_err_t cloud_ret = cloud_mqtt_init(&cloud_config, &cloud_runtime);
@@ -910,6 +1013,7 @@ void app_main(void)
         wifi_manager_status_t initial_wifi;
         wifi_manager_get_status(&initial_wifi);
         cloud_mqtt_notify_wifi_state(&initial_wifi);
+        cloud_ws_uplink_notify_wifi_state(&initial_wifi);
     }
     start_webserver();
     #endif

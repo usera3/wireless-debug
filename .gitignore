@@ -15,9 +15,11 @@
 
 # Log files
 *.log
+*.pid
 
 # Build artifacts and directories
 **/build/
+**/target/
 build/
 .worktrees/
 *.o
@@ -79,3 +81,7 @@ Desktop.ini
 /.devcontainer/
 /.vscode/*
 !/.vscode/tasks.json
+
+# Runtime state for local cloud prototypes
+tools/remote_mqtt_python/data/
+tools/remote_mqtt_spring/web-react/dist/

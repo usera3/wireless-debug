@@ -83,25 +83,41 @@ assert.ok(html.includes('set_wifi_mode'), 'dashboard must expose WiFi mode comma
 assert.ok(html.includes('set_uart_baud'), 'dashboard must expose UART baud command');
 for (const token of [
   '远程设备控制台',
-  '状态总览',
-  '网络状态',
-  '通信链路',
+  'device-state-strip',
+  'status-table',
+  'renderDeviceStrip',
+  'renderStatusTable',
+  '消息服务',
+  '命令确认',
+  '接入点 IP',
+  '联网 IP',
+  '串口波特率',
+  '网页通道',
   '远程控制',
   '命令日志',
   '下发中',
   '等待确认',
   '设备离线时控制项会自动锁定',
+  ':focus-visible',
+  'prefers-color-scheme: dark',
   'data-requires-online',
   'setControlsEnabled',
   'setCommandBusy',
   'formatTimestamp',
-  'renderStatusSections',
-  'renderSummary',
 ]) {
   assert.ok(html.includes(token), `professional dashboard missing ${token}`);
 }
 assert.ok(!html.includes('Wireless Debug Remote</h1>'),
   'dashboard must not keep the old demo-style English title');
+for (const staleToken of [
+  'summary-grid',
+  'summary-card',
+  'status-section',
+  'renderSummary',
+  'renderStatusSections',
+]) {
+  assert.ok(!html.includes(staleToken), `dashboard must remove old card-heavy structure: ${staleToken}`);
+}
 
 const readme = readFileSync(resolve(root, 'tools/remote_mqtt/README.md'), 'utf8');
 assert.ok(readme.includes('start_hotspot_mqtt_relay.bat'),

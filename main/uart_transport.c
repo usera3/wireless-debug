@@ -19,9 +19,9 @@ static const char *TAG = "uart_transport";
 #define UART_TRANSPORT_FRAME_IDLE_MS     2
 #define UART_TRANSPORT_QUEUE_LEN         20
 #define UART_TRANSPORT_RX_TIMEOUT        5
-#define UART_TRANSPORT_RX_FULL_THRESHOLD 113
+#define UART_TRANSPORT_RX_FULL_THRESHOLD 64
 #define UART_TRANSPORT_TASK_STACK        8192
-#define UART_TRANSPORT_TASK_PRIORITY     8
+#define UART_TRANSPORT_TASK_PRIORITY     10
 
 static QueueHandle_t s_uart_queue;
 static uart_transport_frame_cb_t s_frame_cb;

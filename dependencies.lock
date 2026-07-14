@@ -9,6 +9,16 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 1.7.19~2
+  espressif/esp_websocket_client:
+    component_hash: 3fb288702517ef4d75bf933a115f1056ee0c2540d964f9e1d856e0bb67e1dfeb
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.7.0
   espressif/mqtt:
     component_hash: ffdad5659706b4dc14bc63f8eb73ef765efa015bf7e9adf71c813d52a2dc9342
     dependencies:
@@ -32,9 +42,10 @@ dependencies:
     version: 9.3.0
 direct_dependencies:
 - espressif/cjson
+- espressif/esp_websocket_client
 - espressif/mqtt
 - idf
 - lvgl/lvgl
-manifest_hash: e28c26ba8f07d541df4a8a08444de9855848cf8db1389fcfcd72e3f5bc6207b0
+manifest_hash: 2456bd1b00254d0d7640c62029af51d249ea7f6cd92817ffe6285a4b2692cf07
 target: esp32s3
 version: 3.0.0

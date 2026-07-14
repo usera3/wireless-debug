@@ -20,11 +20,18 @@ for (const token of [
   'cloud_mqtt_init',
   'cloud_mqtt_notify_wifi_state',
   'cloud_mqtt_publish_status_now',
+  'cloud_mqtt_publish_ws_frame',
   'set_wifi_mode',
   'set_uart_baud',
   'set_comm_mode',
   'ble_start',
   'display_text',
+  'get_comm_stats',
+  'get_display_stats',
+  'get_menu_snapshot',
+  'get_motor_param_count',
+  'get_motor_param_capacity',
+  'device_mac',
 ]) {
   assert.ok(header.includes(token), `cloud_mqtt.h missing ${token}`);
 }
@@ -36,6 +43,8 @@ for (const token of [
   'wireless-debug/%s/availability',
   'wireless-debug/%s/cmd',
   'wireless-debug/%s/ack',
+  'wireless-debug/%s/inbox',
+  'wireless-debug/%s/bus-ack',
   'query_status',
   'set_wifi_mode',
   'set_uart_baud',
@@ -45,6 +54,18 @@ for (const token of [
   'status->mode != SYSTEM_NET_AP',
   'net_mode_json_name',
   'comm_mode_json_name',
+  'esp_get_free_heap_size',
+  'esp_reset_reason',
+  'heap_caps_get_largest_free_block',
+  'comm_stats_snapshot_t',
+  'display_port_stats_t',
+  '"restart_reason"',
+  '"heap"',
+  '"comm_stats"',
+  '"display"',
+  '"menu"',
+  '"motor_params"',
+  '"device_mac"',
 ]) {
   assert.ok(source.includes(token), `cloud_mqtt.c missing ${token}`);
 }
@@ -66,13 +87,19 @@ const kconfig = readFileSync(resolve(root, 'main/Kconfig.projbuild'), 'utf8');
 assert.ok(kconfig.includes('config CLOUD_MQTT_ENABLE'), 'missing CLOUD_MQTT_ENABLE');
 assert.ok(kconfig.includes('config CLOUD_MQTT_DEVICE_ID'), 'missing CLOUD_MQTT_DEVICE_ID');
 assert.ok(kconfig.includes('config CLOUD_MQTT_URI'), 'missing CLOUD_MQTT_URI');
-assert.ok(kconfig.includes('default "esp32-001"'), 'default device ID mismatch');
-assert.ok(kconfig.includes('default "mqtt://192.168.137.1:1883"'),
-  'default MQTT URI must target the Windows hotspot gateway');
+assert.ok(kconfig.includes('default "auto"'), 'default device ID must auto-generate from MAC for multi-device fleets');
+assert.ok(kconfig.includes('default "mqtt://43.153.137.20:1883"'),
+  'default MQTT URI must target the shared cloud broker');
+assert.ok(kconfig.includes('default "ws://43.153.137.20:18089"'),
+  'default binary WebSocket URI must target the shared cloud uplink');
 
 const sdkconfig = readFileSync(resolve(root, 'sdkconfig'), 'utf8');
-assert.ok(sdkconfig.includes('CONFIG_CLOUD_MQTT_URI="mqtt://192.168.137.1:1883"'),
-  'sdkconfig MQTT URI must target the Windows hotspot gateway for this test build');
+assert.ok(sdkconfig.includes('CONFIG_CLOUD_MQTT_DEVICE_ID="auto"'),
+  'sdkconfig device ID must auto-generate from MAC for this fleet build');
+assert.ok(sdkconfig.includes('CONFIG_CLOUD_MQTT_URI="mqtt://43.153.137.20:1883"'),
+  'sdkconfig MQTT URI must target the shared cloud broker for this fleet build');
+assert.ok(sdkconfig.includes('CONFIG_CLOUD_WS_UPLINK_URI="ws://43.153.137.20:18089"'),
+  'sdkconfig binary WebSocket URI must target the shared cloud uplink');
 
 for (const token of [
   'parse_net_mode',
@@ -82,24 +109,52 @@ for (const token of [
   'handle_set_comm_mode',
   'handle_ble_start',
   'handle_display_text',
+  'handle_bus_message',
+  'publish_bus_ack',
+  'message_id',
+  'payload_text',
+  'payload_hex',
+  'source_type',
+  'source_id',
+  'channel',
+  'notify',
+  'ws',
+  'handle_bus_ws_frame',
+  'publish_ws_frame',
+  'send_ws_frame',
   's_runtime.set_wifi_mode',
   's_runtime.set_uart_baud',
   's_runtime.set_comm_mode',
   's_runtime.ble_start',
   's_runtime.display_text',
+  's_runtime.get_comm_stats',
+  's_runtime.get_display_stats',
+  's_runtime.get_menu_snapshot',
   'publish_ack(command_id_text, type_text, true',
 ]) {
   assert.ok(source.includes(token), `cloud_mqtt.c missing command execution token ${token}`);
 }
+
+assert.match(source, /esp_mqtt_client_subscribe\(s_client,\s*s_inbox_topic,\s*1\)/,
+  'cloud MQTT must subscribe to per-device inbox topic');
+assert.match(source, /strncmp\(event->topic,\s*s_inbox_topic,\s*event->topic_len\)/,
+  'cloud MQTT event handler must route inbox topic to bus handler');
+assert.match(source, /s_runtime\.display_text\(payload_text/,
+  'notify channel must render message text through the display callback');
 
 assert.ok(!source.includes('command scaffold only'), 'command scaffold message must be removed');
 
 const main = readFileSync(resolve(root, 'main/main.c'), 'utf8');
 for (const token of [
   '#include "cloud_mqtt.h"',
+  '#include "esp_mac.h"',
+  'build_cloud_device_identity',
+  's_cloud_device_id',
+  's_cloud_device_mac',
   'cloud_mqtt_runtime_t cloud_runtime',
   'cloud_mqtt_config_t cloud_config',
   'CONFIG_CLOUD_MQTT_DEVICE_ID',
+  '.device_mac = s_cloud_device_mac',
   'CONFIG_CLOUD_MQTT_URI',
   'CONFIG_CLOUD_MQTT_ENABLE',
   'cloud_mqtt_init(&cloud_config, &cloud_runtime)',
@@ -109,6 +164,11 @@ for (const token of [
   'cloud_set_comm_mode',
   'cloud_ble_start',
   'cloud_display_text',
+  'cloud_get_comm_stats',
+  'cloud_get_display_stats',
+  'cloud_get_menu_snapshot',
+  'cloud_get_motor_param_count',
+  'cloud_get_motor_param_capacity',
 ]) {
   assert.ok(main.includes(token), `main.c missing cloud MQTT wiring token ${token}`);
 }

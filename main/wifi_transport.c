@@ -3,10 +3,11 @@
 #include <string.h>
 #include <stdlib.h>
 #include "comm_stats.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/queue.h"
-#include "freertos/semphr.h"
 #include "freertos/task.h"
 
 #ifndef MIN
@@ -14,9 +15,10 @@
 #endif
 
 #define WIFI_TRANSPORT_FRAME_MAX_LEN 512
-#define WIFI_TRANSPORT_FRAME_POOL_SIZE 32
+#define WIFI_TRANSPORT_FRAME_POOL_SIZE 96
 #define WIFI_TRANSPORT_SEND_QUEUE_LEN WIFI_TRANSPORT_FRAME_POOL_SIZE
 #define WIFI_TRANSPORT_SEND_QUEUE_ITEM_SIZE sizeof(wifi_frame_t *)
+#define WIFI_TRANSPORT_COALESCE_WAIT_MS 2
 
 static const char *TAG = "wifi_transport";
 
@@ -32,8 +34,8 @@ static wifi_transport_config_t s_config;
 static httpd_handle_t s_server;
 static int s_ws_client_fd = -1;
 static QueueHandle_t s_send_queue;
-static SemaphoreHandle_t s_pool_mutex;
-static wifi_frame_t s_frame_pool[WIFI_TRANSPORT_FRAME_POOL_SIZE];
+static wifi_frame_t *s_frame_pool;
+static portMUX_TYPE s_pool_lock = portMUX_INITIALIZER_UNLOCKED;
 
 static void ws_client_clear_if_current(httpd_handle_t hd, int fd)
 {
@@ -59,33 +61,45 @@ static bool ws_client_is_active(void)
 static wifi_frame_t *frame_acquire(void)
 {
     wifi_frame_t *slot = NULL;
-    if (s_pool_mutex == NULL) {
+    if (s_frame_pool == NULL) {
         return NULL;
     }
 
-    if (xSemaphoreTake(s_pool_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
-        for (int i = 0; i < WIFI_TRANSPORT_FRAME_POOL_SIZE; i++) {
-            if (!s_frame_pool[i].in_use) {
-                s_frame_pool[i].in_use = true;
-                slot = &s_frame_pool[i];
-                break;
-            }
+    portENTER_CRITICAL(&s_pool_lock);
+    for (int i = 0; i < WIFI_TRANSPORT_FRAME_POOL_SIZE; i++) {
+        if (!s_frame_pool[i].in_use) {
+            s_frame_pool[i].in_use = true;
+            slot = &s_frame_pool[i];
+            break;
         }
-        xSemaphoreGive(s_pool_mutex);
     }
+    portEXIT_CRITICAL(&s_pool_lock);
     return slot;
 }
 
 static void frame_release(wifi_frame_t *frame)
 {
-    if (frame == NULL || s_pool_mutex == NULL) {
+    if (frame == NULL) {
         return;
     }
 
-    if (xSemaphoreTake(s_pool_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
-        frame->in_use = false;
-        xSemaphoreGive(s_pool_mutex);
+    portENTER_CRITICAL(&s_pool_lock);
+    frame->in_use = false;
+    portEXIT_CRITICAL(&s_pool_lock);
+}
+
+static bool wifi_frame_merge(wifi_frame_t *target, wifi_frame_t *source)
+{
+    if (target == NULL || source == NULL || target->hd != source->hd ||
+        target->fd != source->fd ||
+        target->len + source->len > WIFI_TRANSPORT_FRAME_MAX_LEN) {
+        return false;
     }
+
+    memcpy(target->data + target->len, source->data, source->len);
+    target->len += source->len;
+    frame_release(source);
+    return true;
 }
 
 static void ws_async_send(void *arg)
@@ -131,6 +145,24 @@ static void wifi_send_task(void *pvParameters)
         if (frame->hd == NULL || frame->fd < 0) {
             frame_release(frame);
             continue;
+        }
+
+        while (frame->len < WIFI_TRANSPORT_FRAME_MAX_LEN) {
+            wifi_frame_t *next = NULL;
+            if (xQueuePeek(s_send_queue, &next,
+                           pdMS_TO_TICKS(WIFI_TRANSPORT_COALESCE_WAIT_MS)) != pdTRUE ||
+                next == NULL ||
+                next->hd != frame->hd || next->fd != frame->fd ||
+                frame->len + next->len > WIFI_TRANSPORT_FRAME_MAX_LEN) {
+                break;
+            }
+            if (xQueueReceive(s_send_queue, &next, 0) != pdTRUE) {
+                break;
+            }
+            if (!wifi_frame_merge(frame, next)) {
+                frame_release(next);
+                break;
+            }
         }
 
         esp_err_t err = httpd_queue_work(frame->hd, ws_async_send, frame);
@@ -201,24 +233,41 @@ esp_err_t wifi_transport_init(const wifi_transport_config_t *config)
     s_config = *config;
     s_ws_client_fd = -1;
     s_server = NULL;
-    memset(s_frame_pool, 0, sizeof(s_frame_pool));
-
-    if (s_pool_mutex == NULL) {
-        s_pool_mutex = xSemaphoreCreateMutex();
-        if (s_pool_mutex == NULL) {
+    if (s_frame_pool == NULL) {
+        s_frame_pool = heap_caps_calloc(
+            WIFI_TRANSPORT_FRAME_POOL_SIZE,
+            sizeof(wifi_frame_t),
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (s_frame_pool == NULL) {
+            ESP_LOGW(TAG, "PSRAM frame pool allocation failed; using internal RAM");
+            s_frame_pool = heap_caps_calloc(
+                WIFI_TRANSPORT_FRAME_POOL_SIZE,
+                sizeof(wifi_frame_t),
+                MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        }
+        if (s_frame_pool == NULL) {
             return ESP_ERR_NO_MEM;
         }
     }
 
     if (s_send_queue == NULL) {
-        s_send_queue = xQueueCreate(WIFI_TRANSPORT_SEND_QUEUE_LEN,
-                                    WIFI_TRANSPORT_SEND_QUEUE_ITEM_SIZE);
+        s_send_queue = xQueueCreateWithCaps(
+            WIFI_TRANSPORT_SEND_QUEUE_LEN,
+            WIFI_TRANSPORT_SEND_QUEUE_ITEM_SIZE,
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (s_send_queue == NULL) {
+            ESP_LOGW(TAG, "PSRAM send queue allocation failed; using internal RAM");
+            s_send_queue = xQueueCreateWithCaps(
+                WIFI_TRANSPORT_SEND_QUEUE_LEN,
+                WIFI_TRANSPORT_SEND_QUEUE_ITEM_SIZE,
+                MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        }
         if (s_send_queue == NULL) {
             return ESP_ERR_NO_MEM;
         }
 
-        if (xTaskCreate(wifi_send_task, "wifi_send", 4096, NULL, 10, NULL) != pdPASS) {
-            vQueueDelete(s_send_queue);
+        if (xTaskCreate(wifi_send_task, "wifi_send", 4096, NULL, 7, NULL) != pdPASS) {
+            vQueueDeleteWithCaps(s_send_queue);
             s_send_queue = NULL;
             return ESP_ERR_NO_MEM;
         }

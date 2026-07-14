@@ -17,3 +17,4 @@ dependencies:
   lvgl/lvgl: ^9.2.2
   espressif/mqtt: ^1.0.0
   espressif/cjson: '*'
+  espressif/esp_websocket_client: ^1.7.0

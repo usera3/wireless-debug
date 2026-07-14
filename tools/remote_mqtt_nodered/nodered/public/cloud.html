@@ -1,0 +1,700 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>无线调试云端观测台</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f4f6f8;
+        --surface: #ffffff;
+        --line: #d7dee8;
+        --text: #172033;
+        --muted: #657287;
+        --blue: #1f6feb;
+        --green: #148a4d;
+        --amber: #a86600;
+        --red: #c0392b;
+        --shadow: 0 18px 55px rgba(31, 43, 62, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+        letter-spacing: 0;
+      }
+
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+
+      button {
+        border: 0;
+        cursor: pointer;
+      }
+
+      .shell {
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto 1fr;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        padding: 18px 28px;
+        background: #ffffff;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .brand h1 {
+        margin: 0;
+        font-size: 22px;
+        line-height: 1.2;
+      }
+
+      .brand p {
+        margin: 5px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .top-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .button {
+        min-height: 36px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 0 13px;
+        border-radius: 7px;
+        background: var(--blue);
+        color: #ffffff;
+        font-weight: 700;
+      }
+
+      .button.secondary {
+        background: #eef3fb;
+        color: #25405f;
+        border: 1px solid #d6e1ef;
+      }
+
+      .button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      .main {
+        padding: 22px 28px 28px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 420px;
+        gap: 18px;
+      }
+
+      .left,
+      .right {
+        display: grid;
+        gap: 16px;
+        align-content: start;
+      }
+
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(140px, 1fr));
+        gap: 12px;
+      }
+
+      .metric,
+      .panel {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        box-shadow: var(--shadow);
+      }
+
+      .metric {
+        padding: 14px 16px;
+      }
+
+      .metric span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 7px;
+        font-size: 24px;
+      }
+
+      .panel {
+        overflow: hidden;
+      }
+
+      .panel-head {
+        min-height: 58px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .panel-head h2 {
+        margin: 0;
+        font-size: 16px;
+      }
+
+      .panel-head p {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .filters {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 380px;
+      }
+
+      .filters input,
+      .filters select,
+      textarea {
+        width: 100%;
+        min-height: 36px;
+        border: 1px solid #cdd6e3;
+        border-radius: 7px;
+        padding: 8px 10px;
+        color: var(--text);
+        background: #ffffff;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        height: 48px;
+        padding: 0 14px;
+        border-bottom: 1px solid #eef1f5;
+        text-align: left;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+
+      th {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        background: #f8fafc;
+      }
+
+      tr[data-selected="true"] {
+        background: #eef6ff;
+      }
+
+      tr.device-row {
+        cursor: pointer;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-weight: 700;
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--muted);
+      }
+
+      .online .dot {
+        background: var(--green);
+      }
+
+      .stale .dot {
+        background: var(--amber);
+      }
+
+      .offline .dot {
+        background: var(--red);
+      }
+
+      .unknown .dot {
+        background: var(--muted);
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 26px;
+        padding: 0 9px;
+        border-radius: 999px;
+        background: #eef3fb;
+        color: #334b68;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .detail-body {
+        padding: 16px;
+        display: grid;
+        gap: 14px;
+      }
+
+      .kv {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .kv div {
+        min-height: 58px;
+        padding: 10px;
+        border: 1px solid #e2e8f0;
+        border-radius: 7px;
+        background: #fbfdff;
+      }
+
+      .kv span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .kv strong {
+        display: block;
+        margin-top: 5px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 13px;
+      }
+
+      .section-title {
+        margin: 2px 0 8px;
+        font-size: 13px;
+        color: #334155;
+      }
+
+      .stream {
+        max-height: 300px;
+        overflow: auto;
+        border: 1px solid #e2e8f0;
+        border-radius: 7px;
+      }
+
+      .stream-row {
+        display: grid;
+        grid-template-columns: 88px 84px minmax(0, 1fr);
+        gap: 8px;
+        padding: 9px 10px;
+        border-bottom: 1px solid #eef1f5;
+        font-size: 12px;
+      }
+
+      .stream-row:last-child {
+        border-bottom: 0;
+      }
+
+      .stream-row code {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #475569;
+      }
+
+      .empty {
+        padding: 26px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      .policy {
+        padding: 12px 16px;
+        border-top: 1px solid var(--line);
+        background: #fff8e8;
+        color: #684500;
+        font-size: 12px;
+      }
+
+      .note-form {
+        display: grid;
+        gap: 8px;
+      }
+
+      .error {
+        color: var(--red);
+        font-weight: 700;
+      }
+
+      @media (max-width: 1180px) {
+        .main {
+          grid-template-columns: 1fr;
+        }
+
+        .summary {
+          grid-template-columns: repeat(2, minmax(140px, 1fr));
+        }
+      }
+
+      @media (max-width: 760px) {
+        .topbar,
+        .main {
+          padding-left: 14px;
+          padding-right: 14px;
+        }
+
+        .panel-head {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .filters {
+          min-width: 0;
+          width: 100%;
+        }
+
+        .table-wrap {
+          overflow-x: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <h1>无线调试云端观测台</h1>
+          <p>多设备状态、历史事件、诊断回执集中查看</p>
+        </div>
+        <div class="top-actions">
+          <span class="badge" id="lastSync">未同步</span>
+          <button class="button secondary" id="refreshBtn" type="button">刷新</button>
+        </div>
+      </header>
+
+      <main class="main">
+        <section class="left">
+          <div class="summary">
+            <div class="metric"><span>设备总数</span><strong id="totalCount">0</strong></div>
+            <div class="metric"><span>在线</span><strong id="onlineCount">0</strong></div>
+            <div class="metric"><span>疑似离线</span><strong id="staleCount">0</strong></div>
+            <div class="metric"><span>离线</span><strong id="offlineCount">0</strong></div>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>设备总览</h2>
+                <p id="tableHint">等待设备上报</p>
+              </div>
+              <div class="filters">
+                <input id="searchInput" placeholder="搜索设备 ID / 备注 / IP" />
+                <select id="stateFilter">
+                  <option value="all">全部</option>
+                  <option value="online">在线</option>
+                  <option value="stale">疑似离线</option>
+                  <option value="offline">离线</option>
+                  <option value="unknown">未知</option>
+                </select>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>设备 ID</th>
+                    <th>状态</th>
+                    <th>网络</th>
+                    <th>STA IP</th>
+                    <th>AP IP</th>
+                    <th>UART</th>
+                    <th>固件</th>
+                    <th>最后心跳</th>
+                  </tr>
+                </thead>
+                <tbody id="deviceRows">
+                  <tr><td colspan="8" class="empty">暂无数据</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <aside class="right">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>设备详情</h2>
+                <p id="detailTitle">未选择设备</p>
+              </div>
+              <button class="button" id="queryBtn" type="button" disabled>刷新状态</button>
+            </div>
+            <div class="detail-body" id="detailBody">
+              <div class="empty">从左侧选择设备</div>
+            </div>
+            <div class="policy">危险控制不在云端提供。网络模式切换、配网、清除 WiFi、OTA 等操作保留在现场入口。</div>
+          </section>
+        </aside>
+      </main>
+    </div>
+
+    <script>
+      const state = {
+        devices: [],
+        selectedId: '',
+        detail: null,
+        filter: 'all',
+        query: '',
+      };
+
+      const els = {
+        total: document.getElementById('totalCount'),
+        online: document.getElementById('onlineCount'),
+        stale: document.getElementById('staleCount'),
+        offline: document.getElementById('offlineCount'),
+        rows: document.getElementById('deviceRows'),
+        lastSync: document.getElementById('lastSync'),
+        tableHint: document.getElementById('tableHint'),
+        detailTitle: document.getElementById('detailTitle'),
+        detailBody: document.getElementById('detailBody'),
+        queryBtn: document.getElementById('queryBtn'),
+        refreshBtn: document.getElementById('refreshBtn'),
+        searchInput: document.getElementById('searchInput'),
+        stateFilter: document.getElementById('stateFilter'),
+      };
+
+      function text(value) {
+        return value === null || value === undefined || value === '' ? '-' : String(value);
+      }
+
+      function escapeHtml(value) {
+        return text(value).replace(/[&<>"']/g, (char) => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#039;',
+        }[char]));
+      }
+
+      function relativeTime(value) {
+        if (!value) return '-';
+        const delta = Date.now() - new Date(value).getTime();
+        if (Number.isNaN(delta)) return '-';
+        if (delta < 5000) return '刚刚';
+        if (delta < 60000) return `${Math.floor(delta / 1000)} 秒前`;
+        if (delta < 3600000) return `${Math.floor(delta / 60000)} 分钟前`;
+        if (delta < 86400000) return `${Math.floor(delta / 3600000)} 小时前`;
+        return `${Math.floor(delta / 86400000)} 天前`;
+      }
+
+      function stateLabel(value) {
+        return {
+          online: '在线',
+          stale: '疑似离线',
+          offline: '离线',
+          unknown: '未知',
+        }[value] || value || '未知';
+      }
+
+      async function api(path, options = {}) {
+        const response = await fetch(path, {
+          ...options,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(options.headers || {}),
+          },
+        });
+        if (!response.ok) {
+          const body = await response.text();
+          throw new Error(body || `HTTP ${response.status}`);
+        }
+        return response.status === 204 ? null : response.json();
+      }
+
+      function filteredDevices() {
+        const q = state.query.trim().toLowerCase();
+        return state.devices.filter((device) => {
+          if (state.filter !== 'all' && device.cloud_state !== state.filter) return false;
+          if (!q) return true;
+          return [device.device_id, device.note, device.display_name, device.sta_ip, device.ap_ip]
+            .some((value) => text(value).toLowerCase().includes(q));
+        });
+      }
+
+      function renderSummary(summary) {
+        els.total.textContent = summary.total || 0;
+        els.online.textContent = summary.online || 0;
+        els.stale.textContent = summary.stale || 0;
+        els.offline.textContent = summary.offline || 0;
+      }
+
+      function renderRows() {
+        const rows = filteredDevices();
+        els.tableHint.textContent = rows.length ? `${rows.length} 台设备` : '没有匹配设备';
+        if (!rows.length) {
+          els.rows.innerHTML = '<tr><td colspan="8" class="empty">暂无数据</td></tr>';
+          return;
+        }
+        els.rows.innerHTML = rows.map((device) => `
+          <tr class="device-row" data-id="${escapeHtml(device.device_id)}" data-selected="${device.device_id === state.selectedId}">
+            <td><strong>${escapeHtml(device.device_id)}</strong></td>
+            <td><span class="status ${escapeHtml(device.cloud_state)}"><i class="dot"></i>${escapeHtml(stateLabel(device.cloud_state))}</span></td>
+            <td>${escapeHtml(device.net_mode)}</td>
+            <td>${escapeHtml(device.sta_ip)}</td>
+            <td>${escapeHtml(device.ap_ip)}</td>
+            <td>${escapeHtml(device.uart_baud)}</td>
+            <td>${escapeHtml(device.fw_version)}</td>
+            <td>${escapeHtml(relativeTime(device.last_seen_at))}</td>
+          </tr>
+        `).join('');
+        for (const row of els.rows.querySelectorAll('.device-row')) {
+          row.addEventListener('click', () => selectDevice(row.dataset.id));
+        }
+      }
+
+      function renderDetail() {
+        const detail = state.detail;
+        els.queryBtn.disabled = !state.selectedId;
+        if (!detail || !detail.device) {
+          els.detailTitle.textContent = state.selectedId || '未选择设备';
+          els.detailBody.innerHTML = '<div class="empty">从左侧选择设备</div>';
+          return;
+        }
+        const device = detail.device;
+        els.detailTitle.textContent = device.device_id;
+        const eventRows = (detail.events || []).slice(0, 24).map((event) => `
+          <div class="stream-row">
+            <span>${escapeHtml(relativeTime(event.created_at))}</span>
+            <strong>${escapeHtml(event.event_type)}</strong>
+            <code>${escapeHtml(JSON.stringify(event.payload_json))}</code>
+          </div>
+        `).join('') || '<div class="empty">暂无事件</div>';
+        const commandRows = (detail.commands || []).slice(0, 16).map((command) => `
+          <div class="stream-row">
+            <span>${escapeHtml(relativeTime(command.created_at))}</span>
+            <strong>${escapeHtml(command.state)}</strong>
+            <code>${escapeHtml(`${command.command_type} ${command.command_id} ${command.ack_message || ''}`)}</code>
+          </div>
+        `).join('') || '<div class="empty">暂无命令</div>';
+        const latestNote = detail.notes && detail.notes[0] ? detail.notes[0].note : device.note || '';
+        els.detailBody.innerHTML = `
+          <div class="kv">
+            <div><span>云端状态</span><strong>${escapeHtml(stateLabel(device.cloud_state))}</strong></div>
+            <div><span>最后心跳</span><strong>${escapeHtml(relativeTime(device.last_seen_at))}</strong></div>
+            <div><span>网络模式</span><strong>${escapeHtml(device.net_mode)}</strong></div>
+            <div><span>STA 连接</span><strong>${device.sta_connected ? '已连接' : '未连接'}</strong></div>
+            <div><span>STA IP</span><strong>${escapeHtml(device.sta_ip)}</strong></div>
+            <div><span>AP IP</span><strong>${escapeHtml(device.ap_ip)}</strong></div>
+            <div><span>UART</span><strong>${escapeHtml(device.uart_baud)}</strong></div>
+            <div><span>固件</span><strong>${escapeHtml(device.fw_version)}</strong></div>
+          </div>
+          <form class="note-form" id="noteForm">
+            <label class="section-title" for="noteInput">设备备注</label>
+            <textarea id="noteInput" rows="3" maxlength="500">${escapeHtml(latestNote)}</textarea>
+            <button class="button secondary" type="submit">保存备注</button>
+          </form>
+          <div>
+            <h3 class="section-title">最近命令</h3>
+            <div class="stream">${commandRows}</div>
+          </div>
+          <div>
+            <h3 class="section-title">最近事件</h3>
+            <div class="stream">${eventRows}</div>
+          </div>
+        `;
+        document.getElementById('noteForm').addEventListener('submit', saveNote);
+      }
+
+      async function loadDevices() {
+        try {
+          const data = await api('/api/devices');
+          state.devices = data.devices || [];
+          renderSummary(data.summary || {});
+          els.lastSync.textContent = `同步 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`;
+          renderRows();
+          if (state.selectedId) {
+            await loadDetail(state.selectedId, false);
+          }
+        } catch (err) {
+          els.tableHint.innerHTML = `<span class="error">${escapeHtml(err.message)}</span>`;
+        }
+      }
+
+      async function loadDetail(deviceId, rerenderRows = true) {
+        state.detail = await api(`/api/devices/${encodeURIComponent(deviceId)}`);
+        if (rerenderRows) renderRows();
+        renderDetail();
+      }
+
+      async function selectDevice(deviceId) {
+        state.selectedId = deviceId;
+        await loadDetail(deviceId);
+      }
+
+      async function sendQueryStatus() {
+        if (!state.selectedId) return;
+        els.queryBtn.disabled = true;
+        try {
+          await api(`/api/devices/${encodeURIComponent(state.selectedId)}/query-status`, { method: 'POST' });
+          await loadDetail(state.selectedId);
+        } finally {
+          els.queryBtn.disabled = false;
+        }
+      }
+
+      async function saveNote(event) {
+        event.preventDefault();
+        if (!state.selectedId) return;
+        const note = document.getElementById('noteInput').value;
+        await api(`/api/devices/${encodeURIComponent(state.selectedId)}/note`, {
+          method: 'POST',
+          body: JSON.stringify({ note }),
+        });
+        await loadDevices();
+      }
+
+      els.refreshBtn.addEventListener('click', loadDevices);
+      els.queryBtn.addEventListener('click', sendQueryStatus);
+      els.searchInput.addEventListener('input', (event) => {
+        state.query = event.target.value;
+        renderRows();
+      });
+      els.stateFilter.addEventListener('change', (event) => {
+        state.filter = event.target.value;
+        renderRows();
+      });
+
+      loadDevices();
+      setInterval(loadDevices, 5000);
+    </script>
+  </body>
+</html>

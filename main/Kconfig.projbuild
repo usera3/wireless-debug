@@ -6,10 +6,18 @@ config CLOUD_MQTT_ENABLE
 
 config CLOUD_MQTT_DEVICE_ID
     string "Cloud MQTT device ID"
-    default "esp32-001"
+    default "auto"
 
 config CLOUD_MQTT_URI
     string "Cloud MQTT broker URI"
-    default "mqtt://192.168.137.1:1883"
+    default "mqtt://43.153.137.20:1883"
+
+config CLOUD_WS_UPLINK_ENABLE
+    bool "Enable binary cloud WebSocket oscilloscope uplink"
+    default y
+
+config CLOUD_WS_UPLINK_URI
+    string "Cloud WebSocket uplink base URI"
+    default "ws://43.153.137.20:18089"
 
 endmenu

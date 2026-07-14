@@ -1,0 +1,64 @@
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:18-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-wireless_debug}
+      POSTGRES_USER: ${POSTGRES_USER:-wireless_debug}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wireless_debug}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wireless_debug} -d ${POSTGRES_DB:-wireless_debug}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mosquitto:
+    image: ${MOSQUITTO_IMAGE:-eclipse-mosquitto:2}
+    restart: unless-stopped
+    ports:
+      - "${MQTT_PORT:-1883}:1883"
+    command: ["mosquitto", "-c", "/mosquitto-no-auth.conf"]
+
+  cloud:
+    build:
+      context: .
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+    restart: unless-stopped
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: 18088
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wireless_debug}:${POSTGRES_PASSWORD:-wireless_debug}@postgres:5432/${POSTGRES_DB:-wireless_debug}
+      MQTT_URL: mqtt://mosquitto:1883
+      MQTT_NAMESPACE: ${MQTT_NAMESPACE:-wireless-debug}
+      ONLINE_SECONDS: ${ONLINE_SECONDS:-60}
+      CLOUD_HTTP_USER: ${CLOUD_HTTP_USER:-}
+      CLOUD_HTTP_PASSWORD: ${CLOUD_HTTP_PASSWORD:-}
+      CLOUD_SESSION_SECRET: ${CLOUD_SESSION_SECRET:-}
+      ORIG_WEB_DIR: ${ORIG_WEB_DIR:-/app/orig}
+      REMOTE_EXCEL_DIR: ${REMOTE_EXCEL_DIR:-/app/data/excel}
+      REMOTE_EXCEL_MAX_BYTES: ${REMOTE_EXCEL_MAX_BYTES:-8388608}
+      CLOUD_WS_HOST: 0.0.0.0
+      CLOUD_WS_PORT: ${CLOUD_WS_PORT:-18089}
+      CLOUD_WS_PUBLIC_URL: ${CLOUD_WS_PUBLIC_URL:-}
+      CLOUD_WS_BROWSER_QUEUE_FRAMES: ${CLOUD_WS_BROWSER_QUEUE_FRAMES:-16}
+      CLOUD_WS_BROWSER_CHUNK_BYTES: ${CLOUD_WS_BROWSER_CHUNK_BYTES:-2048}
+      CLOUD_WS_BROWSER_SEND_INTERVAL_MS: ${CLOUD_WS_BROWSER_SEND_INTERVAL_MS:-20}
+      CLOUD_WS_MAX_MESSAGE_BYTES: ${CLOUD_WS_MAX_MESSAGE_BYTES:-16384}
+    ports:
+      - "${APP_PORT:-18088}:18088"
+      - "${CLOUD_WS_PORT:-18089}:18089"
+    volumes:
+      - ./data:/app/data
+      - ../../dist/orig:/app/orig:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+
+volumes:
+  pgdata:

@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "cloud_ws_uplink.h"
 #include "comm_stats.h"
 #include "display_lvgl.h"
 #include "display_port.h"
@@ -1073,13 +1074,15 @@ static esp_err_t device_status_handler(httpd_req_t *req)
     system_menu_snapshot_t menu;
     display_port_stats_t display;
     comm_stats_snapshot_t stats;
+    cloud_ws_uplink_stats_t uplink;
     system_menu_get_snapshot(&menu);
     display_port_get_stats(&display);
     comm_stats_get_snapshot(&stats);
+    cloud_ws_uplink_get_stats(&uplink);
     http_prepare_json(req);
 
-    char resp[1536];
-    snprintf(resp, sizeof(resp),
+    char resp[2304];
+    int written = snprintf(resp, sizeof(resp),
              "{\"ok\":true,\"net\":\"%s\",\"comm\":\"%s\",\"uart_baud\":%lu,"
              "\"ble_ready\":%s,\"wifi_ws_client\":%s,"
              "\"display_backend\":\"%s\",\"display_status\":\"%s\","
@@ -1097,6 +1100,17 @@ static esp_err_t device_status_handler(httpd_req_t *req)
              "\"httpd_queue_failures\":%llu,\"rx_failures\":%llu},"
              "\"route\":{\"idle_drops\":%llu,\"unavailable_drops\":%llu,"
              "\"partial_drops\":%llu,\"dropped_bytes\":%llu}},"
+             "\"cloud_ws_uplink\":{\"schema_version\":%u,"
+             "\"connected\":%s,\"queue_in_psram\":%s,"
+             "\"sender_stack_min_free\":%lu,\"queue_pending_frames\":%lu,"
+             "\"queued_frames\":%lu,"
+             "\"sent_frames\":%lu,\"sent_bytes\":%lu,\"queue_full\":%lu,"
+             "\"overload_dropped_frames\":%lu,\"send_failures\":%lu,"
+             "\"fallback_frames\":%lu,"
+             "\"queued_fallback_frames\":%lu,\"fallback_failures\":%lu,"
+             "\"stop_dropped_frames\":%lu,\"connect_events\":%lu,"
+             "\"disconnect_events\":%lu,\"error_events\":%lu,"
+             "\"closed_events\":%lu,\"last_event_id\":%ld},"
              "\"motor_params\":{\"count\":%u,\"capacity\":%u}}",
              system_menu_net_name(menu.net_mode),
              system_menu_comm_name(menu.comm_mode),
@@ -1134,8 +1148,32 @@ static esp_err_t device_status_handler(httpd_req_t *req)
              (unsigned long long)stats.route_unavailable_drops,
              (unsigned long long)stats.route_partial_drops,
              (unsigned long long)stats.route_dropped_bytes,
+             (unsigned)CLOUD_WS_UPLINK_SCHEMA_VERSION,
+             uplink.connected ? "true" : "false",
+             uplink.queue_in_psram ? "true" : "false",
+             (unsigned long)uplink.sender_stack_min_free,
+             (unsigned long)uplink.queue_pending_frames,
+             (unsigned long)uplink.queued_frames,
+             (unsigned long)uplink.sent_frames,
+             (unsigned long)uplink.sent_bytes,
+             (unsigned long)uplink.queue_full,
+             (unsigned long)uplink.overload_dropped_frames,
+             (unsigned long)uplink.send_failures,
+             (unsigned long)uplink.fallback_frames,
+             (unsigned long)uplink.queued_fallback_frames,
+             (unsigned long)uplink.fallback_failures,
+             (unsigned long)uplink.stop_dropped_frames,
+             (unsigned long)uplink.connect_events,
+             (unsigned long)uplink.disconnect_events,
+             (unsigned long)uplink.error_events,
+             (unsigned long)uplink.closed_events,
+             (long)uplink.last_event_id,
              (unsigned)motor_diag_param_count(),
              (unsigned)motor_diag_param_capacity());
+    if (written < 0 || (size_t)written >= sizeof(resp)) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   "device status response too large");
+    }
     httpd_resp_sendstr(req, resp);
     return ESP_OK;
 }

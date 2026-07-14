@@ -1,12 +1,16 @@
 #include "cloud_mqtt.h"
+#include "cloud_ws_uplink.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "cJSON.h"
 #include "esp_event.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
 #include "mqtt_client.h"
 
 #define CLOUD_MQTT_STATUS_INTERVAL_US (5LL * 1000LL * 1000LL)
@@ -15,6 +19,16 @@
 #define CLOUD_MQTT_TOPIC_AVAILABILITY_FMT "wireless-debug/%s/availability"
 #define CLOUD_MQTT_TOPIC_CMD_FMT "wireless-debug/%s/cmd"
 #define CLOUD_MQTT_TOPIC_ACK_FMT "wireless-debug/%s/ack"
+#define CLOUD_MQTT_TOPIC_INBOX_FMT "wireless-debug/%s/inbox"
+#define CLOUD_MQTT_TOPIC_BUS_ACK_FMT "wireless-debug/%s/bus-ack"
+#define CLOUD_MQTT_TOPIC_PUB_FMT "wireless-debug/%s/pub"
+#define CLOUD_MQTT_WS_ACTIVE_US (10LL * 1000LL * 1000LL)
+#define CLOUD_MQTT_WS_FRAME_MAX_LEN 512
+#define CLOUD_MQTT_OSC_MAGIC_LEN 4U
+
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
 
 static const char *TAG = "cloud_mqtt";
 static cloud_mqtt_config_t s_config;
@@ -24,10 +38,72 @@ static esp_timer_handle_t s_status_timer;
 static bool s_initialized;
 static bool s_started;
 static bool s_connected;
+static bool s_ws_osc_streaming;
+static int64_t s_ws_active_until_us;
+static portMUX_TYPE s_ws_osc_state_lock = portMUX_INITIALIZER_UNLOCKED;
 static char s_status_topic[CLOUD_MQTT_TOPIC_MAX_LEN];
 static char s_availability_topic[CLOUD_MQTT_TOPIC_MAX_LEN];
 static char s_cmd_topic[CLOUD_MQTT_TOPIC_MAX_LEN];
 static char s_ack_topic[CLOUD_MQTT_TOPIC_MAX_LEN];
+static char s_inbox_topic[CLOUD_MQTT_TOPIC_MAX_LEN];
+static char s_bus_ack_topic[CLOUD_MQTT_TOPIC_MAX_LEN];
+static char s_pub_topic[CLOUD_MQTT_TOPIC_MAX_LEN];
+
+static void ws_osc_state_set(bool streaming, int64_t active_until_us)
+{
+    portENTER_CRITICAL(&s_ws_osc_state_lock);
+    s_ws_osc_streaming = streaming;
+    s_ws_active_until_us = active_until_us;
+    portEXIT_CRITICAL(&s_ws_osc_state_lock);
+}
+
+static void ws_osc_state_snapshot(bool *streaming, int64_t *active_until_us)
+{
+    portENTER_CRITICAL(&s_ws_osc_state_lock);
+    if (streaming != NULL) {
+        *streaming = s_ws_osc_streaming;
+    }
+    if (active_until_us != NULL) {
+        *active_until_us = s_ws_active_until_us;
+    }
+    portEXIT_CRITICAL(&s_ws_osc_state_lock);
+}
+
+static bool ws_osc_state_expire(int64_t now_us)
+{
+    bool expired = false;
+    portENTER_CRITICAL(&s_ws_osc_state_lock);
+    if (s_ws_osc_streaming && now_us > s_ws_active_until_us) {
+        s_ws_osc_streaming = false;
+        s_ws_active_until_us = 0;
+        expired = true;
+    }
+    portEXIT_CRITICAL(&s_ws_osc_state_lock);
+    return expired;
+}
+
+static bool ws_osc_state_refresh(bool start_streaming, int64_t active_until_us)
+{
+    bool streaming = false;
+    portENTER_CRITICAL(&s_ws_osc_state_lock);
+    if (start_streaming) {
+        s_ws_osc_streaming = true;
+    }
+    s_ws_active_until_us = active_until_us;
+    streaming = s_ws_osc_streaming;
+    portEXIT_CRITICAL(&s_ws_osc_state_lock);
+    return streaming;
+}
+
+static bool is_osc_stop_frame(const uint8_t *data, size_t len)
+{
+    return data != NULL && len >= 2U && data[0] == 0xff && data[1] == 0x72;
+}
+
+static bool is_osc_start_frame(const uint8_t *data, size_t len)
+{
+    return data != NULL && len >= 2U && data[0] == 0xff && data[1] == 0x71;
+}
 
 static int make_topic_from_format(char *out, size_t out_size, const char *fmt)
 {
@@ -66,11 +142,249 @@ static void build_topics(void)
     make_topic_from_format(s_availability_topic, sizeof(s_availability_topic), CLOUD_MQTT_TOPIC_AVAILABILITY_FMT);
     make_topic_from_format(s_cmd_topic, sizeof(s_cmd_topic), CLOUD_MQTT_TOPIC_CMD_FMT);
     make_topic_from_format(s_ack_topic, sizeof(s_ack_topic), CLOUD_MQTT_TOPIC_ACK_FMT);
+    make_topic_from_format(s_inbox_topic, sizeof(s_inbox_topic), CLOUD_MQTT_TOPIC_INBOX_FMT);
+    make_topic_from_format(s_bus_ack_topic, sizeof(s_bus_ack_topic), CLOUD_MQTT_TOPIC_BUS_ACK_FMT);
+    make_topic_from_format(s_pub_topic, sizeof(s_pub_topic), CLOUD_MQTT_TOPIC_PUB_FMT);
+}
+
+static int hex_value(char c)
+{
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
+
+static bool hex_decode(const char *hex, uint8_t *out, size_t out_size, size_t *out_len)
+{
+    if (hex == NULL || out == NULL || out_len == NULL) {
+        return false;
+    }
+    size_t hex_len = strlen(hex);
+    if ((hex_len % 2U) != 0U || hex_len / 2U > out_size) {
+        return false;
+    }
+    for (size_t i = 0; i < hex_len; i += 2U) {
+        int hi = hex_value(hex[i]);
+        int lo = hex_value(hex[i + 1U]);
+        if (hi < 0 || lo < 0) {
+            return false;
+        }
+        out[i / 2U] = (uint8_t)((hi << 4) | lo);
+    }
+    *out_len = hex_len / 2U;
+    return true;
+}
+
+static bool hex_encode(const uint8_t *data, size_t len, char *out, size_t out_size)
+{
+    static const char hex[] = "0123456789abcdef";
+    if (data == NULL || out == NULL || out_size < (len * 2U + 1U)) {
+        return false;
+    }
+    for (size_t i = 0; i < len; i++) {
+        out[i * 2U] = hex[(data[i] >> 4) & 0x0F];
+        out[i * 2U + 1U] = hex[data[i] & 0x0F];
+    }
+    out[len * 2U] = '\0';
+    return true;
+}
+
+static void add_heap_status(cJSON *root)
+{
+    cJSON *heap = cJSON_CreateObject();
+    if (heap == NULL) {
+        return;
+    }
+    cJSON_AddNumberToObject(heap, "free", esp_get_free_heap_size());
+    cJSON_AddNumberToObject(heap, "min_free", esp_get_minimum_free_heap_size());
+    cJSON_AddNumberToObject(heap, "largest", heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    cJSON_AddNumberToObject(heap, "internal_free",
+                            heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    cJSON_AddNumberToObject(heap, "internal_min_free",
+                            heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    cJSON_AddItemToObject(root, "heap", heap);
+}
+
+static void add_comm_stats_status(cJSON *root)
+{
+    if (s_runtime.get_comm_stats == NULL) {
+        return;
+    }
+
+    comm_stats_snapshot_t stats;
+    memset(&stats, 0, sizeof(stats));
+    s_runtime.get_comm_stats(&stats, s_runtime.ctx);
+
+    cJSON *comm = cJSON_CreateObject();
+    cJSON *uart = cJSON_CreateObject();
+    cJSON *ble = cJSON_CreateObject();
+    cJSON *wifi = cJSON_CreateObject();
+    cJSON *route = cJSON_CreateObject();
+    if (comm == NULL || uart == NULL || ble == NULL || wifi == NULL || route == NULL) {
+        cJSON_Delete(comm);
+        cJSON_Delete(uart);
+        cJSON_Delete(ble);
+        cJSON_Delete(wifi);
+        cJSON_Delete(route);
+        return;
+    }
+
+    cJSON_AddNumberToObject(uart, "rx_frames", (double)stats.uart_rx_frames);
+    cJSON_AddNumberToObject(uart, "rx_bytes", (double)stats.uart_rx_bytes);
+    cJSON_AddNumberToObject(uart, "tx_bytes", (double)stats.uart_tx_bytes);
+    cJSON_AddNumberToObject(uart, "tx_failures", (double)stats.uart_tx_failures);
+    cJSON_AddNumberToObject(uart, "overflows", (double)stats.uart_overflows);
+
+    cJSON_AddNumberToObject(ble, "rx_frames", (double)stats.ble_rx_frames);
+    cJSON_AddNumberToObject(ble, "rx_bytes", (double)stats.ble_rx_bytes);
+    cJSON_AddNumberToObject(ble, "tx_bytes", (double)stats.ble_tx_bytes);
+    cJSON_AddNumberToObject(ble, "notify_failures", (double)stats.ble_notify_failures);
+    cJSON_AddNumberToObject(ble, "no_subscriber_drops", (double)stats.ble_no_subscriber_drops);
+    cJSON_AddNumberToObject(ble, "dropped_bytes", (double)stats.ble_dropped_bytes);
+    cJSON_AddNumberToObject(ble, "alloc_failures", (double)stats.ble_alloc_failures);
+
+    cJSON_AddNumberToObject(wifi, "rx_frames", (double)stats.wifi_rx_frames);
+    cJSON_AddNumberToObject(wifi, "rx_bytes", (double)stats.wifi_rx_bytes);
+    cJSON_AddNumberToObject(wifi, "tx_queued_bytes", (double)stats.wifi_tx_queued_bytes);
+    cJSON_AddNumberToObject(wifi, "tx_sent_bytes", (double)stats.wifi_tx_sent_bytes);
+    cJSON_AddNumberToObject(wifi, "tx_failures", (double)stats.wifi_tx_failures);
+    cJSON_AddNumberToObject(wifi, "no_client_drops", (double)stats.wifi_no_client_drops);
+    cJSON_AddNumberToObject(wifi, "pool_exhausted", (double)stats.wifi_pool_exhausted);
+    cJSON_AddNumberToObject(wifi, "queue_full", (double)stats.wifi_queue_full);
+    cJSON_AddNumberToObject(wifi, "httpd_queue_failures",
+                            (double)stats.wifi_httpd_queue_failures);
+    cJSON_AddNumberToObject(wifi, "rx_failures", (double)stats.wifi_rx_failures);
+
+    cJSON_AddNumberToObject(route, "idle_drops", (double)stats.route_idle_drops);
+    cJSON_AddNumberToObject(route, "unavailable_drops", (double)stats.route_unavailable_drops);
+    cJSON_AddNumberToObject(route, "partial_drops", (double)stats.route_partial_drops);
+    cJSON_AddNumberToObject(route, "dropped_bytes", (double)stats.route_dropped_bytes);
+
+    cJSON_AddItemToObject(comm, "uart", uart);
+    cJSON_AddItemToObject(comm, "ble", ble);
+    cJSON_AddItemToObject(comm, "wifi", wifi);
+    cJSON_AddItemToObject(comm, "route", route);
+    cJSON_AddItemToObject(root, "comm_stats", comm);
+}
+
+static void add_cloud_ws_uplink_status(cJSON *root)
+{
+    cloud_ws_uplink_stats_t stats;
+    memset(&stats, 0, sizeof(stats));
+    cloud_ws_uplink_get_stats(&stats);
+
+    cJSON *obj = cJSON_CreateObject();
+    if (obj == NULL) {
+        return;
+    }
+    cJSON_AddNumberToObject(obj, "schema_version", CLOUD_WS_UPLINK_SCHEMA_VERSION);
+    cJSON_AddBoolToObject(obj, "connected", stats.connected);
+    cJSON_AddBoolToObject(obj, "queue_in_psram", stats.queue_in_psram);
+    cJSON_AddNumberToObject(obj, "sender_stack_min_free", (double)stats.sender_stack_min_free);
+    cJSON_AddNumberToObject(obj, "queue_pending_frames", (double)stats.queue_pending_frames);
+    cJSON_AddNumberToObject(obj, "queued_frames", (double)stats.queued_frames);
+    cJSON_AddNumberToObject(obj, "sent_frames", (double)stats.sent_frames);
+    cJSON_AddNumberToObject(obj, "sent_bytes", (double)stats.sent_bytes);
+    cJSON_AddNumberToObject(obj, "queue_full", (double)stats.queue_full);
+    cJSON_AddNumberToObject(obj, "overload_dropped_frames",
+                            (double)stats.overload_dropped_frames);
+    cJSON_AddNumberToObject(obj, "send_failures", (double)stats.send_failures);
+    cJSON_AddNumberToObject(obj, "fallback_frames", (double)stats.fallback_frames);
+    cJSON_AddNumberToObject(obj, "queued_fallback_frames", (double)stats.queued_fallback_frames);
+    cJSON_AddNumberToObject(obj, "fallback_failures", (double)stats.fallback_failures);
+    cJSON_AddNumberToObject(obj, "stop_dropped_frames", (double)stats.stop_dropped_frames);
+    cJSON_AddNumberToObject(obj, "connect_events", (double)stats.connect_events);
+    cJSON_AddNumberToObject(obj, "disconnect_events", (double)stats.disconnect_events);
+    cJSON_AddNumberToObject(obj, "error_events", (double)stats.error_events);
+    cJSON_AddNumberToObject(obj, "closed_events", (double)stats.closed_events);
+    cJSON_AddNumberToObject(obj, "last_event_id", (double)stats.last_event_id);
+    cJSON_AddItemToObject(root, "cloud_ws_uplink", obj);
+}
+
+static void add_display_status(cJSON *root)
+{
+    if (s_runtime.get_display_stats == NULL) {
+        return;
+    }
+
+    display_port_stats_t display;
+    memset(&display, 0, sizeof(display));
+    s_runtime.get_display_stats(&display, s_runtime.ctx);
+
+    cJSON *obj = cJSON_CreateObject();
+    if (obj == NULL) {
+        return;
+    }
+    cJSON_AddBoolToObject(obj, "enabled", display.enabled);
+    cJSON_AddStringToObject(obj, "backend", display.backend);
+    cJSON_AddStringToObject(obj, "status", display.status);
+    cJSON_AddNumberToObject(obj, "width", display.width);
+    cJSON_AddNumberToObject(obj, "height", display.height);
+    cJSON_AddNumberToObject(obj, "flush_count", display.flush_count);
+    cJSON_AddNumberToObject(obj, "status_update_count", display.status_update_count);
+    cJSON_AddNumberToObject(obj, "last_flush_bytes", display.last_flush_bytes);
+    if (display.last_flush_us > 0) {
+        int64_t age_ms = (esp_timer_get_time() - display.last_flush_us) / 1000;
+        cJSON_AddNumberToObject(obj, "last_flush_age_ms", age_ms < 0 ? 0 : age_ms);
+    }
+    cJSON_AddItemToObject(root, "display", obj);
+}
+
+static void add_menu_status(cJSON *root)
+{
+    if (s_runtime.get_menu_snapshot == NULL) {
+        return;
+    }
+
+    system_menu_snapshot_t menu;
+    memset(&menu, 0, sizeof(menu));
+    s_runtime.get_menu_snapshot(&menu, s_runtime.ctx);
+
+    cJSON *obj = cJSON_CreateObject();
+    if (obj == NULL) {
+        return;
+    }
+    cJSON_AddBoolToObject(obj, "active", menu.active);
+    cJSON_AddNumberToObject(obj, "page", menu.page);
+    cJSON_AddNumberToObject(obj, "depth", menu.depth);
+    cJSON_AddNumberToObject(obj, "selected", menu.selected);
+    cJSON_AddNumberToObject(obj, "item_count", menu.item_count);
+    cJSON_AddNumberToObject(obj, "event_count", menu.event_count);
+    cJSON_AddStringToObject(obj, "title", menu.title);
+    cJSON_AddStringToObject(obj, "path", menu.path);
+    cJSON_AddStringToObject(obj, "message", menu.message);
+    cJSON_AddItemToObject(root, "menu", obj);
+}
+
+static void add_motor_params_status(cJSON *root)
+{
+    if (s_runtime.get_motor_param_count == NULL ||
+        s_runtime.get_motor_param_capacity == NULL) {
+        return;
+    }
+
+    cJSON *obj = cJSON_CreateObject();
+    if (obj == NULL) {
+        return;
+    }
+    cJSON_AddNumberToObject(obj, "count", s_runtime.get_motor_param_count(s_runtime.ctx));
+    cJSON_AddNumberToObject(obj, "capacity", s_runtime.get_motor_param_capacity(s_runtime.ctx));
+    cJSON_AddItemToObject(root, "motor_params", obj);
 }
 
 static void status_timer_cb(void *arg)
 {
     (void)arg;
+    if (ws_osc_state_expire(esp_timer_get_time())) {
+        cloud_ws_uplink_set_active(false);
+    }
     cloud_mqtt_publish_status_now();
 }
 
@@ -96,6 +410,90 @@ static void publish_ack(const char *command_id, const char *type, bool ok, const
         cJSON_free(payload);
     }
     cJSON_Delete(root);
+}
+
+static void publish_bus_ack(const char *message_id, const char *channel, bool ok, const char *message)
+{
+    if (!s_connected || s_client == NULL) {
+        return;
+    }
+
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) {
+        return;
+    }
+    cJSON_AddStringToObject(root, "device_id", s_config.device_id);
+    cJSON_AddStringToObject(root, "message_id", message_id != NULL ? message_id : "");
+    cJSON_AddStringToObject(root, "channel", channel != NULL ? channel : "");
+    cJSON_AddBoolToObject(root, "ok", ok);
+    cJSON_AddStringToObject(root, "message", message != NULL ? message : "");
+
+    char *payload = cJSON_PrintUnformatted(root);
+    if (payload != NULL) {
+        esp_mqtt_client_publish(s_client, s_bus_ack_topic, payload, 0, 1, 0);
+        cJSON_free(payload);
+    }
+    cJSON_Delete(root);
+}
+
+static bool publish_ws_frame_mqtt(const uint8_t *data, size_t len)
+{
+    bool osc_streaming = false;
+    int64_t active_until_us = 0;
+    ws_osc_state_snapshot(&osc_streaming, &active_until_us);
+    if (!s_connected || s_client == NULL || data == NULL || len == 0 ||
+        len > CLOUD_MQTT_WS_FRAME_MAX_LEN ||
+        esp_timer_get_time() > active_until_us) {
+        return false;
+    }
+
+    char payload_hex[CLOUD_MQTT_WS_FRAME_MAX_LEN * 2U + 1U];
+    if (!hex_encode(data, len, payload_hex, sizeof(payload_hex))) {
+        return false;
+    }
+
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) {
+        return false;
+    }
+    cJSON_AddStringToObject(root, "message_id", "ws-uart-rx");
+    cJSON_AddStringToObject(root, "device_id", s_config.device_id);
+    cJSON_AddStringToObject(root, "channel", "ws");
+    cJSON_AddStringToObject(root, "payload_hex", payload_hex);
+
+    bool published = false;
+    char *json = cJSON_PrintUnformatted(root);
+    if (json != NULL) {
+        int message_id = osc_streaming
+                             ? esp_mqtt_client_enqueue(
+                                   s_client, s_pub_topic, json, 0, 0, 0, true)
+                             : esp_mqtt_client_publish(
+                                   s_client, s_pub_topic, json, 0, 1, 0);
+        published = message_id >= 0;
+        cJSON_free(json);
+    }
+    cJSON_Delete(root);
+    return published;
+}
+
+static void publish_ws_frame(const uint8_t *data, size_t len)
+{
+    bool osc_streaming = false;
+    int64_t active_until_us = 0;
+    ws_osc_state_snapshot(&osc_streaming, &active_until_us);
+    if (data == NULL || len == 0 ||
+        esp_timer_get_time() > active_until_us) {
+        return;
+    }
+
+    size_t offset = 0;
+    while (offset < len) {
+        size_t chunk_len = MIN(len - offset, CLOUD_MQTT_WS_FRAME_MAX_LEN);
+        if (!osc_streaming || !cloud_ws_uplink_send(data + offset, chunk_len)) {
+            cloud_mqtt_publish_ws_fallback(data + offset, chunk_len, NULL);
+        }
+        offset += chunk_len;
+    }
 }
 
 static bool parse_net_mode(const cJSON *args, system_net_mode_t *out)
@@ -235,6 +633,39 @@ static void handle_display_text(const char *command_id, const char *type, const 
     }
 }
 
+static void handle_bus_ws_frame(const char *message_id, const char *channel, const cJSON *root)
+{
+    const cJSON *payload_hex = cJSON_GetObjectItem(root, "payload_hex");
+    if (!cJSON_IsString(payload_hex) || payload_hex->valuestring[0] == '\0') {
+        publish_bus_ack(message_id, channel, false, "payload_hex required");
+        return;
+    }
+    if (s_runtime.send_ws_frame == NULL) {
+        publish_bus_ack(message_id, channel, false, "send_ws_frame callback missing");
+        return;
+    }
+
+    uint8_t frame[CLOUD_MQTT_WS_FRAME_MAX_LEN];
+    size_t frame_len = 0;
+    if (!hex_decode(payload_hex->valuestring, frame, sizeof(frame), &frame_len) || frame_len == 0) {
+        publish_bus_ack(message_id, channel, false, "invalid payload_hex");
+        return;
+    }
+
+    if (is_osc_stop_frame(frame, frame_len)) {
+        ws_osc_state_set(false, 0);
+        cloud_ws_uplink_set_active(false);
+    } else {
+        bool osc_streaming = ws_osc_state_refresh(
+            is_osc_start_frame(frame, frame_len),
+            esp_timer_get_time() + CLOUD_MQTT_WS_ACTIVE_US);
+        cloud_ws_uplink_set_active(osc_streaming);
+    }
+    esp_err_t err = s_runtime.send_ws_frame(frame, frame_len, s_runtime.ctx);
+    bool ok = err == ESP_OK;
+    publish_bus_ack(message_id, channel, ok, ok ? "ws forwarded" : esp_err_to_name(err));
+}
+
 static void handle_command(const char *payload, int payload_len)
 {
     if (payload == NULL || payload_len <= 0) {
@@ -285,6 +716,82 @@ static void handle_command(const char *payload, int payload_len)
     cJSON_Delete(root);
 }
 
+static void handle_bus_message(const char *payload, int payload_len)
+{
+    if (payload == NULL || payload_len <= 0) {
+        publish_bus_ack("", "", false, "empty bus message");
+        return;
+    }
+
+    char *json = calloc((size_t)payload_len + 1U, 1U);
+    if (json == NULL) {
+        publish_bus_ack("", "", false, "no memory");
+        return;
+    }
+    memcpy(json, payload, (size_t)payload_len);
+
+    cJSON *root = cJSON_Parse(json);
+    free(json);
+    if (root == NULL) {
+        publish_bus_ack("", "", false, "invalid json");
+        return;
+    }
+
+    const cJSON *message_id = cJSON_GetObjectItem(root, "message_id");
+    const cJSON *channel = cJSON_GetObjectItem(root, "channel");
+    const cJSON *source_type = cJSON_GetObjectItem(root, "source_type");
+    const cJSON *source_id = cJSON_GetObjectItem(root, "source_id");
+    const cJSON *payload_text = cJSON_GetObjectItem(root, "payload_text");
+    if (!cJSON_IsString(payload_text)) {
+        payload_text = cJSON_GetObjectItem(root, "payload");
+    }
+
+    const char *message_id_text = cJSON_IsString(message_id) ? message_id->valuestring : "";
+    const char *channel_text = cJSON_IsString(channel) ? channel->valuestring : "";
+    const char *source_type_text = cJSON_IsString(source_type) ? source_type->valuestring : "unknown";
+    const char *source_id_text = cJSON_IsString(source_id) ? source_id->valuestring : "unknown";
+
+    if (!cJSON_IsString(channel) || channel_text[0] == '\0') {
+        publish_bus_ack(message_id_text, "", false, "channel required");
+        cJSON_Delete(root);
+        return;
+    }
+
+    if (strcmp(channel_text, "ws") == 0) {
+        handle_bus_ws_frame(message_id_text, channel_text, root);
+        cJSON_Delete(root);
+        return;
+    }
+
+    if (strcmp(channel_text, "notify") != 0) {
+        publish_bus_ack(message_id_text, channel_text, false, "unsupported channel");
+        cJSON_Delete(root);
+        return;
+    }
+
+    if (!cJSON_IsString(payload_text) || payload_text->valuestring[0] == '\0') {
+        publish_bus_ack(message_id_text, channel_text, false, "payload_text required");
+        cJSON_Delete(root);
+        return;
+    }
+
+    if (s_runtime.display_text == NULL) {
+        publish_bus_ack(message_id_text, channel_text, false, "display callback missing");
+        cJSON_Delete(root);
+        return;
+    }
+
+    ESP_LOGI(TAG, "bus notify from %s:%s", source_type_text, source_id_text);
+    esp_err_t err = s_runtime.display_text(payload_text->valuestring, s_runtime.ctx);
+    bool ok = err == ESP_OK;
+    publish_bus_ack(message_id_text, channel_text, ok, ok ? "displayed" : esp_err_to_name(err));
+    if (ok) {
+        cloud_mqtt_publish_status_now();
+    }
+
+    cJSON_Delete(root);
+}
+
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
                                int32_t event_id, void *event_data)
 {
@@ -296,6 +803,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         s_connected = true;
         esp_mqtt_client_publish(s_client, s_availability_topic, "online", 0, 1, 1);
         esp_mqtt_client_subscribe(s_client, s_cmd_topic, 1);
+        esp_mqtt_client_subscribe(s_client, s_inbox_topic, 1);
         cloud_mqtt_publish_status_now();
     } else if (event_id == MQTT_EVENT_DISCONNECTED) {
         s_connected = false;
@@ -303,6 +811,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         if ((int)strlen(s_cmd_topic) == event->topic_len &&
             strncmp(event->topic, s_cmd_topic, event->topic_len) == 0) {
             handle_command(event->data, event->data_len);
+        } else if ((int)strlen(s_inbox_topic) == event->topic_len &&
+                   strncmp(event->topic, s_inbox_topic, event->topic_len) == 0) {
+            handle_bus_message(event->data, event->data_len);
         }
     }
 }
@@ -396,6 +907,9 @@ void cloud_mqtt_publish_status_now(void)
         return;
     }
     cJSON_AddStringToObject(root, "device_id", s_config.device_id);
+    if (s_config.device_mac != NULL && s_config.device_mac[0] != '\0') {
+        cJSON_AddStringToObject(root, "device_mac", s_config.device_mac);
+    }
     cJSON_AddStringToObject(root, "fw", "wireless-debug");
     cJSON_AddNumberToObject(root, "uptime_ms", (double)(esp_timer_get_time() / 1000));
     cJSON_AddStringToObject(root, "net_mode", net_mode_json_name(wifi.mode));
@@ -416,6 +930,13 @@ void cloud_mqtt_publish_status_now(void)
     cJSON_AddBoolToObject(root, "wifi_ws_client",
                           s_runtime.wifi_ws_client_connected != NULL &&
                           s_runtime.wifi_ws_client_connected(s_runtime.ctx));
+    cJSON_AddNumberToObject(root, "restart_reason", esp_reset_reason());
+    add_heap_status(root);
+    add_comm_stats_status(root);
+    add_cloud_ws_uplink_status(root);
+    add_display_status(root);
+    add_menu_status(root);
+    add_motor_params_status(root);
 
     char *json = cJSON_PrintUnformatted(root);
     if (json != NULL) {
@@ -423,4 +944,20 @@ void cloud_mqtt_publish_status_now(void)
         cJSON_free(json);
     }
     cJSON_Delete(root);
+}
+
+void cloud_mqtt_publish_ws_frame(const uint8_t *data, size_t len)
+{
+    publish_ws_frame(data, len);
+}
+
+bool cloud_mqtt_publish_ws_fallback(const uint8_t *data, size_t len, void *ctx)
+{
+    (void)ctx;
+    if (!publish_ws_frame_mqtt(data, len)) {
+        cloud_ws_uplink_note_fallback_failure();
+        return false;
+    }
+    cloud_ws_uplink_note_fallback();
+    return true;
 }

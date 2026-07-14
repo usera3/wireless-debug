@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: wireless_debug
+      POSTGRES_USER: wireless_debug
+      POSTGRES_PASSWORD: wireless_debug
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wireless_debug -d wireless_debug"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ../remote_mqtt/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/wireless_debug
+      SPRING_DATASOURCE_USERNAME: wireless_debug
+      SPRING_DATASOURCE_PASSWORD: wireless_debug
+      APP_BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      APP_BOOTSTRAP_ADMIN_PASSWORD: ChangeMe123!
+      APP_JWT_SECRET: replace-this-with-a-strong-32-byte-production-secret
+      APP_COOKIE_SECURE: "false"
+      APP_MQTT_ENABLED: "true"
+      APP_MQTT_URL: tcp://mosquitto:1883
+      APP_MQTT_NAMESPACE: wireless-debug
+      APP_CORS_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8081
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+
+  web:
+    build:
+      context: ./web-react
+      args:
+        VITE_API_BASE_URL: http://localhost:8080
+    ports:
+      - "8081:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

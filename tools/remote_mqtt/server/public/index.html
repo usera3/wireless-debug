@@ -6,24 +6,59 @@
   <title>远程设备控制台</title>
   <style>
     :root {
-      color-scheme: light;
-      --bg: #eef2f6;
-      --panel: #ffffff;
-      --panel-soft: #f8fafc;
-      --line: #d8e0ea;
-      --line-soft: #e8edf3;
-      --text: #17202a;
-      --muted: #667085;
-      --blue: #145da0;
-      --blue-dark: #0f4b84;
-      --green: #16845b;
-      --green-soft: #e6f4ee;
-      --amber: #a66200;
-      --amber-soft: #fff4df;
-      --red: #b42318;
-      --red-soft: #fde8e5;
-      --shadow: 0 10px 30px rgba(18, 32, 51, 0.08);
+      color-scheme: light dark;
+      --bg: #f3f5f8;
+      --surface: #ffffff;
+      --surface-muted: #f7f9fc;
+      --surface-strong: #eef2f7;
+      --line: #d6deea;
+      --line-soft: #e7ecf3;
+      --text: #101828;
+      --muted: #5f6b7a;
+      --subtle: #7a8697;
+      --accent: #155eef;
+      --accent-strong: #0b4bc7;
+      --accent-soft: #e9f0ff;
+      --ok: #067647;
+      --ok-soft: #dcfae6;
+      --warn: #93370d;
+      --warn-soft: #fff3d6;
+      --bad: #b42318;
+      --bad-soft: #fef0ef;
+      --neutral-soft: #eef2f7;
+      --log-bg: #10131f;
+      --log-line: rgba(255, 255, 255, 0.08);
+      --log-text: #d7deea;
+      --shadow: 0 16px 36px rgba(16, 24, 40, 0.08);
       font-family: Arial, "Microsoft YaHei", "PingFang SC", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f141b;
+        --surface: #171e28;
+        --surface-muted: #111821;
+        --surface-strong: #202938;
+        --line: #344054;
+        --line-soft: #263243;
+        --text: #f2f4f7;
+        --muted: #b7c0cf;
+        --subtle: #98a2b3;
+        --accent: #75a7ff;
+        --accent-strong: #9bbfff;
+        --accent-soft: #172b4d;
+        --ok: #7ee2ad;
+        --ok-soft: #123525;
+        --warn: #ffd166;
+        --warn-soft: #3a2a10;
+        --bad: #ff9b91;
+        --bad-soft: #3a1717;
+        --neutral-soft: #202938;
+        --log-bg: #080b12;
+        --log-line: rgba(255, 255, 255, 0.1);
+        --log-text: #d7deea;
+        --shadow: 0 16px 36px rgba(0, 0, 0, 0.28);
+      }
     }
 
     * { box-sizing: border-box; }
@@ -34,26 +69,43 @@
       color: var(--text);
     }
 
-    .app-shell {
-      max-width: 1180px;
-      margin: 0 auto;
-      padding: 22px 24px 28px;
+    button, select, input {
+      font: inherit;
     }
 
-    .topbar {
+    button:focus-visible,
+    select:focus-visible,
+    input:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+      outline-offset: 2px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        transition: none !important;
+        scroll-behavior: auto !important;
+      }
+    }
+
+    .console-shell {
+      max-width: 1220px;
+      margin: 0 auto;
+      padding: 22px 24px 30px;
+    }
+
+    .console-header {
       display: flex;
-      justify-content: space-between;
       align-items: flex-start;
+      justify-content: space-between;
       gap: 20px;
-      margin-bottom: 16px;
+      margin-bottom: 14px;
     }
 
     .eyebrow {
       color: var(--muted);
       font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0;
-      text-transform: uppercase;
+      font-weight: 800;
+      line-height: 1.2;
     }
 
     h1, h2, h3, p {
@@ -64,118 +116,156 @@
       margin-top: 4px;
       font-size: 26px;
       line-height: 1.25;
+      letter-spacing: 0;
     }
 
     .subtitle {
+      max-width: 680px;
       margin-top: 6px;
       color: var(--muted);
       font-size: 13px;
+      line-height: 1.55;
     }
 
-    .status-cluster {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: flex-end;
-      gap: 8px;
-      min-width: 240px;
-    }
-
-    .status-pill {
-      display: inline-flex;
-      align-items: center;
-      min-height: 28px;
-      gap: 7px;
-      padding: 5px 10px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: var(--panel);
-      color: var(--muted);
-      font-size: 13px;
-      font-weight: 700;
-      white-space: nowrap;
-    }
-
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      background: #98a2b3;
-      flex: 0 0 auto;
-    }
-
-    .status-pill.online {
-      color: var(--green);
-      background: var(--green-soft);
-      border-color: #bfe7d4;
-    }
-
-    .status-pill.offline {
-      color: var(--red);
-      background: var(--red-soft);
-      border-color: #f3b8b1;
-    }
-
-    .status-pill.online .dot { background: var(--green); }
-    .status-pill.offline .dot { background: var(--red); }
-
-    .summary-grid {
+    .device-state-strip {
       display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 10px;
-      margin-bottom: 12px;
-    }
-
-    .summary-card {
-      min-height: 78px;
-      padding: 12px;
+      grid-template-columns: minmax(220px, 0.78fr) minmax(0, 2.2fr);
+      gap: 0;
+      overflow: hidden;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: var(--panel);
-      box-shadow: 0 1px 0 rgba(18, 32, 51, 0.03);
-    }
-
-    .summary-label {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.25;
-    }
-
-    .summary-value {
-      margin-top: 8px;
-      color: var(--text);
-      font-size: 17px;
-      font-weight: 800;
-      line-height: 1.25;
-      word-break: break-word;
-    }
-
-    .summary-note {
-      margin-top: 4px;
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.25;
-    }
-
-    .workspace {
-      display: grid;
-      grid-template-columns: minmax(0, 1.08fr) minmax(340px, 0.92fr);
-      gap: 12px;
-      align-items: start;
-    }
-
-    .panel {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel);
+      background: var(--surface);
       box-shadow: var(--shadow);
     }
 
-    .panel-header {
+    .state-primary {
+      display: grid;
+      grid-template-columns: 12px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+      padding: 16px;
+      border-right: 1px solid var(--line);
+      background: var(--surface-muted);
+    }
+
+    .state-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: var(--subtle);
+      box-shadow: 0 0 0 4px var(--neutral-soft);
+    }
+
+    .state-dot.ok {
+      background: var(--ok);
+      box-shadow: 0 0 0 4px var(--ok-soft);
+    }
+
+    .state-dot.bad {
+      background: var(--bad);
+      box-shadow: 0 0 0 4px var(--bad-soft);
+    }
+
+    .state-kicker,
+    .metric-label,
+    .status-label,
+    label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.25;
+    }
+
+    .state-device {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 8px;
+      margin-top: 5px;
+    }
+
+    .state-device strong {
+      font-size: 21px;
+      line-height: 1.2;
+      overflow-wrap: anywhere;
+    }
+
+    .state-device span {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .state-metrics {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      margin: 0;
+    }
+
+    .metric {
+      min-width: 0;
+      padding: 14px 16px;
+      border-right: 1px solid var(--line-soft);
+    }
+
+    .metric:last-child {
+      border-right: 0;
+    }
+
+    .metric-label span,
+    .status-meta,
+    .control-hint {
+      display: block;
+      margin-top: 2px;
+      color: var(--subtle);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    .metric-value {
+      margin-top: 8px;
+      color: var(--text);
+      font-size: 16px;
+      font-weight: 900;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
+    }
+
+    .metric-value.ip-value {
+      font-size: 15px;
+      white-space: nowrap;
+      overflow-wrap: normal;
+    }
+
+    .metric-value.muted {
+      color: var(--muted);
+    }
+
+    .console-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
+      gap: 14px;
+      align-items: start;
+      margin-top: 14px;
+    }
+
+    .status-console,
+    .control-console,
+    .log-console {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .section-heading {
       display: flex;
       align-items: flex-start;
       justify-content: space-between;
       gap: 12px;
-      padding: 16px 16px 12px;
+      padding: 16px;
       border-bottom: 1px solid var(--line-soft);
     }
 
@@ -184,153 +274,109 @@
       line-height: 1.25;
     }
 
-    .panel-description {
+    h3 {
+      font-size: 14px;
+      line-height: 1.3;
+    }
+
+    .section-description {
       margin-top: 5px;
       color: var(--muted);
       font-size: 13px;
-      line-height: 1.45;
+      line-height: 1.5;
     }
 
-    .status-sections {
+    .status-table {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
-      padding: 14px 16px 16px;
     }
 
-    .status-section {
-      border: 1px solid var(--line-soft);
-      border-radius: 8px;
-      background: var(--panel-soft);
-      overflow: hidden;
-    }
-
-    .status-section h3 {
-      padding: 10px 12px;
+    .status-group-title {
+      padding: 10px 16px;
       border-bottom: 1px solid var(--line-soft);
-      font-size: 14px;
-      line-height: 1.25;
+      background: var(--surface-muted);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 900;
     }
 
-    .kv-row {
+    .status-row {
       display: grid;
-      grid-template-columns: minmax(92px, 0.55fr) minmax(0, 1fr);
-      gap: 12px;
+      grid-template-columns: minmax(130px, 0.55fr) minmax(0, 1fr);
+      gap: 16px;
       align-items: center;
-      min-height: 34px;
-      padding: 7px 12px;
+      min-height: 38px;
+      padding: 8px 16px;
       border-bottom: 1px solid var(--line-soft);
       font-size: 13px;
     }
 
-    .kv-row:last-child {
+    .status-row:last-child {
       border-bottom: 0;
     }
 
-    .kv-label {
-      color: var(--muted);
-    }
-
-    .kv-value {
+    .status-value {
       min-width: 0;
       text-align: right;
-      font-weight: 700;
+      font-weight: 900;
       overflow-wrap: anywhere;
     }
 
-    .chip {
+    .status-badge {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       min-height: 24px;
       padding: 3px 8px;
       border-radius: 999px;
-      font-size: 12px;
-      font-weight: 800;
       border: 1px solid var(--line);
-      background: #fff;
-      color: var(--muted);
-    }
-
-    .chip.ok {
-      border-color: #bfe7d4;
-      background: var(--green-soft);
-      color: var(--green);
-    }
-
-    .chip.warn {
-      border-color: #f7d7a4;
-      background: var(--amber-soft);
-      color: var(--amber);
-    }
-
-    .chip.bad {
-      border-color: #f3b8b1;
-      background: var(--red-soft);
-      color: var(--red);
-    }
-
-    .control-panel {
-      overflow: hidden;
-    }
-
-    .control-body {
-      padding: 14px 16px 16px;
-    }
-
-    .control-section {
-      padding: 12px 0;
-      border-bottom: 1px solid var(--line-soft);
-    }
-
-    .control-section:first-child {
-      padding-top: 0;
-    }
-
-    .control-section:last-child {
-      padding-bottom: 0;
-      border-bottom: 0;
-    }
-
-    .control-title {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      gap: 10px;
-      margin-bottom: 8px;
-    }
-
-    .control-title h3 {
-      font-size: 14px;
-    }
-
-    .control-hint {
+      background: var(--neutral-soft);
       color: var(--muted);
       font-size: 12px;
+      font-weight: 900;
       white-space: nowrap;
     }
 
-    label {
-      display: block;
-      margin-bottom: 5px;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 700;
+    .status-badge.ok {
+      border-color: color-mix(in srgb, var(--ok) 32%, transparent);
+      background: var(--ok-soft);
+      color: var(--ok);
     }
 
-    select, input, button {
-      width: 100%;
-      min-height: 38px;
-      border-radius: 7px;
-      font: inherit;
-      font-size: 14px;
+    .status-badge.warn {
+      border-color: color-mix(in srgb, var(--warn) 34%, transparent);
+      background: var(--warn-soft);
+      color: var(--warn);
     }
 
-    select, input {
-      border: 1px solid #c6d1dd;
-      background: #fff;
-      color: var(--text);
-      padding: 8px 10px;
+    .status-badge.bad {
+      border-color: color-mix(in srgb, var(--bad) 30%, transparent);
+      background: var(--bad-soft);
+      color: var(--bad);
+    }
+
+    .control-console {
+      display: grid;
+    }
+
+    .control-stack {
+      display: grid;
+    }
+
+    .command-block {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .command-block:last-child {
+      border-bottom: 0;
+    }
+
+    .command-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 9px;
     }
 
     .field-grid {
@@ -340,34 +386,56 @@
       align-items: end;
     }
 
-    .field-grid .field {
+    .field {
       min-width: 0;
     }
 
+    label {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    select,
+    input,
     button {
-      border: 1px solid var(--blue);
-      background: var(--blue);
-      color: #fff;
+      width: 100%;
+      min-height: 38px;
+      border-radius: 7px;
+      font-size: 14px;
+    }
+
+    select,
+    input {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--text);
+      padding: 8px 10px;
+    }
+
+    button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #ffffff;
       padding: 8px 12px;
-      font-weight: 800;
+      font-weight: 900;
       cursor: pointer;
       transition: background 120ms ease, border-color 120ms ease, opacity 120ms ease;
       white-space: nowrap;
     }
 
     button:hover:not(:disabled) {
-      background: var(--blue-dark);
-      border-color: var(--blue-dark);
+      border-color: var(--accent-strong);
+      background: var(--accent-strong);
     }
 
     button.secondary {
-      background: #fff;
-      color: var(--blue);
+      background: var(--surface);
+      color: var(--accent);
     }
 
     button.secondary:hover:not(:disabled) {
-      background: #eef6ff;
-      color: var(--blue-dark);
+      background: var(--accent-soft);
+      color: var(--accent-strong);
     }
 
     button.compact {
@@ -377,38 +445,43 @@
       font-size: 13px;
     }
 
-    button:disabled, select:disabled, input:disabled {
+    button:disabled,
+    select:disabled,
+    input:disabled {
       cursor: not-allowed;
       opacity: 0.55;
     }
 
-    .log-panel {
-      margin-top: 12px;
-      overflow: hidden;
+    button.is-busy {
+      cursor: progress;
+    }
+
+    .log-console {
+      margin-top: 14px;
     }
 
     .log-stream {
-      min-height: 150px;
-      max-height: 260px;
+      min-height: 154px;
+      max-height: 270px;
       overflow: auto;
       padding: 8px 12px 12px;
-      background: #101828;
-      color: #d0d5dd;
+      background: var(--log-bg);
+      color: var(--log-text);
       font-family: Consolas, "SFMono-Regular", monospace;
       font-size: 12px;
     }
 
-    .log-line {
+    .log-entry {
       display: grid;
-      grid-template-columns: 72px 74px minmax(0, 1fr);
+      grid-template-columns: 72px 76px minmax(0, 1fr);
       gap: 10px;
       align-items: start;
       min-height: 25px;
       padding: 5px 0;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+      border-bottom: 1px solid var(--log-line);
     }
 
-    .log-line:last-child {
+    .log-entry:last-child {
       border-bottom: 0;
     }
 
@@ -417,12 +490,13 @@
     }
 
     .log-status {
-      font-weight: 800;
+      font-weight: 900;
     }
 
     .log-status.ok { color: #7ee2ad; }
     .log-status.pending { color: #ffd166; }
     .log-status.bad { color: #ff9b91; }
+
     .log-message {
       min-width: 0;
       overflow-wrap: anywhere;
@@ -433,52 +507,71 @@
       color: #98a2b3;
     }
 
-    @media (max-width: 980px) {
-      .summary-grid {
+    @media (max-width: 1040px) {
+      .device-state-strip,
+      .console-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .state-primary {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .state-metrics {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
 
-      .workspace {
-        grid-template-columns: 1fr;
+      .metric:nth-child(2n) {
+        border-right: 0;
+      }
+
+      .metric:nth-child(n + 3) {
+        border-top: 1px solid var(--line-soft);
       }
     }
 
     @media (max-width: 640px) {
-      .app-shell {
-        padding: 16px;
+      .console-shell {
+        padding: 14px 12px 22px;
       }
 
-      .topbar {
+      .console-header,
+      .section-heading,
+      .command-title {
         display: block;
       }
 
-      .status-cluster {
-        justify-content: flex-start;
-        margin-top: 12px;
+      .section-heading button {
+        margin-top: 10px;
       }
 
-      .summary-grid, .status-sections {
+      .state-metrics,
+      .field-grid,
+      .status-row,
+      .log-entry {
         grid-template-columns: 1fr;
       }
 
-      .field-grid {
-        grid-template-columns: 1fr;
+      .metric {
+        border-right: 0;
+        border-top: 1px solid var(--line-soft);
+      }
+
+      .metric:first-child {
+        border-top: 0;
+      }
+
+      .status-value {
+        text-align: left;
       }
 
       .field-grid button {
         width: 100%;
       }
 
-      .panel-header {
-        display: block;
-      }
-
-      .panel-header button {
-        margin-top: 10px;
-      }
-
-      .log-line {
-        grid-template-columns: 64px minmax(0, 1fr);
+      .control-hint {
+        margin-top: 3px;
       }
 
       .log-status {
@@ -488,69 +581,72 @@
   </style>
 </head>
 <body>
-  <main class="app-shell">
-    <header class="topbar">
+  <main class="console-shell">
+    <header class="console-header">
       <div>
-        <div class="eyebrow">Wireless Debug Remote</div>
+        <div class="eyebrow">远程 MQTT 控制</div>
         <h1>远程设备控制台</h1>
-        <p class="subtitle">面向调试终端的在线状态监控、MQTT 远程控制和命令回执追踪。</p>
-      </div>
-      <div class="status-cluster" aria-label="连接状态">
-        <span id="onlineBadge" class="status-pill offline"><span class="dot"></span><span>设备离线</span></span>
-        <span id="brokerBadge" class="status-pill offline"><span class="dot"></span><span>Broker 未连接</span></span>
+        <p class="subtitle">集中查看在线状态、网络地址、链路状态和命令确认结果；页面通过实时刷新通道同步设备上报。</p>
       </div>
     </header>
 
-    <section class="summary-grid" aria-label="状态总览">
-      <article class="summary-card">
-        <div class="summary-label">设备</div>
-        <div id="summaryDevice" class="summary-value">esp32-001</div>
-        <div class="summary-note">当前管理对象</div>
-      </article>
-      <article class="summary-card">
-        <div class="summary-label">运行状态</div>
-        <div id="summaryOnline" class="summary-value">离线</div>
-        <div id="summaryAvailability" class="summary-note">等待设备心跳</div>
-      </article>
-      <article class="summary-card">
-        <div class="summary-label">最近心跳</div>
-        <div id="summaryHeartbeat" class="summary-value">-</div>
-        <div class="summary-note">15 秒内视为在线</div>
-      </article>
-      <article class="summary-card">
-        <div class="summary-label">网络模式</div>
-        <div id="summaryMode" class="summary-value">-</div>
-        <div id="summarySta" class="summary-note">STA 未连接</div>
-      </article>
-      <article class="summary-card">
-        <div class="summary-label">STA IP</div>
-        <div id="summaryStaIp" class="summary-value">-</div>
-        <div class="summary-note">热点或路由器分配</div>
-      </article>
+    <section class="device-state-strip" aria-label="设备当前状态">
+      <div class="state-primary">
+        <span id="stripStateDot" class="state-dot bad" aria-hidden="true"></span>
+        <div>
+          <div class="state-kicker">当前设备</div>
+          <div class="state-device">
+            <strong id="stripDevice">esp32-001</strong>
+            <span id="stripOnline">设备离线</span>
+          </div>
+        </div>
+      </div>
+      <dl class="state-metrics">
+        <div class="metric">
+          <dt class="metric-label">消息服务<span>MQTT Broker</span></dt>
+          <dd id="stripBroker" class="metric-value muted">未连接</dd>
+        </div>
+        <div class="metric">
+          <dt class="metric-label">网络模式<span>AP / STA / APSTA</span></dt>
+          <dd id="stripMode" class="metric-value muted">-</dd>
+        </div>
+        <div class="metric">
+          <dt class="metric-label">接入点 IP<span>AP</span></dt>
+          <dd id="stripApIp" class="metric-value ip-value muted">-</dd>
+        </div>
+        <div class="metric">
+          <dt class="metric-label">联网 IP<span>STA</span></dt>
+          <dd id="stripStaIp" class="metric-value ip-value muted">-</dd>
+        </div>
+        <div class="metric">
+          <dt class="metric-label">最近心跳<span>15 秒内视为在线</span></dt>
+          <dd id="stripHeartbeat" class="metric-value muted">-</dd>
+        </div>
+      </dl>
     </section>
 
-    <section class="workspace">
-      <section class="panel" aria-label="设备状态">
-        <div class="panel-header">
+    <section class="console-grid">
+      <section class="status-console" aria-label="详细状态">
+        <div class="section-heading">
           <div>
-            <h2>状态总览</h2>
-            <p class="panel-description">设备每 5 秒上报一次状态；页面通过 SSE 实时刷新。</p>
+            <h2>详细状态</h2>
+            <p class="section-description">设备每 5 秒上报一次；页面通过实时刷新通道 SSE 更新。</p>
           </div>
           <button class="secondary compact" data-command="query_status" data-requires-online>刷新状态</button>
         </div>
-        <div id="statusSections" class="status-sections"></div>
+        <div id="statusTable" class="status-table"></div>
       </section>
 
-      <aside class="panel control-panel" aria-label="远程控制">
-        <div class="panel-header">
+      <aside class="control-console" aria-label="远程控制">
+        <div class="section-heading">
           <div>
             <h2>远程控制</h2>
-            <p class="panel-description">设备离线时控制项会自动锁定；命令下发后等待 ACK 确认。</p>
+            <p class="section-description">设备离线时控制项会自动锁定；命令下发后等待 ACK 确认。</p>
           </div>
         </div>
-        <div class="control-body">
-          <section class="control-section">
-            <div class="control-title">
+        <div class="control-stack">
+          <section class="command-block">
+            <div class="command-title">
               <h3>网络模式</h3>
               <span class="control-hint">AP / STA / APSTA</span>
             </div>
@@ -567,14 +663,14 @@
             </div>
           </section>
 
-          <section class="control-section">
-            <div class="control-title">
+          <section class="command-block">
+            <div class="command-title">
               <h3>串口参数</h3>
-              <span class="control-hint">UART Baud</span>
+              <span class="control-hint">UART</span>
             </div>
             <div class="field-grid">
               <div class="field">
-                <label for="uartBaud">波特率</label>
+                <label for="uartBaud">串口波特率</label>
                 <select id="uartBaud" data-requires-online>
                   <option>115200</option>
                   <option>921600</option>
@@ -586,10 +682,10 @@
             </div>
           </section>
 
-          <section class="control-section">
-            <div class="control-title">
+          <section class="command-block">
+            <div class="command-title">
               <h3>通信链路</h3>
-              <span class="control-hint">自动 / WiFi / BLE</span>
+              <span class="control-hint">WiFi / BLE</span>
             </div>
             <div class="field-grid">
               <div class="field">
@@ -605,8 +701,8 @@
             <button class="secondary" data-command="ble_start" data-requires-online>启动 BLE 广播</button>
           </section>
 
-          <section class="control-section">
-            <div class="control-title">
+          <section class="command-block">
+            <div class="command-title">
               <h3>OLED 显示</h3>
               <span class="control-hint">远程显示测试</span>
             </div>
@@ -618,11 +714,11 @@
       </aside>
     </section>
 
-    <section class="panel log-panel" aria-label="命令日志">
-      <div class="panel-header">
+    <section class="log-console" aria-label="命令日志">
+      <div class="section-heading">
         <div>
           <h2>命令日志</h2>
-          <p class="panel-description">记录远程命令、等待确认和设备 ACK，便于现场复盘。</p>
+          <p class="section-description">记录远程命令、等待确认和设备 ACK，便于现场复盘。</p>
         </div>
         <button id="clearLog" class="secondary compact">清空日志</button>
       </div>
@@ -632,7 +728,7 @@
 
   <script>
     const DEVICE_ID = 'esp32-001';
-    const statusSections = document.querySelector('#statusSections');
+    const statusTable = document.querySelector('#statusTable');
     const log = document.querySelector('#log');
     const commandButtons = [...document.querySelectorAll('button[data-command]')];
     const guardedControls = [...document.querySelectorAll('[data-requires-online]')];
@@ -656,6 +752,16 @@
       button.dataset.defaultLabel = button.textContent.trim();
     });
 
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }[char]));
+    }
+
     function formatTimestamp(value) {
       if (!value) return '-';
       const date = new Date(value);
@@ -678,78 +784,122 @@
       return value === undefined || value === null || value === '' ? '-' : value;
     }
 
-    function chip(text, tone = '') {
-      return `<span class="chip ${tone}">${text}</span>`;
+    function modeHasAp(mode) {
+      return mode === 'ap' || mode === 'apsta';
     }
 
-    function statusRow(label, value) {
-      return `<div class="kv-row"><div class="kv-label">${label}</div><div class="kv-value">${value}</div></div>`;
+    function modeHasSta(mode) {
+      return mode === 'sta' || mode === 'apsta';
     }
 
-    function sectionBlock(title, rows) {
-      return `<section class="status-section"><h3>${title}</h3>${rows.join('')}</section>`;
+    function visibleApIp(status) {
+      return modeHasAp(status.net_mode) ? valueOrDash(status.ap_ip) : '-';
     }
 
-    function renderSummary(device) {
+    function visibleStaIp(status) {
+      return modeHasSta(status.net_mode) ? valueOrDash(status.sta_ip) : '-';
+    }
+
+    function badge(text, tone = '') {
+      return `<span class="status-badge ${tone}">${escapeHtml(text)}</span>`;
+    }
+
+    function statusRow(label, value, meta = '', htmlValue = false) {
+      const renderedValue = htmlValue ? value : escapeHtml(valueOrDash(value));
+      return `
+        <div class="status-row">
+          <div>
+            <div class="status-label">${escapeHtml(label)}</div>
+            ${meta ? `<div class="status-meta">${escapeHtml(meta)}</div>` : ''}
+          </div>
+          <div class="status-value">${renderedValue}</div>
+        </div>
+      `;
+    }
+
+    function statusGroup(title, rows) {
+      return `
+        <div class="status-group-title">${escapeHtml(title)}</div>
+        ${rows.join('')}
+      `;
+    }
+
+    function setMetricValue(selector, value) {
+      const el = document.querySelector(selector);
+      el.textContent = valueOrDash(value);
+      el.classList.toggle('muted', valueOrDash(value) === '-');
+    }
+
+    function renderDeviceStrip(device) {
       const status = device?.status || {};
-      document.querySelector('#summaryDevice').textContent = device?.device_id || DEVICE_ID;
-      document.querySelector('#summaryOnline').textContent = device?.online ? '在线' : '离线';
-      document.querySelector('#summaryAvailability').textContent =
-        device?.availability === 'online' ? '设备心跳正常' : '等待设备上线';
-      document.querySelector('#summaryHeartbeat').textContent = formatTimestamp(device?.status_at);
-      document.querySelector('#summaryMode').textContent = netModeNames[status.net_mode] || valueOrDash(status.net_mode);
-      document.querySelector('#summarySta').textContent = status.sta_connected ? 'STA 已连接' :
-        status.sta_connecting ? 'STA 连接中' : 'STA 未连接';
-      document.querySelector('#summaryStaIp').textContent = valueOrDash(status.sta_ip);
+      const online = !!device?.online;
+      const broker = !!device?.broker_connected;
+      const dot = document.querySelector('#stripStateDot');
+      dot.classList.toggle('ok', online);
+      dot.classList.toggle('bad', !online);
 
-      const onlineBadge = document.querySelector('#onlineBadge');
-      onlineBadge.classList.toggle('online', !!device?.online);
-      onlineBadge.classList.toggle('offline', !device?.online);
-      onlineBadge.querySelector('span:last-child').textContent = device?.online ? '设备在线' : '设备离线';
-
-      const brokerBadge = document.querySelector('#brokerBadge');
-      brokerBadge.classList.toggle('online', !!device?.broker_connected);
-      brokerBadge.classList.toggle('offline', !device?.broker_connected);
-      brokerBadge.querySelector('span:last-child').textContent =
-        device?.broker_connected ? 'Broker 已连接' : 'Broker 未连接';
+      document.querySelector('#stripDevice').textContent = device?.device_id || DEVICE_ID;
+      document.querySelector('#stripOnline').textContent = online ? '设备在线' : '设备离线';
+      setMetricValue('#stripBroker', broker ? '已连接' : '未连接');
+      setMetricValue('#stripMode', netModeNames[status.net_mode] || valueOrDash(status.net_mode));
+      setMetricValue('#stripApIp', visibleApIp(status));
+      setMetricValue('#stripStaIp', visibleStaIp(status));
+      setMetricValue('#stripHeartbeat', formatTimestamp(device?.status_at));
     }
 
-    function renderStatusSections(device) {
-      const status = device?.status || {};
-      const staState = status.sta_connected ? chip('已连接', 'ok') :
-        status.sta_connecting ? chip('连接中', 'warn') : chip('离线', 'bad');
-      const brokerState = device?.broker_connected ? chip('已连接', 'ok') : chip('未连接', 'bad');
-      const deviceState = device?.online ? chip('在线', 'ok') : chip('离线', 'bad');
-      const bleState = status.ble_ready ? chip('就绪', 'ok') : chip('未启动', 'warn');
-      const wsState = status.wifi_ws_client ? chip('有客户端', 'ok') : chip('无客户端', 'warn');
+    function staStateBadge(status) {
+      if (!modeHasSta(status.net_mode)) {
+        return badge('未启用', '');
+      }
+      if (status.sta_connected) {
+        return badge('已连接', 'ok');
+      }
+      if (status.sta_connecting) {
+        return badge('连接中', 'warn');
+      }
+      return badge('未连接', 'bad');
+    }
 
-      statusSections.innerHTML = [
-        sectionBlock('网络状态', [
-          statusRow('设备状态', deviceState),
-          statusRow('Broker', brokerState),
-          statusRow('WiFi 模式', valueOrDash(netModeNames[status.net_mode] || status.net_mode)),
-          statusRow('STA 状态', staState),
-          statusRow('AP IP', valueOrDash(status.ap_ip)),
-          statusRow('STA IP', valueOrDash(status.sta_ip)),
+    function latestAckText(device) {
+      const ack = Array.isArray(device?.ack_log) ? device.ack_log[0] : null;
+      if (!ack) return '-';
+      const result = ack.ok ? '成功' : '失败';
+      return `${ack.type || '-'} / ${result}`;
+    }
+
+    function renderStatusTable(device) {
+      const status = device?.status || {};
+      const deviceState = device?.online ? badge('在线', 'ok') : badge('离线', 'bad');
+      const brokerState = device?.broker_connected ? badge('已连接', 'ok') : badge('未连接', 'bad');
+      const bleState = status.ble_ready ? badge('就绪', 'ok') : badge('未启动', 'warn');
+      const wsState = status.wifi_ws_client ? badge('有客户端', 'ok') : badge('无客户端', 'warn');
+      const pendingCount = Array.isArray(device?.pending_commands) ? device.pending_commands.length : 0;
+
+      statusTable.innerHTML = [
+        statusGroup('网络', [
+          statusRow('设备状态', deviceState, '', true),
+          statusRow('消息服务', brokerState, 'MQTT Broker', true),
+          statusRow('WiFi 模式', netModeNames[status.net_mode] || status.net_mode),
+          statusRow('STA 连接', staStateBadge(status), '联网状态', true),
+          statusRow('接入点 IP', visibleApIp(status), 'AP'),
+          statusRow('联网 IP', visibleStaIp(status), 'STA'),
         ]),
-        sectionBlock('通信链路', [
-          statusRow('通信模式', valueOrDash(commModeNames[status.comm_mode] || status.comm_mode)),
-          statusRow('UART 波特率', valueOrDash(status.uart_baud)),
-          statusRow('BLE', bleState),
-          statusRow('BLE 订阅', status.ble_subscribed ? chip('已有订阅', 'ok') : chip('未订阅', 'warn')),
-          statusRow('WebSocket', wsState),
+        statusGroup('通信', [
+          statusRow('通信模式', commModeNames[status.comm_mode] || status.comm_mode),
+          statusRow('串口波特率', status.uart_baud, 'UART'),
+          statusRow('蓝牙链路', bleState, 'BLE', true),
+          statusRow('BLE 订阅', status.ble_subscribed ? badge('已有订阅', 'ok') : badge('未订阅', 'warn'), '', true),
+          statusRow('网页通道', wsState, 'WebSocket', true),
         ]),
-        sectionBlock('运行信息', [
-          statusRow('固件标识', valueOrDash(status.fw)),
+        statusGroup('运行', [
+          statusRow('固件标识', status.fw),
           statusRow('运行时间', status.uptime_ms ? `${Math.floor(status.uptime_ms / 1000)} 秒` : '-'),
-          statusRow('STA 配置', status.sta_configured ? chip('已保存', 'ok') : chip('未配置', 'warn')),
-          statusRow('最近心跳', formatTimestamp(device?.status_at)),
+          statusRow('STA 配置', status.sta_configured ? badge('已保存', 'ok') : badge('未配置', 'warn'), '', true),
+          statusRow('最近心跳', formatTimestamp(device?.status_at), 'SSE 实时刷新'),
         ]),
-        sectionBlock('命令状态', [
-          statusRow('待确认命令', Array.isArray(device?.pending_commands) && device.pending_commands.length ?
-            chip(`${device.pending_commands.length} 条等待确认`, 'warn') : chip('无', 'ok')),
-          statusRow('最近 ACK', Array.isArray(device?.ack_log) && device.ack_log[0] ?
-            `${device.ack_log[0].type || '-'} / ${device.ack_log[0].ok ? '成功' : '失败'}` : '-'),
+        statusGroup('命令', [
+          statusRow('待确认命令', pendingCount ? badge(`${pendingCount} 条等待确认`, 'warn') : badge('无', 'ok'), '', true),
+          statusRow('命令确认', latestAckText(device), 'ACK'),
         ]),
       ].join('');
     }
@@ -767,6 +917,8 @@
       commandButtons.forEach((button) => {
         const isActive = type && button.dataset.command === type;
         button.textContent = isActive ? '下发中...' : button.dataset.defaultLabel;
+        button.classList.toggle('is-busy', !!isActive);
+        button.toggleAttribute('aria-busy', !!isActive);
       });
       setControlsEnabled(currentDevice);
     }
@@ -779,6 +931,8 @@
       activeCommandId = null;
       commandButtons.forEach((button) => {
         button.textContent = button.dataset.defaultLabel;
+        button.classList.remove('is-busy');
+        button.removeAttribute('aria-busy');
       });
       setControlsEnabled(currentDevice);
     }
@@ -801,10 +955,10 @@
       }
       const label = { ok: '成功', pending: '等待确认', bad: '失败' };
       log.innerHTML = logs.map((item) => `
-        <div class="log-line">
-          <span class="log-time">${item.time}</span>
-          <span class="log-status ${item.status}">${label[item.status] || item.status}</span>
-          <span class="log-message">${item.message}${item.detail ? ` · ${item.detail}` : ''}</span>
+        <div class="log-entry">
+          <span class="log-time">${escapeHtml(item.time)}</span>
+          <span class="log-status ${escapeHtml(item.status)}">${escapeHtml(label[item.status] || item.status)}</span>
+          <span class="log-message">${escapeHtml(item.message)}${item.detail ? ` · ${escapeHtml(item.detail)}` : ''}</span>
         </div>
       `).join('');
     }
@@ -824,8 +978,8 @@
 
     function render(device) {
       currentDevice = device;
-      renderSummary(device);
-      renderStatusSections(device);
+      renderDeviceStrip(device);
+      renderStatusTable(device);
       setControlsEnabled(device);
       if (Array.isArray(device?.ack_log) && device.ack_log[0]) {
         handleAck(device.ack_log[0]);
