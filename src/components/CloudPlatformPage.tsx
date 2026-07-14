@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import {
   cloudDeviceConsolePath,
@@ -163,6 +163,7 @@ export function CloudPlatformPage() {
   const [refreshSeq, setRefreshSeq] = useState(0);
   const [activeSection, setActiveSection] = useState<PlatformSection>('overview');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const [detail, setDetail] = useState<CloudDeviceDetailResponse | null>(null);
@@ -182,6 +183,21 @@ export function CloudPlatformPage() {
   const [busMessage, setBusMessage] = useState('当前只开放 notify，避免把云端做成危险控制入口。');
   const [busLoading, setBusLoading] = useState(false);
   const [busRefreshSeq, setBusRefreshSeq] = useState(0);
+
+  useEffect(() => {
+    if (!userMenuOpen) return;
+
+    function closeOnOutsidePointer(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && userMenuRef.current?.contains(target)) return;
+      setUserMenuOpen(false);
+    }
+
+    document.addEventListener('pointerdown', closeOnOutsidePointer, true);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsidePointer, true);
+    };
+  }, [userMenuOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -437,7 +453,7 @@ export function CloudPlatformPage() {
               >
                 刷新
               </button>
-              <div className="user-menu relative">
+              <div className="user-menu relative" ref={userMenuRef}>
                 <button
                   type="button"
                   className="flex h-10 items-center gap-3 rounded-full border border-slate-200 bg-white px-3 text-sm font-black shadow-sm transition hover:border-teal-200 hover:bg-teal-50"

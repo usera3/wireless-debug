@@ -261,6 +261,11 @@ try {
   if (logoutHref !== '/logout') {
     throw new Error(`cloud platform logout href mismatch: ${logoutHref}`);
   }
+  await page.getByRole('heading', { name: '无线调试云端观测台' }).click();
+  await page.waitForTimeout(120);
+  if (await logout.isVisible()) {
+    throw new Error('cloud platform user menu did not close after clicking outside');
+  }
 
   await page.goto(`http://127.0.0.1:${port}/remote/wd-ac276eab7c9c/orig/i.html`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(500);
