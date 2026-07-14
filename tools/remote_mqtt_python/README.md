@@ -67,6 +67,16 @@ CLOUD_WS_PUBLIC_URL=wss://example.com
 
 每个浏览器连接使用独立的有界实时发送队列。`CLOUD_WS_BROWSER_QUEUE_FRAMES` 控制队列深度；慢客户端队列满时丢弃最旧波形帧，避免拖慢同设备的其他浏览器和 ESP32 上行连接。
 
+### Unified React frontend
+
+The cloud service serves the same Vite + React bundle used by ESP32 local mode.
+
+- `/cloud.html` runs the bundle in `cloud-platform` mode.
+- `/remote/<device_id>/orig/i.html` runs the bundle in `cloud-device` mode.
+- `/legacy-cloud.html` is kept temporarily for rollback during the migration.
+
+Build assets in `wireless_debug_web` with `npm run build:firmware-assets`, then deploy the updated `dist/orig` directory with the cloud service.
+
 ## MQTT Topics
 
 ESP32 上报：

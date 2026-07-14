@@ -1436,8 +1436,8 @@ def cloud():
     return redirect('/cloud.html')
 
 
-@app.get('/cloud.html')
-def cloud_html():
+@app.get('/legacy-cloud.html')
+def legacy_cloud_html():
     return send_from_directory(BASE_DIR / 'static', 'cloud.html')
 
 
@@ -1451,6 +1451,18 @@ def cloud_ws_public_url(device_id):
         hostname = forwarded_host.rsplit(':', 1)[0] if ':' in forwarded_host else forwarded_host
         base = f'{scheme}://{hostname}:{CLOUD_WS_PORT}'
     return f'{base.rstrip("/")}/ws/device/{quote(device_id, safe="")}'
+
+
+def inject_react_runtime(html, runtime_mode, device_id=None):
+    remote_ws_url = cloud_ws_public_url(device_id) if device_id else None
+    script = f"""
+    <script>
+      window.__WIRELESS_RUNTIME_MODE = {json.dumps(runtime_mode)};
+      window.__WIRELESS_REMOTE_DEVICE_ID = {json.dumps(device_id)};
+      window.__WIRELESS_REMOTE_WS_URL = {json.dumps(remote_ws_url)};
+    </script>
+    """
+    return html.replace('</head>', f'{script}</head>')
 
 
 def remote_console_rewrite_script(device_id):
@@ -1507,6 +1519,7 @@ def remote_console_rewrite_script(device_id):
           }};
           return xhr;
         }};
+        window.__WIRELESS_RUNTIME_MODE = 'cloud-device';
         window.__WIRELESS_REMOTE_DEVICE_ID = deviceId;
         window.__WIRELESS_REMOTE_WS_URL = remoteWsUrl;
       }})();
@@ -1514,15 +1527,8 @@ def remote_console_rewrite_script(device_id):
     """
 
 
-def render_remote_console_html(device_id):
-    html_path = ORIG_WEB_DIR / 'i.html'
-    if not html_path.exists():
-        return Response('remote console asset missing', 404)
-    html = html_path.read_text(encoding='utf-8')
-    for asset_name in ('a.js', 'a.css'):
-        version = remote_console_asset_version(asset_name)
-        html = html.replace(f'./{asset_name}', f'./{asset_name}?v={version}')
-    fallback = """
+def react_load_fallback_script():
+    return """
     <script>
       window.addEventListener('load', () => {
         window.setTimeout(() => {
@@ -1540,12 +1546,42 @@ def render_remote_console_html(device_id):
       });
     </script>
     """
-    injected = html.replace(
-        '</head>', f'{remote_console_rewrite_script(device_id)}{fallback}</head>')
+
+
+def render_react_app(runtime_mode, device_id=None):
+    html_path = ORIG_WEB_DIR / 'i.html'
+    if not html_path.exists():
+        return Response('react app asset missing', 404)
+    html = html_path.read_text(encoding='utf-8')
+    for asset_name in ('a.js', 'a.css', 'x.js'):
+        version = remote_console_asset_version(asset_name)
+        html = html.replace(f'./{asset_name}', f'./{asset_name}?v={version}')
+
+    runtime_html = inject_react_runtime(html, runtime_mode, device_id)
+    extra_script = react_load_fallback_script()
+    if runtime_mode == 'cloud-device' and device_id:
+        extra_script = f'{remote_console_rewrite_script(device_id)}{extra_script}'
+    injected = runtime_html.replace('</head>', f'{extra_script}</head>')
     response = Response(injected, mimetype='text/html')
     response.headers['Cache-Control'] = 'no-store, max-age=0'
     response.headers['Pragma'] = 'no-cache'
     return response
+
+
+@app.get('/cloud.html')
+def cloud_html():
+    return render_react_app('cloud-platform')
+
+
+@app.get('/a.js')
+@app.get('/a.css')
+@app.get('/x.js')
+def react_root_asset():
+    return send_from_directory(ORIG_WEB_DIR, request.path.lstrip('/'))
+
+
+def render_remote_console_html(device_id):
+    return render_react_app('cloud-device', device_id)
 
 
 def remote_console_asset_version(filename):
