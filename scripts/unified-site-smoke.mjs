@@ -273,6 +273,29 @@ try {
     throw new Error('cloud device mode did not render device controls');
   }
 
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`http://127.0.0.1:${port}/cloud.html`, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(1200);
+  const mobileNavButton = page.getByRole('button', { name: '打开导航' });
+  if (!(await mobileNavButton.isVisible())) {
+    throw new Error('mobile cloud platform did not render navigation button');
+  }
+  if (!(await page.getByLabel('移动端设备列表').isVisible())) {
+    throw new Error('mobile cloud platform did not render device cards');
+  }
+  if (await page.locator('table').isVisible()) {
+    throw new Error('mobile cloud platform should not show the wide device table');
+  }
+  await mobileNavButton.click();
+  const mobileDeviceNav = page.getByRole('dialog', { name: '移动端导航' }).getByRole('button', { name: '设备管理' });
+  if (!(await mobileDeviceNav.isVisible())) {
+    throw new Error('mobile cloud platform drawer did not expose device management');
+  }
+  await mobileDeviceNav.click();
+  if (!(await page.getByRole('heading', { name: '设备管理' }).count())) {
+    throw new Error('mobile cloud platform navigation did not switch sections');
+  }
+
   if (errors.length) throw new Error(`browser errors: ${errors.join('\n')}`);
   console.log('unified site smoke passed');
 } finally {

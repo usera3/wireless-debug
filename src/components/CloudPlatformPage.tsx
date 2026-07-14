@@ -163,6 +163,7 @@ export function CloudPlatformPage() {
   const [refreshSeq, setRefreshSeq] = useState(0);
   const [activeSection, setActiveSection] = useState<PlatformSection>('overview');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
@@ -198,6 +199,19 @@ export function CloudPlatformPage() {
       document.removeEventListener('pointerdown', closeOnOutsidePointer, true);
     };
   }, [userMenuOpen]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') setMobileNavOpen(false);
+    }
+
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [mobileNavOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -392,6 +406,11 @@ export function CloudPlatformPage() {
     setActiveSection(section);
   }
 
+  function switchSection(section: PlatformSection) {
+    setActiveSection(section);
+    setMobileNavOpen(false);
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950">
       <div className="flex min-h-screen">
@@ -417,7 +436,7 @@ export function CloudPlatformPage() {
                     <button
                       key={item.id}
                       type="button"
-                      onClick={() => setActiveSection(item.id)}
+                      onClick={() => switchSection(item.id)}
                       className={`flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold transition ${
                         activeSection === item.id
                           ? 'bg-teal-50 text-teal-900'
@@ -436,15 +455,75 @@ export function CloudPlatformPage() {
           </nav>
         </aside>
 
+        {mobileNavOpen && (
+          <div className="fixed inset-0 z-30 lg:hidden" role="dialog" aria-label="移动端导航" aria-modal="true">
+            <button
+              type="button"
+              className="absolute inset-0 bg-slate-950/45"
+              aria-label="关闭导航"
+              onClick={() => setMobileNavOpen(false)}
+            />
+            <aside className="relative h-full w-[292px] max-w-[82vw] border-r border-slate-200 bg-white shadow-2xl">
+              <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-6">
+                <div className="grid h-10 w-10 place-items-center rounded-lg bg-gradient-to-br from-slate-900 to-teal-500 text-sm font-black text-white">
+                  WD
+                </div>
+                <div>
+                  <div className="whitespace-nowrap text-lg font-black leading-tight">Wireless Debug</div>
+                  <div className="mt-1 inline-flex rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">
+                    Cloud Console
+                  </div>
+                </div>
+              </div>
+              <nav className="px-3 py-5">
+                {NAV_GROUPS.map((group) => (
+                  <div key={group.title} className="mb-7">
+                    <div className="mb-2 px-2 text-xs font-bold text-slate-400">{group.title}</div>
+                    <div className="space-y-1">
+                      {group.items.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => switchSection(item.id)}
+                          className={`flex h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold transition ${
+                            activeSection === item.id
+                              ? 'bg-teal-50 text-teal-900'
+                              : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
+                          }`}
+                        >
+                          <span className="grid h-6 w-6 place-items-center rounded bg-slate-100 text-[11px] font-black text-slate-500">
+                            {item.code}
+                          </span>
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </nav>
+            </aside>
+          </div>
+        )}
+
         <div className="min-w-0 flex-1">
-          <header className="flex h-[104px] items-center justify-between border-b border-slate-200 bg-white px-6 lg:px-10">
-            <div>
-              <h1 className="text-2xl font-black tracking-tight">无线调试云端观测台</h1>
-              <p className="mt-2 text-sm text-slate-500">多设备状态、历史事件、诊断回执集中查看</p>
+          <header className="flex min-h-[104px] flex-col gap-4 border-b border-slate-200 bg-white px-4 py-4 sm:px-6 lg:h-[104px] lg:flex-row lg:items-center lg:justify-between lg:px-10 lg:py-0">
+            <div className="flex w-full min-w-0 items-start gap-3 lg:w-auto">
+              <button
+                type="button"
+                className="mt-1 grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-sm font-black text-slate-700 shadow-sm transition hover:border-teal-300 hover:bg-teal-50 hover:text-teal-800 lg:hidden"
+                aria-label="打开导航"
+                onClick={() => setMobileNavOpen(true)}
+              >
+                ☰
+              </button>
+              <div className="min-w-0">
+                <h1 className="text-xl font-black tracking-tight sm:text-2xl">无线调试云端观测台</h1>
+                <p className="mt-2 text-sm text-slate-500">多设备状态、历史事件、诊断回执集中查看</p>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex w-full flex-wrap items-center gap-2 sm:gap-3 lg:w-auto lg:justify-end">
               <StatusBadge label={mqttConnected ? 'MQTT 已连接' : 'MQTT 未连接'} tone={mqttConnected ? 'green' : 'red'} />
-              <span className="hidden rounded-full border border-teal-100 bg-teal-50 px-4 py-2 text-sm font-bold text-teal-700 md:inline-flex">
+              <span className="inline-flex rounded-full border border-teal-100 bg-teal-50 px-3 py-2 text-xs font-bold text-teal-700 sm:px-4 sm:text-sm">
                 同步 {formatGeneratedAt(generatedAt)}
               </span>
               <button
@@ -480,7 +559,7 @@ export function CloudPlatformPage() {
             </div>
           </header>
 
-          <main className="min-h-[calc(100vh-104px)] bg-gradient-to-br from-teal-50 via-slate-50 to-blue-50 px-5 py-8 lg:px-9">
+          <main className="min-h-[calc(100vh-104px)] bg-gradient-to-br from-teal-50 via-slate-50 to-blue-50 px-4 py-5 sm:px-5 lg:px-9 lg:py-8">
             <section className="mx-auto max-w-[1380px]">
               <div className="mb-7">
                 <h2 className="text-2xl font-black">{activeCopy.title}</h2>
@@ -605,7 +684,7 @@ function OverviewSection({
 }) {
   return (
     <div className="space-y-8">
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4">
         <Metric label="设备总数" value={summary.total} />
         <Metric label="在线" value={summary.online} />
         <Metric label="离线" value={summary.offline} />
@@ -1275,7 +1354,51 @@ function DeviceTablePanel({
         </div>
       </div>
 
-      <div className="overflow-x-auto px-5 py-4">
+      <div className="lg:hidden" aria-label="移动端设备列表">
+        <div className="space-y-3 px-4 py-4">
+          {devices.length ? (
+            devices.map((device) => (
+              <div key={device.deviceId} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-teal-200 hover:bg-teal-50/60">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="break-words text-base font-black text-slate-950">{device.displayName}</div>
+                    <div className="mt-1 break-all font-mono text-xs font-bold text-slate-500">{device.deviceId}</div>
+                  </div>
+                  <StatePill device={device} />
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                  <MobileDeviceFact label="网络" value={device.network} />
+                  <MobileDeviceFact label="健康" value={device.health} />
+                  <MobileDeviceFact label="STA IP" value={device.staIp} />
+                  <MobileDeviceFact label="AP IP" value={device.apIp} />
+                  <MobileDeviceFact label="BLE" value={device.bleState} />
+                  <MobileDeviceFact label="WS" value={device.wsState} />
+                </div>
+                <div className="mt-4 flex gap-2">
+                  <button
+                    type="button"
+                    className="h-9 flex-1 rounded-lg bg-slate-900 px-3 text-sm font-black text-white transition hover:bg-teal-700"
+                    onClick={() => onSelectDevice(device.deviceId, 'devices')}
+                  >
+                    查看详情
+                  </button>
+                  <a
+                    className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-teal-300 hover:bg-teal-50 hover:text-teal-800"
+                    href={cloudDeviceConsolePath(device.deviceId)}
+                    aria-label={`打开控制台 ${device.displayName}`}
+                  >
+                    控制台
+                  </a>
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyBox>暂无数据</EmptyBox>
+          )}
+        </div>
+      </div>
+
+      <div className="hidden overflow-x-auto px-5 py-4 lg:block">
         <table className="min-w-[1320px] w-full text-left text-sm">
           <thead className="text-slate-500">
             <tr>
@@ -1380,7 +1503,7 @@ function Metric({ label, value }: { label: string; value: number }) {
 
 function StatusBadge({ label, tone }: { label: string; tone: 'green' | 'red' }) {
   return (
-    <span className={`hidden items-center gap-2 rounded-full border px-4 py-2 text-sm font-bold md:inline-flex ${
+    <span className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-bold sm:px-4 sm:text-sm ${
       tone === 'green'
         ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
         : 'border-rose-100 bg-rose-50 text-rose-700'
@@ -1388,6 +1511,15 @@ function StatusBadge({ label, tone }: { label: string; tone: 'green' | 'red' }) 
       <i className={`h-2 w-2 rounded-full ${tone === 'green' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
       {label}
     </span>
+  );
+}
+
+function MobileDeviceFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-lg bg-slate-50 px-3 py-2">
+      <div className="text-xs font-black text-slate-400">{label}</div>
+      <div className="mt-1 truncate text-sm font-black text-slate-800">{value}</div>
+    </div>
   );
 }
 
