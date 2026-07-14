@@ -8,6 +8,7 @@ interface LayoutProps {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
   children: ReactNode;
+  variant?: 'device' | 'platform';
 }
 
 const TABS: { id: Tab; label: string; icon: string }[] = [
@@ -20,12 +21,14 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: 'debug', label: '调试信息', icon: '🐛' },
 ];
 
-export function Layout({ activeTab, onTabChange, children }: LayoutProps) {
+export function Layout({ activeTab, onTabChange, children, variant = 'device' }: LayoutProps) {
   const connected = useConnectionStore((s) => s.connected);
   const connecting = useConnectionStore((s) => s.connecting);
   const [showDebug, setShowDebug] = useState(false);
 
-  const visibleTabs = showDebug ? TABS : TABS.filter((t) => t.id !== 'debug');
+  const visibleTabs = variant === 'platform'
+    ? [{ id: 'dashboard' as Tab, label: '仪表盘', icon: 'OV' }]
+    : (showDebug ? TABS : TABS.filter((t) => t.id !== 'debug'));
 
   return (
     <div className="flex flex-col h-screen bg-slate-900 text-slate-100">

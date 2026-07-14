@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Layout } from './components/Layout';
 import { ConnectionPanel } from './components/ConnectionPanel';
 import { OscilloscoperPage } from './components/OscilloscoperPage';
@@ -11,6 +11,8 @@ import { useConnectionStore } from './store/connectionStore';
 import { wsClient } from './lib/wsClient';
 import { resolveConnectionTarget } from './lib/connectionTarget';
 import { requiresLocalNetworkPermission } from './lib/localNetworkAccess';
+import { currentRuntimeInfo } from './lib/runtimeMode';
+import { CloudPlatformPage } from './components/CloudPlatformPage';
 
 type Tab = 'dashboard' | 'osc' | 'modbusOsc' | 'params' | 'connection' | 'debug' | 'bootloader';
 
@@ -18,9 +20,11 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const { connected, connect } = useConnectionStore();
   const [toast, setToast] = useState<string | null>(null);
+  const runtime = useMemo(() => currentRuntimeInfo(), []);
 
   // 页面加载 3s 后自动尝试连接默认地址
   useEffect(() => {
+    if (runtime.mode === 'cloud-platform') return undefined;
     const timer = setTimeout(() => {
       const state = useConnectionStore.getState();
       const target = resolveConnectionTarget(state.url, window.location.origin);
@@ -30,7 +34,7 @@ export default function App() {
     }, 3000);
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [runtime.mode]);
 
   // 监听 WebSocket 意外断开（状态已由 wsClient.onClose 自动更新，此处仅弹 toast）
   useEffect(() => {
@@ -53,6 +57,14 @@ export default function App() {
     debug: <DebugPage />,
     bootloader: <BootloaderPage />,
   }[activeTab];
+
+  if (runtime.mode === 'cloud-platform') {
+    return (
+      <Layout activeTab="dashboard" onTabChange={() => undefined} variant="platform">
+        <CloudPlatformPage />
+      </Layout>
+    );
+  }
 
   return (
     <Layout activeTab={activeTab} onTabChange={setActiveTab}>
