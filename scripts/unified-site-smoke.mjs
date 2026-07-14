@@ -100,6 +100,20 @@ try {
   if (!(await page.getByText('ESP32-001').count())) {
     throw new Error('cloud platform mode did not render device row');
   }
+  await page.getByRole('button', { name: '设备管理' }).click();
+  if (!(await page.getByRole('heading', { name: '设备管理' }).count())) {
+    throw new Error('cloud platform navigation did not switch to device management');
+  }
+  await page.getByRole('button', { name: /Admin/ }).click();
+  const logout = page.getByRole('link', { name: '退出登录' });
+  await logout.hover();
+  if (!(await logout.isVisible())) {
+    throw new Error('cloud platform user menu hides before logout can be clicked');
+  }
+  const logoutHref = await logout.getAttribute('href');
+  if (logoutHref !== '/logout') {
+    throw new Error(`cloud platform logout href mismatch: ${logoutHref}`);
+  }
 
   await page.goto(`http://127.0.0.1:${port}/remote/wd-ac276eab7c9c/orig/i.html`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(500);

@@ -30,24 +30,69 @@ interface CloudSummary {
 
 const EMPTY_SUMMARY: CloudSummary = { total: 0, online: 0, offline: 0, unknown: 0 };
 
+type PlatformSection =
+  | 'overview'
+  | 'devices'
+  | 'connections'
+  | 'history'
+  | 'messages'
+  | 'capabilities'
+  | 'events'
+  | 'settings';
+
 const NAV_GROUPS = [
   {
     title: '控制台',
     items: [
-      ['OV', '仪表盘'],
-      ['DV', '设备管理'],
-      ['CN', '连接管理'],
-      ['HS', '连接历史'],
-      ['MS', '消息中心'],
-      ['CP', '能力清单'],
-      ['EV', '事件记录'],
+      { id: 'overview', code: 'OV', label: '仪表盘' },
+      { id: 'devices', code: 'DV', label: '设备管理' },
+      { id: 'connections', code: 'CN', label: '连接管理' },
+      { id: 'history', code: 'HS', label: '连接历史' },
+      { id: 'messages', code: 'MS', label: '消息中心' },
+      { id: 'capabilities', code: 'CP', label: '能力清单' },
+      { id: 'events', code: 'EV', label: '事件记录' },
     ],
   },
   {
     title: '系统',
-    items: [['ST', '系统设置']],
+    items: [{ id: 'settings', code: 'ST', label: '系统设置' }],
   },
-] as const;
+] satisfies { title: string; items: { id: PlatformSection; code: string; label: string }[] }[];
+
+const SECTION_COPY: Record<PlatformSection, { title: string; desc: string }> = {
+  overview: {
+    title: '仪表盘',
+    desc: '按设备名、网络状态和实时心跳集中管理 ESP32 无线调试终端',
+  },
+  devices: {
+    title: '设备管理',
+    desc: '查看设备身份、硬件地址、固件版本和云端控制台入口',
+  },
+  connections: {
+    title: '连接管理',
+    desc: '查看 AP/STA 地址、通信模式、BLE 与 WebSocket 接入状态',
+  },
+  history: {
+    title: '连接历史',
+    desc: '查看设备在线、离线和重连记录',
+  },
+  messages: {
+    title: '消息中心',
+    desc: '查看云平台与设备之间的消息收发状态',
+  },
+  capabilities: {
+    title: '能力清单',
+    desc: '查看当前云端控制台已接入的设备能力',
+  },
+  events: {
+    title: '事件记录',
+    desc: '查看设备状态上报、命令回执和诊断事件',
+  },
+  settings: {
+    title: '系统设置',
+    desc: '查看云端控制台运行状态和登录会话',
+  },
+};
 
 async function fetchJson<T>(path: string): Promise<T> {
   const response = await fetch(cloudPlatformApiUrl(path), { cache: 'no-store' });
@@ -85,6 +130,8 @@ export function CloudPlatformPage() {
   const [filter, setFilter] = useState('');
   const [stateFilter, setStateFilter] = useState('all');
   const [refreshSeq, setRefreshSeq] = useState(0);
+  const [activeSection, setActiveSection] = useState<PlatformSection>('overview');
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -132,6 +179,13 @@ export function CloudPlatformPage() {
     });
   }, [devices, filter, stateFilter]);
 
+  const activeCopy = SECTION_COPY[activeSection];
+  const showMetrics = activeSection === 'overview';
+  const showDeviceTable = activeSection === 'overview'
+    || activeSection === 'devices'
+    || activeSection === 'connections';
+  const tableTitle = activeSection === 'connections' ? '连接状态' : '设备总览';
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950">
       <div className="flex min-h-screen">
@@ -153,19 +207,21 @@ export function CloudPlatformPage() {
               <div key={group.title} className="mb-7">
                 <div className="mb-2 px-2 text-xs font-bold text-slate-400">{group.title}</div>
                 <div className="space-y-1">
-                  {group.items.map(([code, label], index) => (
+                  {group.items.map((item) => (
                     <button
-                      key={code}
+                      key={item.id}
+                      type="button"
+                      onClick={() => setActiveSection(item.id)}
                       className={`flex h-10 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-bold transition ${
-                        index === 0 && group.title === '控制台'
+                        activeSection === item.id
                           ? 'bg-teal-50 text-teal-900'
                           : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'
                       }`}
                     >
                       <span className="grid h-6 w-6 place-items-center rounded bg-slate-100 text-[11px] font-black text-slate-500">
-                        {code}
+                        {item.code}
                       </span>
-                      {label}
+                      {item.label}
                     </button>
                   ))}
                 </div>
@@ -191,13 +247,19 @@ export function CloudPlatformPage() {
               >
                 刷新
               </button>
-              <div className="user-menu group relative">
-                <button className="flex h-10 items-center gap-3 rounded-full border border-slate-200 bg-white px-3 text-sm font-black shadow-sm transition hover:border-teal-200 hover:bg-teal-50">
+              <div className="user-menu relative">
+                <button
+                  type="button"
+                  className="flex h-10 items-center gap-3 rounded-full border border-slate-200 bg-white px-3 text-sm font-black shadow-sm transition hover:border-teal-200 hover:bg-teal-50"
+                  onClick={() => setUserMenuOpen((open) => !open)}
+                  aria-expanded={userMenuOpen}
+                  aria-haspopup="menu"
+                >
                   <span className="grid h-7 w-7 place-items-center rounded-full bg-cyan-100 text-xs text-cyan-700">AD</span>
                   <span className="hidden sm:inline">Admin</span>
                   <span className="text-slate-400">⌄</span>
                 </button>
-                <div className="absolute right-0 z-20 mt-2 hidden w-40 rounded-lg border border-slate-200 bg-white p-2 text-sm shadow-xl group-hover:block">
+                <div className={`absolute right-0 z-20 mt-2 w-40 rounded-lg border border-slate-200 bg-white p-2 text-sm shadow-xl ${userMenuOpen ? 'block' : 'hidden'}`}>
                   <a className="block rounded-md px-3 py-2 font-bold text-slate-600 hover:bg-slate-50" href="/logout">
                     退出登录
                   </a>
@@ -209,21 +271,24 @@ export function CloudPlatformPage() {
           <main className="min-h-[calc(100vh-104px)] bg-gradient-to-br from-teal-50 via-slate-50 to-blue-50 px-5 py-8 lg:px-9">
             <section className="mx-auto max-w-[1380px]">
               <div className="mb-7">
-                <h2 className="text-2xl font-black">仪表盘</h2>
-                <p className="mt-2 text-sm text-slate-500">按设备名、网络状态和实时心跳集中管理 ESP32 无线调试终端</p>
+                <h2 className="text-2xl font-black">{activeCopy.title}</h2>
+                <p className="mt-2 text-sm text-slate-500">{activeCopy.desc}</p>
               </div>
 
-              <div className="mb-8 grid gap-4 md:grid-cols-4">
-                <Metric label="设备总数" value={summary.total} />
-                <Metric label="在线" value={summary.online} />
-                <Metric label="离线" value={summary.offline} />
-                <Metric label="未知" value={summary.unknown} />
-              </div>
+              {showMetrics && (
+                <div className="mb-8 grid gap-4 md:grid-cols-4">
+                  <Metric label="设备总数" value={summary.total} />
+                  <Metric label="在线" value={summary.online} />
+                  <Metric label="离线" value={summary.offline} />
+                  <Metric label="未知" value={summary.unknown} />
+                </div>
+              )}
 
-              <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl shadow-slate-200/70">
+              {showDeviceTable ? (
+                <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl shadow-slate-200/70">
                 <div className="flex flex-col gap-4 border-b border-slate-200 px-5 py-4 xl:flex-row xl:items-center xl:justify-between">
                   <div>
-                    <h3 className="text-xl font-black">设备总览</h3>
+                    <h3 className="text-xl font-black">{tableTitle}</h3>
                     <p className="mt-1 text-sm text-slate-500">
                       {loading ? '正在同步设备...' : `${visibleDevices.length} 台设备`}
                     </p>
@@ -307,6 +372,9 @@ export function CloudPlatformPage() {
                   </table>
                 </div>
               </div>
+              ) : (
+                <EmptySection section={activeSection} devices={devices} mqttConnected={mqttConnected} />
+              )}
             </section>
           </main>
         </div>
@@ -334,6 +402,57 @@ function StatusBadge({ label, tone }: { label: string; tone: 'green' | 'red' }) 
       <i className={`h-2 w-2 rounded-full ${tone === 'green' ? 'bg-emerald-500' : 'bg-rose-500'}`} />
       {label}
     </span>
+  );
+}
+
+function EmptySection({
+  section,
+  devices,
+  mqttConnected,
+}: {
+  section: PlatformSection;
+  devices: CloudDeviceRow[];
+  mqttConnected: boolean;
+}) {
+  if (section === 'capabilities') {
+    return (
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <CapabilityCard title="设备状态上报" value={`${devices.length} 台设备`} />
+        <CapabilityCard title="MQTT 通道" value={mqttConnected ? '已连接' : '未连接'} />
+        <CapabilityCard title="远程控制台" value="已启用" />
+        <CapabilityCard title="参数表服务" value="已启用" />
+      </div>
+    );
+  }
+
+  const emptyText: Record<PlatformSection, string> = {
+    overview: '',
+    devices: '',
+    connections: '',
+    history: '暂无连接历史记录',
+    messages: '暂无消息记录',
+    capabilities: '',
+    events: '暂无事件记录',
+    settings: '当前登录用户：Admin',
+  };
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white px-6 py-12 text-center shadow-xl shadow-slate-200/70">
+      <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-lg bg-teal-50 text-sm font-black text-teal-700">
+        {SECTION_COPY[section].title.slice(0, 2)}
+      </div>
+      <h3 className="text-lg font-black">{SECTION_COPY[section].title}</h3>
+      <p className="mt-2 text-sm text-slate-500">{emptyText[section]}</p>
+    </div>
+  );
+}
+
+function CapabilityCard({ title, value }: { title: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/60">
+      <div className="text-sm font-bold text-slate-500">{title}</div>
+      <div className="mt-3 text-xl font-black text-slate-950">{value}</div>
+    </div>
   );
 }
 
