@@ -1,5 +1,22 @@
 import { create } from 'zustand';
 import { wsClient } from '../lib/wsClient';
+import { remoteConsoleWsUrl } from '../lib/remoteConsole';
+import { resolveConnectionTarget } from '../lib/connectionTarget';
+import { selectInitialConnectionUrl } from '../lib/connectionPreference';
+
+const URL_LS_KEY = 'wireless_debug_ws_url';
+
+function defaultWsUrl(): string {
+  return import.meta.env.VITE_WS_URL ?? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
+}
+
+function initialWsUrl(): string {
+  return selectInitialConnectionUrl({
+    remoteUrl: remoteConsoleWsUrl(),
+    savedUrl: localStorage.getItem(URL_LS_KEY),
+    defaultUrl: defaultWsUrl(),
+  });
+}
 
 interface ConnectionState {
   url: string;
@@ -16,13 +33,21 @@ export const useConnectionStore = create<ConnectionState>((set, get) => {
   wsClient.onClose(() => set({ connected: false, connecting: false }));
 
   return {
-    url: import.meta.env.VITE_WS_URL ?? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`,
+    url: initialWsUrl(),
     connected: false,
     connecting: false,
-    setUrl: (url) => set({ url }),
+    setUrl: (url) => {
+      localStorage.setItem(URL_LS_KEY, url);
+      set({ url });
+    },
     connect: () => {
+      const target = resolveConnectionTarget(get().url, window.location.origin);
+      if (target.kind === 'invalid') {
+        set({ connecting: false, connected: false });
+        return;
+      }
       set({ connecting: true, connected: false });
-      wsClient.connect(get().url);
+      wsClient.connect(target.wsUrl);
     },
     disconnect: () => {
       wsClient.disconnect();

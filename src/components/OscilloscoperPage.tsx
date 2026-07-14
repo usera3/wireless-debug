@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   OSC_HISTORY_RETENTION_OPTIONS,
   OSC_VIEW_WINDOW_OPTIONS,
@@ -11,6 +11,8 @@ import { OscChannelConfig, buildChannelConfigs } from './OscChannelConfig';
 import { OscChart } from './OscChart';
 import { useOscController } from '../hooks/useOscController';
 import { exportCsv, importCsv } from '../lib/csvWave';
+import { resolveConnectionTarget } from '../lib/connectionTarget';
+import { describeOscTransport } from '../lib/oscTransport';
 
 function createMockOscData(): Map<number, number[]> {
   const samples = 30_000;
@@ -52,6 +54,7 @@ function formatDuration(seconds: number): string {
 export function OscilloscoperPage() {
   const {
     running,
+    startError,
     sampleRate,
     frameLen,
     channels,
@@ -73,12 +76,22 @@ export function OscilloscoperPage() {
     setReviewEndSeconds,
   } = useOscStore();
   const connected = useConnectionStore((s) => s.connected);
+  const url = useConnectionStore((s) => s.url);
   const modbusOscRunning = useModbusOscStore((s) => s.running);
   const { start, stop } = useOscController();
+  const transport = useMemo(
+    () => describeOscTransport(resolveConnectionTarget(url, window.location.origin)),
+    [url],
+  );
 
   const [csvError, setCsvError] = useState<string | null>(null);
   const [resetViewSignal, setResetViewSignal] = useState(0);
   const importRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!connected && running) stop();
+  }, [connected, running, stop]);
+
   const configuredChannels = useMemo(() => buildChannelConfigs(configRows, numChannels), [configRows, numChannels]);
   const activeChannels = channels.length > 0 ? channels : configuredChannels;
   const channelNos = useMemo(() => channels.map((channel) => channel.channelNo), [channels]);
@@ -217,6 +230,24 @@ export function OscilloscoperPage() {
 
   return (
     <div className="flex flex-col gap-4 p-4 h-full">
+      <div
+        className={`flex items-center justify-between gap-3 border px-3 py-2 text-sm rounded-lg ${
+          transport.tone === 'fast'
+            ? 'border-emerald-700/70 bg-emerald-950/35 text-emerald-200'
+            : transport.tone === 'cloud'
+              ? 'border-cyan-700/70 bg-cyan-950/30 text-cyan-200'
+              : 'border-red-800/70 bg-red-950/30 text-red-200'
+        }`}
+      >
+        <div className="min-w-0">
+          <div className="font-medium">{transport.title}</div>
+          <div className="mt-0.5 text-xs opacity-75">{transport.detail}</div>
+        </div>
+        <span className="shrink-0 text-xs tabular-nums opacity-70">
+          {transport.mode === 'local' ? '低延迟' : transport.mode === 'cloud' ? '公网链路' : '未连接'}
+        </span>
+      </div>
+
       <div className="bg-slate-800 rounded-lg p-3 border border-slate-700">
         <OscChannelConfig />
       </div>
@@ -311,6 +342,7 @@ export function OscilloscoperPage() {
 
         <div className="ml-auto flex items-center gap-4 text-xs text-slate-400 flex-wrap justify-end">
           {csvError && <span className="text-red-400">❌ {csvError}</span>}
+          {startError && <span className="text-red-400">启动失败: {startError}</span>}
           {modbusOscRunning && (
             <span className="text-amber-400">⚠️ 参数示波器运行中，请先停止</span>
           )}

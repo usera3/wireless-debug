@@ -4,6 +4,8 @@ import { GaugeChart } from './GaugeChart';
 import { useDashboardPoller } from '../hooks/useDashboardPoller';
 import { EspFilePicker } from './EspFilePicker';
 import { parseParameterTable } from '../lib/paramParser';
+import { currentConnectionTarget } from '../lib/apiClient';
+import { parameterSourcePolicy } from '../lib/parameterSourcePolicy';
 
 // 数码管风格的只读显示块
 function DigitDisplay({ label, value, unit }: { label: string; value: string; unit?: string }) {
@@ -30,6 +32,7 @@ export function DashboardPage() {
   const [showEspPicker, setShowEspPicker] = useState(false);
   const enabled = useParamStore((s) => s.dashboardEnabled);
   const setDashboardEnabled = useParamStore((s) => s.setDashboardEnabled);
+  const sourcePolicy = parameterSourcePolicy(currentConnectionTarget().kind);
 
   const { writeParam } = useDashboardPoller(enabled);
 
@@ -153,34 +156,38 @@ export function DashboardPage() {
         <div className="flex flex-col gap-2 bg-yellow-950/60 border border-yellow-700/60 rounded-lg px-4 py-3">
           <span className="text-sm text-yellow-300 font-medium">⚠️ 参数表未加载，仪表盘功能受限</span>
           <div className="flex gap-2">
-            <button
-              onClick={() => fileRef.current?.click()}
-              disabled={loading}
-              className="flex-1 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm transition-colors disabled:opacity-50"
-            >
-              📂 加载参数表
-            </button>
+            {sourcePolicy.showLocalFilePicker && (
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={loading}
+                className="flex-1 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm transition-colors disabled:opacity-50"
+              >
+                📂 本地参数表
+              </button>
+            )}
             <button
               onClick={() => setShowEspPicker(true)}
               disabled={loading}
               className="flex-1 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm transition-colors disabled:opacity-50"
             >
-              📡 远程加载
+              📡 {sourcePolicy.remoteButtonLabel}
             </button>
           </div>
           {loading && <span className="text-xs text-yellow-400">解析中…</span>}
         </div>
       )}
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".xlsx"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) loadFile(f);
-        }}
-      />
+      {sourcePolicy.showLocalFilePicker && (
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".xlsx"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) loadFile(f);
+          }}
+        />
+      )}
 
       {/* 控制区（使能后才可交互） */}
       <div className={`flex flex-col gap-4${!enabled ? ' pointer-events-none opacity-40 select-none' : ''}`}>
@@ -322,7 +329,11 @@ export function DashboardPage() {
 
       {/* ESP32 文件选择弹窗 */}
       {showEspPicker && (
-        <EspFilePicker onFileReady={(file) => loadFile(file)} onClose={() => setShowEspPicker(false)} />
+        <EspFilePicker
+          onFileReady={(file) => loadFile(file)}
+          onClose={() => setShowEspPicker(false)}
+          policy={sourcePolicy}
+        />
       )}
     </div>
   );

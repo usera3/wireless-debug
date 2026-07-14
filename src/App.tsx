@@ -9,6 +9,8 @@ import { DashboardPage } from './components/DashboardPage';
 import { BootloaderPage } from './components/BootloaderPage';
 import { useConnectionStore } from './store/connectionStore';
 import { wsClient } from './lib/wsClient';
+import { resolveConnectionTarget } from './lib/connectionTarget';
+import { requiresLocalNetworkPermission } from './lib/localNetworkAccess';
 
 type Tab = 'dashboard' | 'osc' | 'modbusOsc' | 'params' | 'connection' | 'debug' | 'bootloader';
 
@@ -20,7 +22,9 @@ export default function App() {
   // 页面加载 3s 后自动尝试连接默认地址
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (!useConnectionStore.getState().connected) {
+      const state = useConnectionStore.getState();
+      const target = resolveConnectionTarget(state.url, window.location.origin);
+      if (!state.connected && !requiresLocalNetworkPermission(target, window.location.protocol)) {
         connect();
       }
     }, 3000);

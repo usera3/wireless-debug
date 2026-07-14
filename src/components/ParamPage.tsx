@@ -5,17 +5,20 @@ import { parseParameterTable } from '../lib/paramParser';
 import { ParamRow } from './ParamRow';
 import { useModbusOps } from '../hooks/useModbusOps';
 import { EspFilePicker } from './EspFilePicker';
+import { currentConnectionTarget } from '../lib/apiClient';
+import { parameterSourcePolicy } from '../lib/parameterSourcePolicy';
 
 export function ParamPage() {
   const { pages, params, loadParams, activePage, search, setActivePage, setSearch } = useParamStore();
   const connected = useConnectionStore((s) => s.connected);
-  const { readRegister } = useModbusOps();
+  const { readRegisters } = useModbusOps();
 
   const [loading, setLoading] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; mode: 'page' | 'all' } | null>(null);
   const [showEspPicker, setShowEspPicker] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef(false);
+  const sourcePolicy = parameterSourcePolicy(currentConnectionTarget().kind);
 
   // 加载 Excel（本地文件 or ESP32 下载后传入）
   async function loadFile(file: File) {
@@ -52,14 +55,13 @@ export function ParamPage() {
     const targets = params.filter((p) => !p.hidden && p.page === activePage);
     cancelRef.current = false;
     setBulkProgress({ done: 0, total: targets.length, mode: 'page' });
-    for (let i = 0; i < targets.length; i++) {
-      if (cancelRef.current) break;
-      try {
-        await readRegister(targets[i]);
-      } catch {
-        // 单条失败继续
+    try {
+      if (!cancelRef.current) {
+        const done = await readRegisters(targets);
+        setBulkProgress({ done, total: targets.length, mode: 'page' });
       }
-      setBulkProgress({ done: i + 1, total: targets.length, mode: 'page' });
+    } catch {
+      // 当前页失败时保留已有值，允许用户重试
     }
     setBulkProgress(null);
   }
@@ -68,21 +70,18 @@ export function ParamPage() {
     const targets = params.filter((p) => !p.hidden);
     cancelRef.current = false;
     setBulkProgress({ done: 0, total: targets.length, mode: 'all' });
-    let currentPage = activePage;
-    for (let i = 0; i < targets.length; i++) {
+    let done = 0;
+    for (const page of pages) {
       if (cancelRef.current) break;
-      const target = targets[i];
-      // 自动翻到正在读取的页
-      if (target.page !== currentPage) {
-        currentPage = target.page;
-        setActivePage(currentPage);
-      }
+      const pageTargets = targets.filter((target) => target.page === page);
+      if (pageTargets.length === 0) continue;
+      setActivePage(page);
       try {
-        await readRegister(target);
+        done += await readRegisters(pageTargets);
       } catch {
-        // 单条失败继续
+        // 单页失败继续下一页
       }
-      setBulkProgress({ done: i + 1, total: targets.length, mode: 'all' });
+      setBulkProgress({ done, total: targets.length, mode: 'all' });
     }
     setBulkProgress(null);
   }
@@ -92,26 +91,30 @@ export function ParamPage() {
       {/* 工具栏 */}
       <div className="flex items-center gap-3 px-4 py-2 bg-slate-800 border-b border-slate-700 flex-wrap">
         {/* 加载 Excel */}
-        <button
-          onClick={() => fileRef.current?.click()}
-          className="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white rounded text-sm transition-colors"
-        >
-          📂 加载参数表
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".xlsx"
-          onChange={handleFileChange}
-          className="hidden"
-        />
+        {sourcePolicy.showLocalFilePicker && (
+          <>
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white rounded text-sm transition-colors"
+            >
+              📂 本地参数表
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".xlsx"
+              onChange={handleFileChange}
+              className="hidden"
+            />
+          </>
+        )}
 
         {/* 从 ESP32 加载 */}
         <button
           onClick={() => setShowEspPicker(true)}
           className="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white rounded text-sm transition-colors"
         >
-          📡 远程加载
+          📡 {sourcePolicy.remoteButtonLabel}
         </button>
 
         {loading && <span className="text-sm text-yellow-400">解析中…</span>}
@@ -221,6 +224,7 @@ export function ParamPage() {
         <EspFilePicker
           onFileReady={(file) => loadFile(file)}
           onClose={() => setShowEspPicker(false)}
+          policy={sourcePolicy}
         />
       )}
 

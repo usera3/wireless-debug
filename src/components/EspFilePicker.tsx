@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
+import { apiFetch, apiUrl } from '../lib/apiClient';
+import type { ParameterSourcePolicy } from '../lib/parameterSourcePolicy';
 
 interface Props {
   /** 选中并成功下载文件后的回调，传入 File 对象供 parseParameterTable 使用 */
   onFileReady: (file: File) => void;
   onClose: () => void;
+  policy: ParameterSourcePolicy;
 }
 
 type StatusCls = '' | 'ok' | 'err' | 'ing';
 
-export function EspFilePicker({ onFileReady, onClose }: Props) {
+export function EspFilePicker({ onFileReady, onClose, policy }: Props) {
   const [files, setFiles] = useState<string[]>([]);
   const [status, setStatus] = useState<{ msg: string; cls: StatusCls }>({ msg: '', cls: '' });
   const [progress, setProgress] = useState(0);
@@ -26,9 +29,12 @@ export function EspFilePicker({ onFileReady, onClose }: Props) {
   async function refreshList() {
     st('正在获取文件列表...', 'ing');
     try {
-      const list: string[] = await fetch('/api/excel/list').then((r) => r.json());
+      const list: string[] = await apiFetch('/api/excel/list').then((r) => r.json());
       setFiles(list);
       st(list.length ? `共 ${list.length} 个文件` : '', list.length ? 'ok' : '');
+      if (policy.autoLoadSingleRemoteFile && list.length === 1) {
+        await selectFile(list[0]);
+      }
     } catch (e) {
       st(`❌ 获取列表失败：${(e as Error).message}`, 'err');
     }
@@ -44,7 +50,7 @@ export function EspFilePicker({ onFileReady, onClose }: Props) {
     try {
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/api/excel/upload');
+        xhr.open('POST', apiUrl('/api/excel/upload'));
         xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 95));
@@ -67,7 +73,7 @@ export function EspFilePicker({ onFileReady, onClose }: Props) {
     if (!confirm(`确认删除「${filename}」？此操作不可恢复。`)) return;
     st(`正在删除 ${filename}...`, 'ing');
     try {
-      const res = await fetch(`/api/excel/delete?name=${encodeURIComponent(filename)}`, {
+      const res = await apiFetch(`/api/excel/delete?name=${encodeURIComponent(filename)}`, {
         method: 'DELETE',
       });
       if (!res.ok) throw new Error(await res.text());
@@ -79,9 +85,9 @@ export function EspFilePicker({ onFileReady, onClose }: Props) {
   }
 
   async function selectFile(filename: string) {
-    st(`正在从 ESP32 下载 ${filename}...`, 'ing');
+    st(`正在加载 ${filename}...`, 'ing');
     try {
-      const res = await fetch(`/excel/${encodeURIComponent(filename)}`);
+      const res = await apiFetch(`/excel/${encodeURIComponent(filename)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const buf = await res.arrayBuffer();
       const file = new File([buf], filename, {
@@ -109,13 +115,13 @@ export function EspFilePicker({ onFileReady, onClose }: Props) {
     >
       <div className="bg-slate-800 border border-slate-600 rounded-2xl p-6 min-w-[380px] max-w-[92vw] shadow-2xl">
         <h3 className="text-base font-semibold text-slate-100 mb-4 pb-2.5 border-b border-slate-700">
-          📡 从 ESP32 加载 Excel 文件
+          📡 {policy.remoteDialogTitle}
         </h3>
 
         {/* 文件列表 */}
         <ul className="max-h-[280px] overflow-y-auto mb-4 space-y-0">
           {files.length === 0 && status.cls !== 'ing' ? (
-            <li className="py-2 text-sm text-slate-500">暂无文件，请先上传</li>
+            <li className="py-2 text-sm text-slate-500">{policy.emptyMessage}</li>
           ) : (
             files.map((name) => (
               <li
@@ -129,12 +135,14 @@ export function EspFilePicker({ onFileReady, onClose }: Props) {
                 >
                   选择加载
                 </button>
-                <button
-                  onClick={() => deleteFile(name)}
-                  className="shrink-0 border border-red-400 text-red-400 hover:bg-red-400 hover:text-white rounded-md px-2.5 py-1 text-xs transition-all"
-                >
-                  🗑 删除
-                </button>
+                {policy.allowRemoteDelete && (
+                  <button
+                    onClick={() => deleteFile(name)}
+                    className="shrink-0 border border-red-400 text-red-400 hover:bg-red-400 hover:text-white rounded-md px-2.5 py-1 text-xs transition-all"
+                  >
+                    🗑 删除
+                  </button>
+                )}
               </li>
             ))
           )}
@@ -142,22 +150,26 @@ export function EspFilePicker({ onFileReady, onClose }: Props) {
 
         {/* 底部操作行 */}
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => uploadRef.current?.click()}
-            className="bg-slate-700 hover:opacity-80 border border-slate-500 text-slate-200 rounded-md px-3.5 py-1.5 text-xs transition-opacity"
-          >
-            ⬆️ 上传新文件
-          </button>
-          <input
-            ref={uploadRef}
-            type="file"
-            accept=".xlsx,.xls,.csv"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) { handleUpload(f); e.target.value = ''; }
-            }}
-          />
+          {policy.allowRemoteUpload && (
+            <>
+              <button
+                onClick={() => uploadRef.current?.click()}
+                className="bg-slate-700 hover:opacity-80 border border-slate-500 text-slate-200 rounded-md px-3.5 py-1.5 text-xs transition-opacity"
+              >
+                ⬆️ 上传新文件
+              </button>
+              <input
+                ref={uploadRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) { handleUpload(f); e.target.value = ''; }
+                }}
+              />
+            </>
+          )}
           <button
             onClick={refreshList}
             className="bg-slate-700 hover:opacity-80 border border-slate-500 text-slate-200 rounded-md px-3.5 py-1.5 text-xs transition-opacity"

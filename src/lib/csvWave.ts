@@ -11,7 +11,7 @@
 
 export function exportCsv(
   labels: string[],
-  columns: number[][],
+  columns: (number | null)[][],
   sampleIntervalSec: number,
   filename: string,
   startTimeSec = 0,
@@ -26,7 +26,8 @@ export function exportCsv(
     const timeSec = (startTimeSec + i * sampleIntervalSec).toFixed(6);
     const row = [timeSec];
     for (const col of columns) {
-      row.push(i < col.length ? String(col[i]) : '');
+      const value = i < col.length ? col[i] : null;
+      row.push(value != null && Number.isFinite(value) ? String(value) : '');
     }
     lines.push(row.join(','));
   }

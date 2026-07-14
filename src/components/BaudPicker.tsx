@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { apiJson, apiPostJson } from '../lib/apiClient';
 
 interface Props {
   onClose: () => void;
@@ -25,8 +26,7 @@ export function BaudPicker({ onClose }: Props) {
 
   /* 弹窗打开时向 ESP32 查询实时波特率 */
   useEffect(() => {
-    fetch('/api/uart/baud')
-      .then((r) => r.json())
+    apiJson<{ baud?: number }>('/api/uart/baud')
       .then((json: { baud?: number }) => {
         if (!json.baud) return;
         setCurrentBaud(json.baud);
@@ -48,12 +48,7 @@ export function BaudPicker({ onClose }: Props) {
     setApplying(true);
     st(`正在设置 ${baud} bps...`, 'ing');
     try {
-      const res = await fetch('/api/uart/baud', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ baud }),
-      });
-      const json: { ok: boolean; baud?: number; msg?: string } = await res.json();
+      const json = await apiPostJson<{ ok: boolean; baud?: number; msg?: string }>('/api/uart/baud', { baud });
       if (!json.ok) throw new Error(json.msg || '设置失败');
 
       const newBaud = json.baud ?? baud;

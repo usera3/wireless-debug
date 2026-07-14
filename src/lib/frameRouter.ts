@@ -19,6 +19,22 @@ type RxLogHook = (frame: Uint8Array, type: 'osc' | 'modbus') => void;
 
 const OSC_MAGIC = new Uint8Array([0xff, 0x77, 0xaa, 0x55]);
 const MAGIC_LEN = 4;
+const FIXED_MODBUS_RESPONSE_LEN: Record<number, number> = {
+  0x06: 8,
+  0x10: 8,
+  0x65: 5,
+  0x66: 13,
+  0x67: 7,
+  0x68: 5,
+  0x69: 5,
+  0x6a: 5,
+  0x70: 5,
+  0x71: 8,
+  0x72: 8,
+  0x73: 8,
+  0x75: 8,
+  0x08: 8,
+};
 
 function matchMagic(buf: Uint8Array, offset: number): boolean {
   if (offset + MAGIC_LEN > buf.length) return false;
@@ -28,6 +44,28 @@ function matchMagic(buf: Uint8Array, offset: number): boolean {
   return true;
 }
 
+function expectedModbusFrameLength(buf: Uint8Array, offset: number): number | null {
+  const remaining = buf.length - offset;
+  if (remaining < 2) return null;
+
+  const fc = buf[offset + 1];
+  if ((fc & 0x80) !== 0) return 5;
+
+  if (fc === 0x03 || fc === 0x04) {
+    if (remaining < 3) return null;
+    return 3 + buf[offset + 2] + 2;
+  }
+
+  return FIXED_MODBUS_RESPONSE_LEN[fc] ?? null;
+}
+
+function isLengthFramedReadResponse(buf: Uint8Array, offset: number, expectedLength: number): boolean {
+  const fc = buf[offset + 1];
+  if (fc !== 0x03 && fc !== 0x04) return false;
+  if (buf.length - offset < expectedLength || expectedLength < 5) return false;
+  return 3 + buf[offset + 2] + 2 === expectedLength;
+}
+
 export class FrameRouter {
   private buf = new Uint8Array(0);
   /** 设备上报的帧长（含头4+payload+CRC2+尾4，不含附加 Modbus） */
@@ -35,6 +73,7 @@ export class FrameRouter {
 
   private oscHandler: OscFrameHandler = () => {};
   private modbusHandler: ModbusFrameHandler = () => {};
+  private modbusSubscribers = new Set<ModbusFrameHandler>();
   private rxLogHooks: RxLogHook[] = [];
 
   setFrameLen(n: number) {
@@ -47,6 +86,11 @@ export class FrameRouter {
 
   onModbusFrame(h: ModbusFrameHandler) {
     this.modbusHandler = h;
+  }
+
+  subscribeModbusFrame(h: ModbusFrameHandler) {
+    this.modbusSubscribers.add(h);
+    return () => this.modbusSubscribers.delete(h);
   }
 
   /** 注册 RX 解析后日志钩子（调试用），每个完整识别帧触发一次 */
@@ -70,18 +114,29 @@ export class FrameRouter {
 
   private tryConsume() {
     while (this.buf.length > 0) {
+      const modbusAtStart = this.consumeModbusAtStart();
+      if (modbusAtStart === 'consumed') {
+        continue;
+      }
+      if (modbusAtStart === 'wait') {
+        break;
+      }
+
       // ── 寻找 osc 帧头 ─────────────────────────────────────────────────────
       const headerPos = this.findMagic(0);
 
       if (headerPos < 0) {
-        // buffer 中无任何 osc 帧头，全部作为 Modbus 数据分发
-        this.dispatchModbus(this.buf);
-        this.buf = new Uint8Array(0);
+        // buffer 中无任何 osc 帧头，按 Modbus 帧长消费完整帧；不完整尾包继续等待。
+        const consumed = this.dispatchModbus(this.buf);
+        this.buf = this.buf.slice(consumed);
+        if (this.buf.length > 512) {
+          this.buf = this.buf.slice(-3);
+        }
         return;
       }
 
       if (headerPos > 0) {
-        // 帧头前有垃圾字节，先作为 Modbus 数据分发（可能是上一轮的 Modbus 响应）
+        // 帧头前有 Modbus 数据或垃圾字节，先尽量分发完整 Modbus 帧。
         this.dispatchModbus(this.buf.slice(0, headerPos));
         this.buf = this.buf.slice(headerPos);
         continue;
@@ -90,7 +145,14 @@ export class FrameRouter {
       // ── buf 开头即为 osc 帧头 ─────────────────────────────────────────────
       // 最少需要 frameLen 字节才能读到完整的 osc 帧（含尾部 magic）
       if (this.buf.length < this.frameLen) {
-        // 数据不够，等待更多数据
+        // 云端停止采样时，上一轮示波尾包可能只留下 footer magic，随后紧跟
+        // 下一轮 Modbus 响应。若后方已有 CRC 完整的 Modbus 帧，丢弃残留尾包恢复同步。
+        const recoveryOffset = this.findCompleteModbusOffset(MAGIC_LEN);
+        if (recoveryOffset >= 0) {
+          this.buf = this.buf.slice(recoveryOffset);
+          continue;
+        }
+        // 数据不够且尚无可恢复的控制响应，等待更多数据。
         break;
       }
 
@@ -145,6 +207,34 @@ export class FrameRouter {
     }
   }
 
+  private consumeModbusAtStart(): 'consumed' | 'wait' | 'none' {
+    if (this.buf.length < 2 || this.buf[0] !== 0xff || matchMagic(this.buf, 0)) {
+      return 'none';
+    }
+
+    const fc = this.buf[1];
+    if ((fc === 0x03 || fc === 0x04) && this.buf.length < 3) {
+      return 'wait';
+    }
+
+    const expectedLength = expectedModbusFrameLength(this.buf, 0);
+    if (expectedLength == null || expectedLength > 260) {
+      return 'none';
+    }
+    if (this.buf.length < expectedLength) {
+      return 'wait';
+    }
+
+    const candidate = this.buf.slice(0, expectedLength);
+    if (!verifyCrc(candidate) && !isLengthFramedReadResponse(this.buf, 0, expectedLength)) {
+      return 'none';
+    }
+
+    this.dispatchModbusFrame(candidate);
+    this.buf = this.buf.slice(expectedLength);
+    return 'consumed';
+  }
+
   /**
    * 在 buf 中从 startPos 开始寻找 OSC_MAGIC，返回偏移量。
    * 找不到返回 -1。
@@ -159,38 +249,80 @@ export class FrameRouter {
   }
 
   /**
-   * 将数据按照标准 Modbus RTU 帧分割后依次分发。
-   * Modbus RTU 帧：[addr 0xff][fc][...][CRC_lo][CRC_hi]，最短 4 字节。
-   * 如果无法确定边界，整块分发（让上层自行处理）。
+   * 将数据按照标准 Modbus RTU 响应帧分割后依次分发。
+   * 返回已消费字节数；尾部不完整帧会保留在主 buffer 中等待后续 WS 分片。
    */
-  private dispatchModbus(data: Uint8Array) {
-    if (data.length === 0) return;
-
-    if (verifyCrc(data)) {
-      this.modbusHandler(data);
-      this.rxLogHooks.forEach((h) => h(data, 'modbus'));
-      return;
-    }
+  private dispatchModbus(data: Uint8Array): number {
+    if (data.length === 0) return 0;
 
     let offset = 0;
     while (offset < data.length) {
-      let found = false;
-      for (let len = 4; len <= Math.min(data.length - offset, 256); len++) {
-        const candidate = data.slice(offset, offset + len);
-        if (verifyCrc(candidate)) {
-          this.modbusHandler(candidate);
-          this.rxLogHooks.forEach((h) => h(candidate, 'modbus'));
-          offset += len;
-          found = true;
-          break;
+      const remaining = data.length - offset;
+
+      if (data[offset] !== 0xff) {
+        offset += 1;
+        continue;
+      }
+
+      if (remaining < 3) break;
+
+      const expectedLength = expectedModbusFrameLength(data, offset);
+
+      if (expectedLength != null) {
+        if (expectedLength > 260) {
+          offset += 1;
+          continue;
         }
+        if (remaining < expectedLength) break;
+
+        const candidate = data.slice(offset, offset + expectedLength);
+        if (verifyCrc(candidate) || isLengthFramedReadResponse(data, offset, expectedLength)) {
+          this.dispatchModbusFrame(candidate);
+          offset += expectedLength;
+          continue;
+        }
+
+        offset += 1;
+        continue;
       }
-      if (!found) {
-        this.modbusHandler(data.slice(offset));
-        this.rxLogHooks.forEach((h) => h(data.slice(offset), 'modbus'));
-        break;
+
+      const fallbackLength = this.findCrcFrameLength(data, offset);
+      if (fallbackLength == null) {
+        offset += 1;
+        continue;
       }
+
+      this.dispatchModbusFrame(data.slice(offset, offset + fallbackLength));
+      offset += fallbackLength;
     }
+
+    return offset;
+  }
+
+  private findCrcFrameLength(data: Uint8Array, offset: number): number | null {
+    const maxLen = Math.min(data.length - offset, 256);
+    for (let len = 4; len <= maxLen; len++) {
+      const candidate = data.slice(offset, offset + len);
+      if (verifyCrc(candidate)) return len;
+    }
+    return null;
+  }
+
+  private findCompleteModbusOffset(startOffset: number): number {
+    for (let offset = startOffset; offset < this.buf.length; offset++) {
+      if (this.buf[offset] !== 0xff) continue;
+      const expectedLength = expectedModbusFrameLength(this.buf, offset);
+      if (expectedLength == null || expectedLength > 260) continue;
+      if (offset + expectedLength > this.buf.length) continue;
+      if (verifyCrc(this.buf.slice(offset, offset + expectedLength))) return offset;
+    }
+    return -1;
+  }
+
+  private dispatchModbusFrame(frame: Uint8Array) {
+    this.modbusHandler(frame);
+    this.modbusSubscribers.forEach((handler) => handler(frame));
+    this.rxLogHooks.forEach((h) => h(frame, 'modbus'));
   }
 }
 

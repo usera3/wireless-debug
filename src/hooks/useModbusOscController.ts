@@ -1,12 +1,13 @@
 import { useCallback } from 'react';
 import { wsClient } from '../lib/wsClient';
 import { buildReadHolding, parseReadResponse } from '../lib/modbus';
-import { useParamStore } from '../store/paramStore';
+import { useParamStore, type ParamDef } from '../store/paramStore';
 import { useModbusOscStore } from '../store/modbusOscStore';
 import { frameRouter } from '../lib/frameRouter';
+import { completeOscSample } from '../lib/modbusOscSample';
 
-/** 等待一个 Modbus 响应帧，超时 reject */
-function waitModbusFrame(timeoutMs: number): Promise<Uint8Array> {
+/** 等待一个匹配当前 FC03 请求的 Modbus 响应帧，超时 reject */
+function waitModbusFrame(timeoutMs: number, expectedRegisterCount: number): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       frameRouter.onModbusFrame(() => {});
@@ -14,6 +15,7 @@ function waitModbusFrame(timeoutMs: number): Promise<Uint8Array> {
     }, timeoutMs);
 
     frameRouter.onModbusFrame((frame) => {
+      if (parseReadResponse(frame, expectedRegisterCount, { allowBadCrc: true }) == null) return;
       clearTimeout(timer);
       frameRouter.onModbusFrame(() => {});
       resolve(frame);
@@ -25,10 +27,41 @@ function waitModbusFrame(timeoutMs: number): Promise<Uint8Array> {
 let modbusOscTimer: ReturnType<typeof setInterval> | null = null;
 let modbusOscBusy = false;
 
-const MODBUS_TIMEOUT_MS = 500; // 单次 Modbus 响应超时，与采样间隔无关
+const MODBUS_TIMEOUT_MS = 1000; // 单次 Modbus 响应超时，与采样间隔无关
+
+function registerWidth(param: ParamDef): number {
+  return param.isFloat ? 2 : 1;
+}
+
+function decodeParamValue(param: ParamDef, regs: number[], minAddr: number): number | null {
+  const offset = param.regAddr - minAddr;
+  if (offset < 0 || offset + registerWidth(param) > regs.length) return null;
+
+  if (param.isFloat) {
+    const buf = new ArrayBuffer(4);
+    const view = new DataView(buf);
+    view.setUint16(0, regs[offset], false);
+    view.setUint16(2, regs[offset + 1], false);
+    return view.getFloat32(0, false);
+  }
+
+  const raw = regs[offset];
+  const signed = param.signed ? (raw >= 0x8000 ? raw - 0x10000 : raw) : raw;
+  return signed / Math.pow(10, param.decimals);
+}
 
 export function useModbusOscController() {
-  const { running, selectedPage, setRunning, pushSamples, clearWaveData } =
+  const {
+    selectedPage,
+    setRunning,
+    pushSamples,
+    resetHistory,
+    resetIoStats,
+    recordIoRequest,
+    recordIoResponse,
+    recordIoSamples,
+    recordIoError,
+  } =
     useModbusOscStore();
   const params = useParamStore((s) => s.params);
 
@@ -40,11 +73,14 @@ export function useModbusOscController() {
     if (overridePage && overridePage !== selectedPage) {
       useModbusOscStore.getState().setSelectedPage(overridePage);
     }
-    clearWaveData();
+
+    const { interval: currentInterval, readChunkSize: currentChunkSize } = useModbusOscStore.getState();
+    resetHistory(pageParams.map((param) => param.alias), 1000 / Math.max(100, currentInterval));
+    resetIoStats();
+    frameRouter.reset();
     setRunning(true);
 
     // 从 store 直接读最新值，避免闭包拿到旧值
-    const { interval: currentInterval, readChunkSize: currentChunkSize } = useModbusOscStore.getState();
 
     // 将参数按地址排序后分组；readChunkSize=0 表示不分组（整页一次读）
     const sorted = [...pageParams].sort((a, b) => a.regAddr - b.regAddr);
@@ -55,42 +91,69 @@ export function useModbusOscController() {
     }
 
     if (modbusOscTimer) clearInterval(modbusOscTimer);
-    modbusOscTimer = setInterval(async () => {
+
+    const pollOnce = async () => {
       if (modbusOscBusy) return;
       modbusOscBusy = true;
+      const samples: Record<string, number> = {};
       try {
-        const samples: Record<string, number> = {};
-
         for (const chunk of chunks) {
           const addrs = chunk.map((p) => p.regAddr);
           const minAddr = Math.min(...addrs);
-          const maxAddr = Math.max(...addrs);
+          const maxAddr = Math.max(...chunk.map((p) => p.regAddr + registerWidth(p) - 1));
           const count = maxAddr - minAddr + 1;
 
           const frame = buildReadHolding(minAddr, count);
-          const waitP = waitModbusFrame(MODBUS_TIMEOUT_MS);
+          const waitP = waitModbusFrame(MODBUS_TIMEOUT_MS, count);
+          recordIoRequest();
           wsClient.send(frame);
           const resp = await waitP;
-          const regs = parseReadResponse(resp);
-          if (!regs) continue;
+          recordIoResponse(resp.length);
+          const regs = parseReadResponse(resp, count, { allowBadCrc: true });
+          if (!regs) {
+            recordIoError('响应格式错误');
+            continue;
+          }
 
           for (const p of chunk) {
-            const offset = p.regAddr - minAddr;
-            if (offset < 0 || offset >= regs.length) continue;
-            const raw = regs[offset];
-            const signed = p.signed ? (raw >= 0x8000 ? raw - 0x10000 : raw) : raw;
-            samples[p.alias] = signed / Math.pow(10, p.decimals);
+            const value = decodeParamValue(p, regs, minAddr);
+            if (value == null) continue;
+            samples[p.alias] = value;
           }
         }
 
-        if (Object.keys(samples).length > 0) pushSamples(samples);
-      } catch {
-        // 超时或通信错误，本次跳过
+        if (Object.keys(samples).length === 0) {
+          recordIoError('未解析到有效参数');
+        }
+      } catch (err) {
+        recordIoError((err as Error).message || '通信错误');
       } finally {
+        const completedSamples = completeOscSample(
+          pageParams.map((param) => param.alias),
+          samples,
+        );
+        pushSamples(completedSamples);
+        recordIoSamples(pageParams.length);
         modbusOscBusy = false;
       }
+    };
+
+    void pollOnce();
+    modbusOscTimer = setInterval(() => {
+      void pollOnce();
     }, currentInterval);
-  }, [params, selectedPage, clearWaveData, setRunning, pushSamples]);
+  }, [
+    params,
+    selectedPage,
+    resetHistory,
+    resetIoStats,
+    setRunning,
+    pushSamples,
+    recordIoRequest,
+    recordIoResponse,
+    recordIoSamples,
+    recordIoError,
+  ]);
 
   const stop = useCallback(() => {
     if (modbusOscTimer) {
@@ -102,5 +165,5 @@ export function useModbusOscController() {
     setRunning(false);
   }, [setRunning]);
 
-  return { start, stop, running };
+  return { start, stop };
 }

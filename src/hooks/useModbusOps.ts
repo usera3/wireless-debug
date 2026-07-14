@@ -3,6 +3,7 @@ import { wsClient } from '../lib/wsClient';
 import { buildReadHolding, buildWriteSingle, buildWriteMultiple, parseReadResponse } from '../lib/modbus';
 import { useParamStore, type ParamDef } from '../store/paramStore';
 import { frameRouter } from '../lib/frameRouter';
+import { buildParamReadBatches, decodeParamBatchValues } from '../lib/paramBatchRead';
 
 const TIMEOUT_MS = 1000;
 
@@ -62,6 +63,34 @@ export function useModbusOps() {
     [setValue],
   );
 
+  /** 批量读寄存器，连续地址会合并成一次 Modbus 读取 */
+  const readRegisters = useCallback(
+    async (params: ParamDef[]): Promise<number> => {
+      if (pendingRef.current) throw new Error('busy');
+      pendingRef.current = true;
+      try {
+        let updated = 0;
+        for (const batch of buildParamReadBatches(params)) {
+          const frame = buildReadHolding(batch.startAddr, batch.count);
+          const waitP = waitModbus();
+          wsClient.send(frame);
+          const resp = await waitP;
+          const regs = parseReadResponse(resp, batch.count, { allowBadCrc: true });
+          if (!regs) throw new Error('bad response');
+
+          for (const [alias, actual] of decodeParamBatchValues(batch, regs)) {
+            setValue(alias, actual);
+            updated += 1;
+          }
+        }
+        return updated;
+      } finally {
+        pendingRef.current = false;
+      }
+    },
+    [setValue],
+  );
+
   /** 写寄存器，输入为已换算的实际值 */
   const writeRegister = useCallback(
     async (param: ParamDef, actual: number): Promise<void> => {
@@ -89,5 +118,5 @@ export function useModbusOps() {
     [],
   );
 
-  return { readRegister, writeRegister };
+  return { readRegister, readRegisters, writeRegister };
 }

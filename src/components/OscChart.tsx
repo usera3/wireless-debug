@@ -15,6 +15,42 @@ type ChartSeriesDef = { key: string | number; label: string };
 const MAX_PLOT_POINTS = 2400;
 const EMPTY_CHANNELS = new Map<number, number[]>();
 
+function emptyAlignedData(seriesCount: number, xData: number[] = []): AlignedData {
+  const data: AlignedData = [xData];
+  for (let i = 0; i < seriesCount; i++) {
+    data.push(xData.length > 0 ? new Array<number | null>(xData.length).fill(null) : []);
+  }
+  return data;
+}
+
+function normalizeAlignedDataForSeries(data: AlignedData, seriesCount: number): AlignedData {
+  const xData = data[0] ?? [];
+  const normalized: AlignedData = [xData];
+
+  for (let i = 0; i < seriesCount; i++) {
+    const source = data[i + 1];
+    if (!source) {
+      normalized.push(xData.length > 0 ? new Array<number | null>(xData.length).fill(null) : []);
+      continue;
+    }
+
+    if (source.length === xData.length) {
+      normalized.push(source);
+      continue;
+    }
+
+    const aligned = new Array<number | null>(xData.length).fill(null);
+    const copyLength = Math.min(source.length, xData.length);
+    for (let j = 0; j < copyLength; j++) {
+      const value = source[j];
+      aligned[j] = value == null || !Number.isFinite(value) ? null : value;
+    }
+    normalized.push(aligned);
+  }
+
+  return normalized;
+}
+
 function getDataSpan(
   channelNos: number[],
   channels: Map<number, number[]>,
@@ -42,7 +78,7 @@ function buildFullAlignedData(
   sampleOffsets?: Map<number, number>,
 ): AlignedData {
   const span = getDataSpan(channelNos, channels, sampleOffsets);
-  if (!span) return [[]];
+  if (!span) return emptyAlignedData(channelNos.length);
 
   const xData = Array.from({ length: span.length }, (_, i) => (span.start + i) * sampleInterval);
   const seriesData = channelNos.map((chNo) => {
@@ -68,7 +104,7 @@ function buildAlignedData(
   sampleOffsets?: Map<number, number>,
 ): AlignedData {
   const span = getDataSpan(channelNos, channels, sampleOffsets);
-  if (!span) return [[]];
+  if (!span) return emptyAlignedData(channelNos.length);
 
   if (span.length <= MAX_PLOT_POINTS) {
     return buildFullAlignedData(channelNos, channels, sampleInterval, sampleOffsets);
@@ -93,7 +129,7 @@ function buildAlignedData(
       let max = Number.NEGATIVE_INFINITY;
       for (let i = valueStart; i <= valueEnd; i++) {
         const value = values[i - channelStart];
-        if (value == null || Number.isNaN(value)) continue;
+        if (value == null || !Number.isFinite(value)) continue;
         if (value < min) min = value;
         if (value > max) max = value;
       }
@@ -147,7 +183,7 @@ function getVisibleYRange(
     const series = data[seriesIdx];
     for (let i = startIdx; i <= inclusiveEnd; i++) {
       const value = series[i];
-      if (value == null || Number.isNaN(value)) continue;
+      if (value == null || !Number.isFinite(value)) continue;
       if (value < min) min = value;
       if (value > max) max = value;
     }
@@ -755,7 +791,7 @@ export function OscChart({
       xSpanRef.current = Math.max(initialWindowSeconds, sampleInterval);
     }
     alignedDataRef.current = usingExternalData
-      ? externalData
+      ? normalizeAlignedDataForSeries(externalData, externalSeries.length)
       : buildAlignedData(channelNos, effectiveChannels, sampleInterval, sampleOffsetsRef.current);
     xModeRef.current = 'following';
     yModeRef.current = 'auto';
@@ -780,23 +816,26 @@ export function OscChart({
             y: true,
           },
           bind: {
-            dblclick: (self, _target) => (event) => {
-              void event;
+            dblclick: (self, target) => {
+              void target;
+              return (event) => {
+                void event;
 
-              syncingScalesRef.current = true;
-              self.batch(() => {
-                if (xModeRef.current === 'manual') {
-                  if (runningRef.current) xModeRef.current = 'following';
-                  yModeRef.current = 'auto';
-                  autoYRangeRef.current = null; // 清除历史，双击后纯数据范围，无 ±5000 兜底
-                  moveToLatestView(self);
-                  applyAutoY(self);
-                } else {
-                  xModeRef.current = 'manual';
-                }
-              });
-              syncingScalesRef.current = false;
-              return null;
+                syncingScalesRef.current = true;
+                self.batch(() => {
+                  if (xModeRef.current === 'manual') {
+                    if (runningRef.current) xModeRef.current = 'following';
+                    yModeRef.current = 'auto';
+                    autoYRangeRef.current = null; // 清除历史，双击后纯数据范围，无 ±5000 兜底
+                    moveToLatestView(self);
+                    applyAutoY(self);
+                  } else {
+                    xModeRef.current = 'manual';
+                  }
+                });
+                syncingScalesRef.current = false;
+                return null;
+              };
             },
             mousedown: (_self, _target, handler) => (event) => {
               if (xModeRef.current !== 'manual') {
@@ -843,7 +882,7 @@ export function OscChart({
             show: seriesVisibilityRef.current.get(String(usingExternalData ? externalSeries[i]?.key ?? chNo : chNo)) ?? true,
             stroke: CHANNEL_COLORS[i % CHANNEL_COLORS.length],
             width: 2,
-            spanGaps: false,
+            spanGaps: true,
             points: { show: false },
           })),
         ],
@@ -971,11 +1010,12 @@ export function OscChart({
     const effectiveChannels = effectiveChannelsRef.current;
     const channelNos = channelOrderRef.current;
     const externalData = alignedInputRef.current;
+    const externalSeries = seriesInputRef.current;
     if (windowSeconds != null) {
       xSpanRef.current = Math.max(windowSeconds, sampleInterval);
     }
-    if (externalData != null) {
-      alignedDataRef.current = externalData;
+    if (externalData != null && externalSeries != null) {
+      alignedDataRef.current = normalizeAlignedDataForSeries(externalData, externalSeries.length);
     } else {
       alignedDataRef.current = buildAlignedData(channelNos, effectiveChannels, sampleInterval, sampleOffsetsRef.current);
       renderedCountsRef.current = new Map(channelNos.map((chNo) => [chNo, effectiveChannels.get(chNo)?.length ?? 0]));

@@ -15,7 +15,7 @@ export interface OscHistoryStats {
 }
 
 export interface OscHistoryExport {
-  columns: number[][];
+  columns: (number | null)[][];
   startSampleIndex: number;
 }
 
@@ -29,6 +29,12 @@ interface Chunk {
 const CHUNK_SIZE = 8192;
 const DEFAULT_SAMPLE_RATE = 1000;
 
+function emptyAlignedData(seriesCount: number): AlignedData {
+  const data: AlignedData = [[]];
+  for (let i = 0; i < seriesCount; i++) data.push([]);
+  return data;
+}
+
 class ChannelHistory {
   private chunks: Chunk[] = [];
   private nextSampleIndex = 0;
@@ -40,13 +46,18 @@ class ChannelHistory {
     this.dropped = 0;
   }
 
-  append(samples: number[], maxSamples: number) {
+  append(samples: number[], maxSamples: number, targetEndSample?: number) {
+    const requestedEnd = Number.isFinite(targetEndSample)
+      ? Math.max(this.nextSampleIndex + samples.length, Math.floor(targetEndSample as number))
+      : this.nextSampleIndex + samples.length;
+    let writeIndex = requestedEnd - samples.length;
     let src = 0;
     while (src < samples.length) {
       let chunk = this.chunks[this.chunks.length - 1];
-      if (!chunk || chunk.offset + chunk.length >= chunk.data.length) {
+      const chunkEnd = chunk ? chunk.start + chunk.length : -1;
+      if (!chunk || chunk.offset + chunk.length >= chunk.data.length || chunkEnd !== writeIndex) {
         chunk = {
-          start: this.nextSampleIndex,
+          start: writeIndex,
           offset: 0,
           length: 0,
           data: new Float64Array(CHUNK_SIZE),
@@ -61,8 +72,10 @@ class ChannelHistory {
       }
       chunk.length += count;
       src += count;
-      this.nextSampleIndex += count;
+      writeIndex += count;
     }
+
+    this.nextSampleIndex = requestedEnd;
 
     this.trim(maxSamples);
   }
@@ -114,12 +127,20 @@ class ChannelHistory {
     return out;
   }
 
+  rangeToAlignedArray(startInclusive: number, endExclusive: number): (number | null)[] {
+    const out = Array<number | null>(Math.max(0, endExclusive - startInclusive)).fill(null);
+    this.forEachRange(startInclusive, endExclusive, (value, sampleIndex) => {
+      out[sampleIndex - startInclusive] = value;
+    });
+    return out;
+  }
+
   minMaxRange(startInclusive: number, endExclusive: number): { min: number; max: number } | null {
     let min = Number.POSITIVE_INFINITY;
     let max = Number.NEGATIVE_INFINITY;
 
     this.forEachRange(startInclusive, endExclusive, (value) => {
-      if (Number.isNaN(value)) return;
+      if (!Number.isFinite(value)) return;
       if (value < min) min = value;
       if (value > max) max = value;
     });
@@ -191,7 +212,14 @@ export class OscHistory {
   }
 
   appendBatch(batch: Map<number, number[]>) {
+    this.appendBatchAt(batch);
+  }
+
+  appendBatchAt(batch: Map<number, number[]>, elapsedMs?: number) {
     const maxSamples = this.maxRetainedSamples();
+    const targetEndSample = Number.isFinite(elapsedMs)
+      ? Math.max(0, Math.round((elapsedMs as number) * this.sampleRate / 1000))
+      : undefined;
     batch.forEach((samples, chNo) => {
       let channel = this.channels.get(chNo);
       if (!channel) {
@@ -199,7 +227,7 @@ export class OscHistory {
         this.channels.set(chNo, channel);
         this.channelOrder = Array.from(this.channels.keys()).sort((a, b) => a - b);
       }
-      channel.append(samples, maxSamples);
+      channel.append(samples, maxSamples, targetEndSample);
     });
     this.version++;
   }
@@ -248,12 +276,12 @@ export class OscHistory {
   ): AlignedData {
     const rate = this.sampleRate;
     const stats = this.getStats();
-    if (stats.retainedSamples <= 0 || endSec <= startSec) return [[]];
+    if (stats.retainedSamples <= 0 || endSec <= startSec) return emptyAlignedData(channelNos.length);
 
     const startSample = clampSample(Math.floor(startSec * rate), stats.firstSampleIndex, stats.latestSampleIndex);
     const endSample = clampSample(Math.ceil(endSec * rate), startSample + 1, stats.latestSampleIndex);
     const sampleCount = endSample - startSample;
-    if (sampleCount <= 0) return [[]];
+    if (sampleCount <= 0) return emptyAlignedData(channelNos.length);
 
     const maxPoints = Math.max(64, Math.floor(maxPlotPoints));
     if (sampleCount <= maxPoints) {
@@ -268,7 +296,7 @@ export class OscHistory {
     const end = stats.latestSampleIndex;
     return {
       startSampleIndex: start,
-      columns: channelNos.map((chNo) => this.channels.get(chNo)?.rangeToArray(start, end) ?? []),
+      columns: channelNos.map((chNo) => this.channels.get(chNo)?.rangeToAlignedArray(start, end) ?? []),
     };
   }
 
@@ -277,7 +305,7 @@ export class OscHistory {
     for (let sample = startSample; sample < endSample; sample++) {
       xData.push(sample / this.sampleRate);
     }
-    const series = channelNos.map((chNo) => this.channels.get(chNo)?.rangeToArray(startSample, endSample) ?? []);
+    const series = channelNos.map((chNo) => this.channels.get(chNo)?.rangeToAlignedArray(startSample, endSample) ?? []);
     return [xData, ...series];
   }
 

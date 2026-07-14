@@ -26,6 +26,7 @@ export function defaultRow(channelNo: number): ChannelRowState {
 
 interface OscState {
   running: boolean;
+  startError: string | null;
   sampleRate: number;
   maxChannels: number;
   frameLen: number;
@@ -42,11 +43,12 @@ interface OscState {
   /** 通讯速率限制（bit/s），0 = 不限制 */
   commRateLimit: number;
   setRunning: (v: boolean) => void;
+  setStartError: (v: string | null) => void;
   setSampleRate: (v: number) => void;
   setMaxChannels: (v: number) => void;
   setFrameLen: (v: number) => void;
   setChannels: (v: ChannelConfig[]) => void;
-  appendSamples: (batch: Map<number, number[]>) => void;
+  appendSamples: (batch: Map<number, number[]>, elapsedMs?: number) => void;
   resetHistory: (channels?: ChannelConfig[], sampleRate?: number) => void;
   refreshHistoryStats: () => void;
   setViewWindowSeconds: (v: number) => void;
@@ -70,6 +72,7 @@ function normalizeRetention(seconds: number): number {
 
 export const useOscStore = create<OscState>((set, get) => ({
   running: false,
+  startError: null,
   sampleRate: 6000,
   maxChannels: 12,
   frameLen: 130,
@@ -84,6 +87,7 @@ export const useOscStore = create<OscState>((set, get) => ({
   numChannels: 4,
   commRateLimit: 0,
   setRunning: (v) => set({ running: v }),
+  setStartError: (v) => set({ startError: v }),
   setSampleRate: (v) => {
     oscHistory.setSampleRate(v);
     const stats = oscHistory.getStats();
@@ -92,9 +96,9 @@ export const useOscStore = create<OscState>((set, get) => ({
   setMaxChannels: (v) => set({ maxChannels: v }),
   setFrameLen: (v) => set({ frameLen: v }),
   setChannels: (v) => set({ channels: v }),
-  appendSamples: (batch) => {
+  appendSamples: (batch, elapsedMs) => {
     if (batch.size === 0) return;
-    oscHistory.appendBatch(batch);
+    oscHistory.appendBatchAt(batch, elapsedMs);
     const stats = oscHistory.getStats();
     set({ historyStats: stats, historyVersion: stats.version });
   },

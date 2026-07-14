@@ -35,10 +35,22 @@ export function buildWriteMultiple(startAddr: number, values: number[]): Uint8Ar
   return appendCrc(buf);
 }
 
+interface ParseReadResponseOptions {
+  allowBadCrc?: boolean;
+}
+
 /** 解析 0x03 响应，返回寄存器值数组 */
-export function parseReadResponse(frame: Uint8Array): number[] | null {
-  if (!verifyCrc(frame) || frame[1] !== 0x03) return null;
+export function parseReadResponse(
+  frame: Uint8Array,
+  expectedRegisterCount?: number,
+  options: ParseReadResponseOptions = {},
+): number[] | null {
+  if ((!options.allowBadCrc && !verifyCrc(frame)) || frame[1] !== 0x03 || frame.length < 5) return null;
   const byteCount = frame[2];
+  if (byteCount % 2 !== 0) return null;
+  if (expectedRegisterCount != null && byteCount !== expectedRegisterCount * 2) return null;
+  if (frame.length !== 3 + byteCount + 2) return null;
+
   const regs: number[] = [];
   for (let i = 0; i < byteCount; i += 2) {
     regs.push((frame[3 + i] << 8) | frame[4 + i]);
