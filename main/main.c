@@ -92,15 +92,31 @@ static router_mode_t current_router_mode(void)
 static void set_router_mode(router_mode_t mode, void *ctx)
 {
     (void)ctx;
+/*
+ * 条件编译：当同时启用BLE和WiFi功能时执行以下代码
+ * CONFIG_ENABLE_BLE 和 CONFIG_ENABLE_WIFI 是宏定义，用于控制是否编译相关功能
+ */
 #if CONFIG_ENABLE_BLE && CONFIG_ENABLE_WIFI
+    /*
+     * 根据模式参数设置通信模式
+     * mode参数可能是路由器的BLE模式、WiFi模式或其他模式
+     */
     if (mode == ROUTER_MODE_BLE) {
-        app_core_set_comm_mode(APP_COMM_BLE);
+        app_core_set_comm_mode(APP_COMM_BLE);    // 设置通信模式为BLE
     } else if (mode == ROUTER_MODE_WIFI) {
-        app_core_set_comm_mode(APP_COMM_WIFI);
+        app_core_set_comm_mode(APP_COMM_WIFI);    // 设置通信模式为WiFi
     } else {
-        app_core_set_comm_mode(APP_COMM_AUTO);
+        app_core_set_comm_mode(APP_COMM_AUTO);    // 设置通信模式为自动模式
     }
+    /*
+     * 根据当前模式设置显示状态
+     * 如果是WiFi模式则显示"mode_wifi_auto"，否则显示"mode_ble_auto"
+     */
     display_port_set_status(mode == ROUTER_MODE_WIFI ? "mode_wifi_auto" : "mode_ble_auto");
+    /*
+     * 设置LVGL显示界面的模式和状态
+     * 根据模式显示"WIFI"或"BLE"，状态显示为"auto"
+     */
     display_lvgl_set_mode(mode == ROUTER_MODE_WIFI ? "WIFI" : "BLE");
     display_lvgl_set_status("auto");
 #endif
