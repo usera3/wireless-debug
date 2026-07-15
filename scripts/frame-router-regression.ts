@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { appendCrc } from '../src/lib/crc16';
+import { appendCrc, crc16 } from '../src/lib/crc16';
 import { FrameRouter } from '../src/lib/frameRouter';
 import { parseReadResponse } from '../src/lib/modbus';
 
@@ -16,6 +16,35 @@ function makeReadResponseWithOscMagicInPayload(): Uint8Array {
       0x00, 0x01, 0xff, 0x77, 0xaa, 0x55, 0x00, 0x02, 0x00, 0x03,
     ]),
   );
+}
+
+function makeOscFrame(frameLen: number): Uint8Array {
+  const payloadLen = frameLen - 10;
+  const payload = new Uint8Array(payloadLen);
+  for (let i = 0; i < payload.length; i++) payload[i] = (i * 17) & 0xff;
+
+  const crc = crc16(payload);
+  const frame = new Uint8Array(frameLen);
+  frame.set([0xff, 0x77, 0xaa, 0x55], 0);
+  frame.set(payload, 4);
+  frame[frameLen - 6] = crc & 0xff;
+  frame[frameLen - 5] = (crc >> 8) & 0xff;
+  frame.set([0xff, 0x77, 0xaa, 0x55], frameLen - 4);
+  return frame;
+}
+
+function corruptOscCrc(frame: Uint8Array): Uint8Array {
+  const copy = frame.slice();
+  copy[copy.length - 6] ^= 0x5a;
+  copy[copy.length - 5] ^= 0xa5;
+  return copy;
+}
+
+function clearOscCrc(frame: Uint8Array): Uint8Array {
+  const copy = frame.slice();
+  copy[copy.length - 6] = 0x00;
+  copy[copy.length - 5] = 0x00;
+  return copy;
 }
 
 {
@@ -70,5 +99,58 @@ function makeReadResponseWithOscMagicInPayload(): Uint8Array {
     frames.some((frame) => hex(frame) === hex(queryResponse)),
     true,
     '上一轮示波尾帧留下伪 magic 时，后续合法 Modbus 响应仍必须被恢复并分发',
+  );
+}
+
+{
+  const router = new FrameRouter();
+  const frames: Uint8Array[] = [];
+  const oscFrame = makeOscFrame(500);
+
+  router.setFrameLen(250);
+  router.onOscFrame((frame) => frames.push(frame));
+  router.feed(oscFrame.slice(0, 250));
+  assert.equal(frames.length, 0, '半个真实示波帧不能被误解析');
+  router.feed(oscFrame.slice(250));
+
+  assert.equal(
+    frames.length,
+    1,
+    '真实示波帧长度与查询值不一致时，必须用 magic+CRC 自动恢复有效帧',
+  );
+  assert.equal(hex(frames[0]), hex(oscFrame));
+}
+
+{
+  const router = new FrameRouter();
+  const frames: Uint8Array[] = [];
+  const oscFrame = corruptOscCrc(makeOscFrame(500));
+
+  router.setFrameLen(250);
+  router.onOscFrame((frame) => frames.push(frame));
+  router.feed(oscFrame.slice(0, 250));
+  router.feed(oscFrame.slice(250));
+
+  assert.equal(
+    frames.length,
+    0,
+    '非零 CRC 错误的示波帧不能被分发，否则公网丢包/错位会画出假尖峰',
+  );
+}
+
+{
+  const router = new FrameRouter();
+  const frames: Uint8Array[] = [];
+  const oscFrame = clearOscCrc(makeOscFrame(500));
+
+  router.setFrameLen(250);
+  router.onOscFrame((frame) => frames.push(frame));
+  router.feed(oscFrame.slice(0, 250));
+  router.feed(oscFrame.slice(250));
+
+  assert.equal(
+    frames.length,
+    0,
+    'CRC 字节为 00 00 的示波帧也必须拒绝，否则云端断流中的零值会被误判为完整帧',
   );
 }

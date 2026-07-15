@@ -4,6 +4,7 @@ import { verifyCrc } from './crc16';
 type OscFrameHandler = (oscFrame: Uint8Array) => void;
 type ModbusFrameHandler = (frame: Uint8Array) => void;
 type RxLogHook = (frame: Uint8Array, type: 'osc' | 'modbus') => void;
+type OscFrameResolution = { frameLen: number };
 
 /**
  * 示波帧结构（frameLen 由设备配置，不含尾部附加 Modbus）：
@@ -19,6 +20,8 @@ type RxLogHook = (frame: Uint8Array, type: 'osc' | 'modbus') => void;
 
 const OSC_MAGIC = new Uint8Array([0xff, 0x77, 0xaa, 0x55]);
 const MAGIC_LEN = 4;
+const OSC_MIN_FRAME_LEN = MAGIC_LEN + 2 + MAGIC_LEN;
+const OSC_MAX_AUTODETECT_FRAME_LEN = 2048;
 const FIXED_MODBUS_RESPONSE_LEN: Record<number, number> = {
   0x06: 8,
   0x10: 8,
@@ -156,49 +159,52 @@ export class FrameRouter {
         break;
       }
 
-      // 校验尾部 magic（offset = frameLen - 4）
-      const tailOffset = this.frameLen - MAGIC_LEN;
-      if (!matchMagic(this.buf, tailOffset)) {
-        // 尾部 magic 对不上：当前头可能是误码，跳过这1字节重新扫描
+      const oscFrame = this.resolveOscFrame();
+      if (oscFrame == null) {
+        const recoveryOffset = this.findCompleteModbusOffset(MAGIC_LEN);
+        if (recoveryOffset >= 0) {
+          this.buf = this.buf.slice(recoveryOffset);
+          continue;
+        }
+
+        if (this.buf.length < this.maxAutoDetectFrameLen()) {
+          break;
+        }
+
+        // 既不是当前配置长度，也找不到后续 magic 能确认的真实长度：
+        // 当前头可能是误码，跳过1字节重新扫描。
         this.buf = this.buf.slice(1);
         continue;
+      }
+
+      if (oscFrame.frameLen !== this.frameLen) {
+        this.frameLen = oscFrame.frameLen;
       }
 
       // mbLen 可选：紧跟帧尾之后若存在且首字节不是 0xFF（新帧头），则视为 mbLen 字节
       // 若下一字节是 0xFF 或 buffer 已无更多字节，则本帧无附加 Modbus 数据
       const hasMbLen =
-        this.buf.length > this.frameLen &&
-        this.buf[this.frameLen] !== 0xff;
-      const mbLen = hasMbLen ? this.buf[this.frameLen] : 0;
+        this.buf.length > oscFrame.frameLen &&
+        this.buf[oscFrame.frameLen] !== 0xff;
+      const mbLen = hasMbLen ? this.buf[oscFrame.frameLen] : 0;
 
       // 完整帧所需字节 = frameLen + (hasMbLen ? 1 + mbLen : 0)
-      const totalNeeded = this.frameLen + (hasMbLen ? 1 + mbLen : 0);
+      const totalNeeded = oscFrame.frameLen + (hasMbLen ? 1 + mbLen : 0);
       if (this.buf.length < totalNeeded) {
         // 附加 Modbus 数据还没到齐，等待
         break;
       }
 
       // ── 提取各部分 ────────────────────────────────────────────────────────
-      const oscFrame = this.buf.slice(0, this.frameLen);
-
-      // CRC 校验：payload = oscFrame[4 .. frameLen-6)，CRC = oscFrame[frameLen-6 .. frameLen-4)
-      // 帧结构: head(4) + payload(frameLen-10) + CRC(2) + footer(4) = frameLen
-      const crcOffset = this.frameLen - MAGIC_LEN - 2; // frameLen - 6
-      const crcValid = verifyCrc(oscFrame.slice(MAGIC_LEN, crcOffset + 2));
-
-      if (!crcValid) {
-        // CRC 错误：跳过1字节重新寻找帧头，实现误码恢复
-        this.buf = this.buf.slice(1);
-        continue;
-      }
+      const oscPayloadFrame = this.buf.slice(0, oscFrame.frameLen);
 
       // 分发示波帧（含完整头尾 CRC，供 parseOscDataFrame 使用）
-      this.oscHandler(oscFrame);
-      this.rxLogHooks.forEach((h) => h(oscFrame, 'osc'));
+      this.oscHandler(oscPayloadFrame);
+      this.rxLogHooks.forEach((h) => h(oscPayloadFrame, 'osc'));
 
       // 分发附加 Modbus 数据（若有）
       if (hasMbLen && mbLen > 0) {
-        const mbData = this.buf.slice(this.frameLen + 1, this.frameLen + 1 + mbLen);
+        const mbData = this.buf.slice(oscFrame.frameLen + 1, oscFrame.frameLen + 1 + mbLen);
         this.dispatchModbus(mbData);
       }
 
@@ -246,6 +252,37 @@ export class FrameRouter {
     }
     // 检查 buffer 末尾是否有 magic 前缀（不要丢弃）
     return -1;
+  }
+
+  private resolveOscFrame(): OscFrameResolution | null {
+    if (this.isValidOscFrameLen(this.frameLen)) {
+      return { frameLen: this.frameLen };
+    }
+
+    const scanLimit = Math.min(this.buf.length, this.maxAutoDetectFrameLen());
+    const configuredTailOffset = Math.max(OSC_MIN_FRAME_LEN - MAGIC_LEN, this.frameLen - MAGIC_LEN);
+    for (let tailOffset = configuredTailOffset + 1; tailOffset <= scanLimit - MAGIC_LEN; tailOffset += 1) {
+      if (!matchMagic(this.buf, tailOffset)) continue;
+      const candidateLen = tailOffset + MAGIC_LEN;
+      if (this.isValidOscFrameLen(candidateLen)) return { frameLen: candidateLen };
+    }
+
+    return null;
+  }
+
+  private isValidOscFrameLen(frameLen: number): boolean {
+    if (frameLen < OSC_MIN_FRAME_LEN || this.buf.length < frameLen) return false;
+    const tailOffset = frameLen - MAGIC_LEN;
+    if (!matchMagic(this.buf, tailOffset)) return false;
+    const crcOffset = frameLen - MAGIC_LEN - 2;
+    return verifyCrc(this.buf.slice(MAGIC_LEN, crcOffset + 2));
+  }
+
+  private maxAutoDetectFrameLen(): number {
+    return Math.min(
+      OSC_MAX_AUTODETECT_FRAME_LEN,
+      Math.max(this.frameLen * 2, this.frameLen + 512),
+    );
   }
 
   /**
