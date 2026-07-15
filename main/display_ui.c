@@ -12,6 +12,7 @@ static lv_obj_t *s_status_mid;
 static lv_obj_t *s_status_right;
 static lv_obj_t *s_title;
 static lv_obj_t *s_rows[SYSTEM_MENU_ROWS];
+static lv_obj_t *s_home_extra_rows[2];
 static lv_obj_t *s_footer;
 
 #define UI_W            DISPLAY_WIDTH
@@ -23,7 +24,8 @@ static lv_obj_t *s_footer;
 #define UI_FOOTER_Y     56
 #define UI_MARGIN_X     2
 #define HOME_ROW_Y      0
-#define HOME_ROW_STEP   10
+#define HOME_ROW_COUNT  6
+#define HOME_ROW_STEP   9
 #define OVERLAY_CJK_COL_UNITS 20
 #define OVERLAY_CJK_ROW_H 12
 #define OVERLAY_ROW_BYTES 80
@@ -72,6 +74,9 @@ static void set_label_long_mode(lv_obj_t *obj, lv_label_long_mode_t mode)
 
 static void set_standard_layout(void)
 {
+    for (uint8_t i = 0; i < HOME_ROW_COUNT - SYSTEM_MENU_ROWS; i++) {
+        lv_obj_add_flag(s_home_extra_rows[i], LV_OBJ_FLAG_HIDDEN);
+    }
     for (uint8_t i = 0; i < SYSTEM_MENU_ROWS; i++) {
         lv_obj_set_style_text_font(s_rows[i], DISPLAY_LVGL_FONT, 0);
         lv_obj_set_height(s_rows[i], UI_ROW_H);
@@ -83,13 +88,22 @@ static void set_standard_layout(void)
     s_overlay_text_layout = false;
 }
 
+static lv_obj_t *home_row(uint8_t index)
+{
+    return index < SYSTEM_MENU_ROWS
+               ? s_rows[index]
+               : s_home_extra_rows[index - SYSTEM_MENU_ROWS];
+}
+
 static void set_home_layout(void)
 {
-    for (uint8_t i = 0; i < SYSTEM_MENU_ROWS; i++) {
-        lv_obj_set_style_text_font(s_rows[i], DISPLAY_LVGL_FONT, 0);
-        lv_obj_set_height(s_rows[i], UI_ROW_H);
-        lv_obj_set_y(s_rows[i], HOME_ROW_Y + i * HOME_ROW_STEP);
-        set_label_long_mode(s_rows[i], LV_LABEL_LONG_MODE_CLIP);
+    for (uint8_t i = 0; i < HOME_ROW_COUNT; i++) {
+        lv_obj_t *row = home_row(i);
+        lv_obj_remove_flag(row, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_text_font(row, DISPLAY_LVGL_FONT, 0);
+        lv_obj_set_height(row, UI_ROW_H);
+        lv_obj_set_y(row, HOME_ROW_Y + i * HOME_ROW_STEP);
+        set_label_long_mode(row, LV_LABEL_LONG_MODE_CLIP);
     }
     set_label_long_mode(s_title, LV_LABEL_LONG_MODE_CLIP);
     set_label_long_mode(s_footer, LV_LABEL_LONG_MODE_CLIP);
@@ -227,36 +241,43 @@ static void update_closed_view(const display_ui_state_t *state)
     format_baud(baud, sizeof(baud), state->baud);
 
     lv_label_set_text(s_title, " ");
+    for (uint8_t i = 0; i < HOME_ROW_COUNT; i++) {
+        lv_label_set_text(home_row(i), " ");
+    }
     switch (menu->net_mode) {
     case SYSTEM_NET_AP:
-        lv_label_set_text(s_rows[0], "WiFi:AP");
-        lv_label_set_text_fmt(s_rows[1], "IP:%s",
-                              is_ipv4_label(state->wifi_ap_ip) ? state->wifi_ap_ip : "192.168.4.1");
-        lv_label_set_text_fmt(s_rows[2], "UART:%s", baud);
-        lv_label_set_text_fmt(s_rows[3], "BLE:%s",
+        lv_label_set_text(home_row(0), "WiFi:AP");
+        lv_label_set_text(home_row(1), "AP:");
+        lv_label_set_text(home_row(2),
+                          is_ipv4_label(state->wifi_ap_ip) ? state->wifi_ap_ip : "192.168.4.1");
+        lv_label_set_text_fmt(home_row(3), "UART:%s", baud);
+        lv_label_set_text_fmt(home_row(4), "BLE:%s",
                               (menu->ble_ready || state->ble_ready) ? "ON" : "OFF");
         break;
     case SYSTEM_NET_STA:
-        lv_label_set_text_fmt(s_rows[0], "WiFi:STA %s", wifi_sta_status(state));
-        lv_label_set_text(s_rows[1],
+        lv_label_set_text_fmt(home_row(0), "WiFi:STA %s", wifi_sta_status(state));
+        lv_label_set_text(home_row(1), "STA:");
+        lv_label_set_text(home_row(2),
                           is_ipv4_label(state->wifi_sta_ip) ? state->wifi_sta_ip : "-");
-        lv_label_set_text_fmt(s_rows[2], "UART:%s", baud);
-        lv_label_set_text_fmt(s_rows[3], "BLE:%s",
+        lv_label_set_text_fmt(home_row(3), "UART:%s", baud);
+        lv_label_set_text_fmt(home_row(4), "BLE:%s",
                               (menu->ble_ready || state->ble_ready) ? "ON" : "OFF");
         break;
     case SYSTEM_NET_APSTA:
     default:
-        lv_label_set_text_fmt(s_rows[0], "WiFi:APSTA %s", wifi_sta_status(state));
-        lv_label_set_text_fmt(s_rows[1], "AP:%s",
-                              is_ipv4_label(state->wifi_ap_ip) ? state->wifi_ap_ip : "192.168.4.1");
-        lv_label_set_text(s_rows[2],
+        lv_label_set_text_fmt(home_row(0), "WiFi:APSTA %s", wifi_sta_status(state));
+        lv_label_set_text(home_row(1), "AP:");
+        lv_label_set_text(home_row(2),
+                          is_ipv4_label(state->wifi_ap_ip) ? state->wifi_ap_ip : "192.168.4.1");
+        lv_label_set_text(home_row(3), "STA:");
+        lv_label_set_text(home_row(4),
                           is_ipv4_label(state->wifi_sta_ip) ? state->wifi_sta_ip : "-");
-        lv_label_set_text_fmt(s_rows[3], "U:%s BLE:%s", baud,
+        lv_label_set_text_fmt(home_row(5), "U:%s BLE:%s", baud,
                               (menu->ble_ready || state->ble_ready) ? "ON" : "OFF");
         break;
     }
-    for (uint8_t i = 0; i < SYSTEM_MENU_ROWS; i++) {
-        set_row_selected(s_rows[i], false);
+    for (uint8_t i = 0; i < HOME_ROW_COUNT; i++) {
+        set_row_selected(home_row(i), false);
     }
     lv_label_set_text(s_footer, "S5 MENU");
 }
@@ -286,6 +307,10 @@ static void update_overlay_view(const display_ui_state_t *state)
     size_t row_count = 0;
     size_t page_count = 1;
     size_t page = 0;
+
+    for (uint8_t i = 0; i < HOME_ROW_COUNT - SYSTEM_MENU_ROWS; i++) {
+        lv_obj_add_flag(s_home_extra_rows[i], LV_OBJ_FLAG_HIDDEN);
+    }
 
     lv_label_set_text(s_title, state->overlay_title[0] ? state->overlay_title : "TEXT");
 
@@ -448,6 +473,10 @@ void display_ui_build(lv_obj_t *screen)
     for (uint8_t i = 0; i < SYSTEM_MENU_ROWS; i++) {
         s_rows[i] = make_label(s_root, UI_MARGIN_X, UI_ROW_Y + i * UI_ROW_H,
                                124, UI_ROW_H, " ");
+    }
+    for (uint8_t i = 0; i < HOME_ROW_COUNT - SYSTEM_MENU_ROWS; i++) {
+        s_home_extra_rows[i] = make_label(s_root, UI_MARGIN_X, 0, 124, UI_ROW_H, " ");
+        lv_obj_add_flag(s_home_extra_rows[i], LV_OBJ_FLAG_HIDDEN);
     }
 
     s_footer = make_label(s_root, UI_MARGIN_X, UI_FOOTER_Y, 124, 8, "OK E0 U0m");

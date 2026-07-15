@@ -41,26 +41,42 @@ assert.ok(main.includes('display_lvgl_set_wifi_state(status->mode'),
 const closedView = displayUi.match(/static void update_closed_view[\s\S]*?\n}\n\nstatic void update_menu_view/);
 assert.ok(closedView, 'display_ui.c must contain update_closed_view');
 
+assert.ok(displayUi.includes('#define HOME_ROW_COUNT  6'),
+  'OLED home must define six rows');
+assert.ok(displayUi.includes('static lv_obj_t *s_home_extra_rows[2];'),
+  'OLED home must add two labels without changing the four-row menu model');
+assert.ok(
+  /static void set_standard_layout[\s\S]*?lv_obj_add_flag\(s_home_extra_rows\[i\], LV_OBJ_FLAG_HIDDEN\)/.test(displayUi),
+  'standard menu layout must hide home-only rows',
+);
+assert.ok(
+  /static void set_home_layout[\s\S]*?lv_obj_remove_flag\(row, LV_OBJ_FLAG_HIDDEN\)/.test(displayUi),
+  'home layout must show all six home rows',
+);
 assert.ok(closedView[0].includes('wifi_sta_status'),
   'OLED home must show STA connection status');
-assert.ok(/case SYSTEM_NET_AP:[\s\S]*?IP:%s[\s\S]*?state->wifi_ap_ip/.test(closedView[0]),
-  'AP home view must show only the AP IP');
-assert.ok(/case SYSTEM_NET_STA:[\s\S]*?lv_label_set_text\(s_rows\[1\],[\s\S]*?state->wifi_sta_ip/.test(closedView[0]),
-  'STA home view must show only the raw STA IP');
-assert.ok(/case SYSTEM_NET_APSTA:[\s\S]*?AP:%s[\s\S]*?state->wifi_ap_ip[\s\S]*?lv_label_set_text\(s_rows\[2\],[\s\S]*?state->wifi_sta_ip/.test(closedView[0]),
-  'APSTA home view must show AP IP and raw STA IP separately');
+assert.ok(
+  /case SYSTEM_NET_AP:[\s\S]*?home_row\(1\), "AP:"[\s\S]*?home_row\(2\)[\s\S]*?state->wifi_ap_ip[\s\S]*?home_row\(3\), "UART:%s"[\s\S]*?home_row\(4\), "BLE:%s"/.test(closedView[0]),
+  'AP home must render AP label, address, UART, and BLE on separate rows',
+);
+assert.ok(
+  /case SYSTEM_NET_STA:[\s\S]*?home_row\(1\), "STA:"[\s\S]*?home_row\(2\)[\s\S]*?state->wifi_sta_ip[\s\S]*?home_row\(3\), "UART:%s"[\s\S]*?home_row\(4\), "BLE:%s"/.test(closedView[0]),
+  'STA home must render STA label, address, UART, and BLE on separate rows',
+);
+assert.ok(
+  /case SYSTEM_NET_APSTA:[\s\S]*?home_row\(1\), "AP:"[\s\S]*?home_row\(2\)[\s\S]*?state->wifi_ap_ip[\s\S]*?home_row\(3\), "STA:"[\s\S]*?home_row\(4\)[\s\S]*?state->wifi_sta_ip[\s\S]*?home_row\(5\), "U:%s BLE:%s"/.test(closedView[0]),
+  'APSTA home must render both labels and addresses across six rows',
+);
+assert.ok(!closedView[0].includes('"AP:%s"'),
+  'AP label and address must not share one OLED row');
 const staBlock = closedView[0].match(/case SYSTEM_NET_STA:[\s\S]*?break;/);
 assert.ok(staBlock, 'display_ui.c must contain an isolated STA home branch');
 assert.ok(!staBlock[0].includes('192.168.4.1') && !staBlock[0].includes('wifi_ap_ip'),
   'STA home view must not hard-code or fall back to the AP IP');
-assert.ok(!staBlock[0].includes('IP:%s'),
-  'STA home view must not prefix STA IP, because 192.168.137.xxx must fit on 128px OLED');
-assert.ok(/case SYSTEM_NET_STA:[\s\S]*?lv_label_set_text\(s_rows\[1\],[\s\S]*?state->wifi_sta_ip[\s\S]*?\);/.test(closedView[0]),
+assert.ok(/case SYSTEM_NET_STA:[\s\S]*?lv_label_set_text\(home_row\(2\),[\s\S]*?state->wifi_sta_ip[\s\S]*?\);/.test(closedView[0]),
   'STA home view must render the raw STA IPv4 string on its own row');
 
 const apstaBlock = closedView[0].match(/case SYSTEM_NET_APSTA:[\s\S]*?break;/);
 assert.ok(apstaBlock, 'display_ui.c must contain an APSTA home branch');
-assert.ok(!apstaBlock[0].includes('STA:%s'),
-  'APSTA home view must not prefix STA IP, because 192.168.137.xxx must fit on 128px OLED');
-assert.ok(/case SYSTEM_NET_APSTA:[\s\S]*?lv_label_set_text\(s_rows\[2\],[\s\S]*?state->wifi_sta_ip[\s\S]*?\);/.test(closedView[0]),
+assert.ok(/case SYSTEM_NET_APSTA:[\s\S]*?lv_label_set_text\(home_row\(4\),[\s\S]*?state->wifi_sta_ip[\s\S]*?\);/.test(closedView[0]),
   'APSTA home view must render the raw STA IPv4 string on its own row');
