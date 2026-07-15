@@ -2,29 +2,27 @@ import { useCallback, useRef } from 'react';
 import { wsClient } from '../lib/wsClient';
 import { buildReadHolding, buildWriteSingle, buildWriteMultiple, parseReadResponse } from '../lib/modbus';
 import { useParamStore, type ParamDef } from '../store/paramStore';
-import { frameRouter } from '../lib/frameRouter';
 import { buildParamReadBatches, decodeParamBatchValues } from '../lib/paramBatchRead';
+import { waitForMatchingModbusFrame } from '../lib/modbusRequest';
 
-const TIMEOUT_MS = 1000;
+const PARAM_MODBUS_TIMEOUT_MS = 3500;
 
 export function useModbusOps() {
   const setValue = useParamStore((s) => s.setValue);
   // 队列：同一时刻只有一个 pending 请求
   const pendingRef = useRef(false);
 
-  /** 等待 Modbus 响应帧，超时 reject */
-  function waitModbus(): Promise<Uint8Array> {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        frameRouter.onModbusFrame(() => {});
-        reject(new Error('modbus timeout'));
-      }, TIMEOUT_MS);
+  function waitReadResponse(expectedRegisterCount: number): Promise<Uint8Array> {
+    return waitForMatchingModbusFrame({
+      timeoutMs: PARAM_MODBUS_TIMEOUT_MS,
+      matches: (frame) => parseReadResponse(frame, expectedRegisterCount, { allowBadCrc: true }) != null,
+    });
+  }
 
-      frameRouter.onModbusFrame((frame) => {
-        clearTimeout(timer);
-        frameRouter.onModbusFrame(() => {});
-        resolve(frame);
-      });
+  function waitWriteResponse(functionCode: 0x06 | 0x10): Promise<Uint8Array> {
+    return waitForMatchingModbusFrame({
+      timeoutMs: PARAM_MODBUS_TIMEOUT_MS,
+      matches: (frame) => frame.length === 8 && frame[0] === 0xff && frame[1] === functionCode,
     });
   }
 
@@ -36,10 +34,10 @@ export function useModbusOps() {
       try {
         const count = param.isFloat ? 2 : 1;
         const frame = buildReadHolding(param.regAddr, count);
-        const waitP = waitModbus();
+        const waitP = waitReadResponse(count);
         wsClient.send(frame);
         const resp = await waitP;
-        const regs = parseReadResponse(resp);
+        const regs = parseReadResponse(resp, count, { allowBadCrc: true });
         if (!regs) throw new Error('bad response');
 
         let raw: number;
@@ -72,7 +70,7 @@ export function useModbusOps() {
         let updated = 0;
         for (const batch of buildParamReadBatches(params)) {
           const frame = buildReadHolding(batch.startAddr, batch.count);
-          const waitP = waitModbus();
+          const waitP = waitReadResponse(batch.count);
           wsClient.send(frame);
           const resp = await waitP;
           const regs = parseReadResponse(resp, batch.count, { allowBadCrc: true });
@@ -98,17 +96,20 @@ export function useModbusOps() {
       pendingRef.current = true;
       try {
         let frame: Uint8Array;
+        let functionCode: 0x06 | 0x10;
         if (param.isFloat) {
           const buf = new ArrayBuffer(4);
           new DataView(buf).setFloat32(0, actual, false);
           const view = new DataView(buf);
           frame = buildWriteMultiple(param.regAddr, [view.getUint16(0, false), view.getUint16(2, false)]);
+          functionCode = 0x10;
         } else {
           const raw = Math.round(actual * Math.pow(10, param.decimals));
           const unsigned = raw < 0 ? raw + 0x10000 : raw;
           frame = buildWriteSingle(param.regAddr, unsigned & 0xffff);
+          functionCode = 0x06;
         }
-        const waitP = waitModbus();
+        const waitP = waitWriteResponse(functionCode);
         wsClient.send(frame);
         await waitP;
       } finally {

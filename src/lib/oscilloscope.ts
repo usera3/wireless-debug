@@ -44,6 +44,10 @@ export interface OscFrame {
   rawData: Uint8Array;
 }
 
+export interface ParseOscDataFrameOptions {
+  requireCrc?: boolean;
+}
+
 // float32 解析的 paramType 集合：0x03=float32, 0x07=double→float(4B)
 const FLOAT32_TYPES = new Set([0x03, 0x07]);
 
@@ -59,6 +63,7 @@ const FLOAT32_TYPES = new Set([0x03, 0x07]);
 export function parseOscDataFrame(
   data: Uint8Array,
   channels: { byteWidth: number; paramType: number }[],
+  options: ParseOscDataFrameOptions = {},
 ): OscFrame | null {
   const MAGIC = [0xff, 0x77, 0xaa, 0x55];
   const HEADER_LEN = 4;
@@ -87,7 +92,8 @@ export function parseOscDataFrame(
   const crcLo = data[crcOffset];
   const crcHi = data[crcOffset + 1];
   const calcCrc = crc16(payload);
-  if (crcLo !== (calcCrc & 0xff) || crcHi !== ((calcCrc >> 8) & 0xff)) return null;
+  const crcValid = crcLo === (calcCrc & 0xff) && crcHi === ((calcCrc >> 8) & 0xff);
+  if (options.requireCrc && !crcValid) return null;
 
   const stridePerSample = channels.reduce((a, c) => a + c.byteWidth, 0);
   if (stridePerSample === 0) return null;

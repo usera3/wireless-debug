@@ -15,6 +15,7 @@ export function ParamPage() {
 
   const [loading, setLoading] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; mode: 'page' | 'all' } | null>(null);
+  const [bulkStatus, setBulkStatus] = useState<{ type: 'info' | 'error'; message: string } | null>(null);
   const [showEspPicker, setShowEspPicker] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef(false);
@@ -32,6 +33,10 @@ export function ParamPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function formatBulkError(err: unknown): string {
+    return err instanceof Error ? err.message : '读取失败';
   }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -54,14 +59,16 @@ export function ParamPage() {
   async function handleReadPage() {
     const targets = params.filter((p) => !p.hidden && p.page === activePage);
     cancelRef.current = false;
+    setBulkStatus(null);
     setBulkProgress({ done: 0, total: targets.length, mode: 'page' });
     try {
       if (!cancelRef.current) {
         const done = await readRegisters(targets);
         setBulkProgress({ done, total: targets.length, mode: 'page' });
+        setBulkStatus({ type: 'info', message: `当前页已读取 ${done}/${targets.length}` });
       }
-    } catch {
-      // 当前页失败时保留已有值，允许用户重试
+    } catch (err) {
+      setBulkStatus({ type: 'error', message: `当前页读取失败：${formatBulkError(err)}` });
     }
     setBulkProgress(null);
   }
@@ -69,8 +76,10 @@ export function ParamPage() {
   async function handleReadAll() {
     const targets = params.filter((p) => !p.hidden);
     cancelRef.current = false;
+    setBulkStatus(null);
     setBulkProgress({ done: 0, total: targets.length, mode: 'all' });
     let done = 0;
+    let failed = 0;
     for (const page of pages) {
       if (cancelRef.current) break;
       const pageTargets = targets.filter((target) => target.page === page);
@@ -78,10 +87,14 @@ export function ParamPage() {
       setActivePage(page);
       try {
         done += await readRegisters(pageTargets);
-      } catch {
-        // 单页失败继续下一页
+      } catch (err) {
+        failed += 1;
+        setBulkStatus({ type: 'error', message: `${page} 读取失败：${formatBulkError(err)}` });
       }
       setBulkProgress({ done, total: targets.length, mode: 'all' });
+    }
+    if (!cancelRef.current && failed === 0) {
+      setBulkStatus({ type: 'info', message: `所有页已读取 ${done}/${targets.length}` });
     }
     setBulkProgress(null);
   }
@@ -148,6 +161,12 @@ export function ParamPage() {
                 : '所有页'}
             </button>
           </div>
+        )}
+
+        {bulkStatus && (
+          <span className={`text-xs ${bulkStatus.type === 'error' ? 'text-red-400' : 'text-green-400'}`}>
+            {bulkStatus.message}
+          </span>
         )}
 
         {/* 搜索 */}

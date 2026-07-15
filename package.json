@@ -20,6 +20,7 @@
     "test:html-shell": "esbuild scripts/html-shell-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/html-shell-regression.mjs && node node_modules/.tmp/html-shell-regression.mjs",
     "test:unified-smoke": "npm run build && node scripts/unified-site-smoke.mjs",
     "test:modbus-osc-sample": "esbuild scripts/modbus-osc-sample-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/modbus-osc-sample-regression.mjs && node node_modules/.tmp/modbus-osc-sample-regression.mjs",
+    "test:modbus-request": "esbuild scripts/modbus-request-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/modbus-request-regression.mjs && node node_modules/.tmp/modbus-request-regression.mjs",
     "test:osc-request": "esbuild scripts/osc-request-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/osc-request-regression.mjs && node node_modules/.tmp/osc-request-regression.mjs",
     "test:osc-transport": "esbuild scripts/osc-transport-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/osc-transport-regression.mjs && node node_modules/.tmp/osc-transport-regression.mjs",
     "test:osc-real-time-axis": "esbuild scripts/osc-real-time-axis-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/osc-real-time-axis-regression.mjs && node node_modules/.tmp/osc-real-time-axis-regression.mjs",
