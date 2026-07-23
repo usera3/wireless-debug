@@ -96,9 +96,9 @@ export const useOscStore = create<OscState>((set, get) => ({
   setMaxChannels: (v) => set({ maxChannels: v }),
   setFrameLen: (v) => set({ frameLen: v }),
   setChannels: (v) => set({ channels: v }),
-  appendSamples: (batch, elapsedMs) => {
+  appendSamples: (batch) => {
     if (batch.size === 0) return;
-    oscHistory.appendBatchAt(batch, elapsedMs);
+    oscHistory.appendBatch(batch);
     const stats = oscHistory.getStats();
     set({ historyStats: stats, historyVersion: stats.version });
   },

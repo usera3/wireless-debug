@@ -191,10 +191,12 @@ export function useOscController() {
       clearInterval(heartbeatTimer);
       heartbeatTimer = null;
     }
+    const drained = oscBuffer.drain(performance.now());
+    if (drained) appendSamples(drained.batch);
     oscBuffer.clear();
     frameRouter.onOscFrame(() => {}); // 清除示波 handler
     frameRouter.reset();
-  }, [setRunning, setStartError]);
+  }, [appendSamples, setRunning, setStartError]);
 
   return { start, stop };
 }

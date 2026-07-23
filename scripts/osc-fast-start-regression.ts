@@ -11,5 +11,10 @@ assert.doesNotMatch(source, /cloud-cached[\s\S]{0,1800}await sendAndWait\(buildS
   'warm cloud startup must not wait for every channel ACK');
 assert.match(source, /cloud-cached[\s\S]{0,3200}const request = buildSetChannel[\s\S]{0,300}wsClient\.send\(request\)/,
   'warm cloud startup must still send every channel configuration');
+assert.match(
+  source,
+  /const stop = useCallback\(\(\) => \{[\s\S]*?oscBuffer\.drain\(performance\.now\(\)\)[\s\S]*?appendSamples\(drained\.batch\)[\s\S]*?oscBuffer\.clear\(\)/,
+  'stop must append the final realtime batch before clearing it',
+);
 
 console.log('osc fast start regression passed');
