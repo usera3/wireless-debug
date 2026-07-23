@@ -26,13 +26,28 @@ import {
 
 // 模块级心跳 timer，与组件生命周期无关，切页不会丢失
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let storeFlushTimer: ReturnType<typeof setInterval> | null = null;
 
-// 数据到达路径限流。高吞吐时 RAF 可能长期得不到调度，不能用它作为时间基准。
+// 接收回调只写缓冲，固定节奏统一触发 store 和图表更新。
 const oscBuffer = new OscRealtimeBuffer();
 const STORE_FLUSH_INTERVAL_MS = 50;
 const OSC_HANDSHAKE_TIMEOUT_MS = 8000;
 const OSC_STOP_DRAIN_TIMEOUT_MS = 2500;
 const OSC_QUERY_RETRY_DELAY_MS = 250;
+
+function stopStoreFlushTimer() {
+  if (!storeFlushTimer) return;
+  clearInterval(storeFlushTimer);
+  storeFlushTimer = null;
+}
+
+function startStoreFlushTimer(appendSamples: (batch: Map<number, number[]>) => void) {
+  stopStoreFlushTimer();
+  storeFlushTimer = setInterval(() => {
+    const drained = oscBuffer.drain(performance.now());
+    if (drained) appendSamples(drained.batch);
+  }, STORE_FLUSH_INTERVAL_MS);
+}
 
 export function useOscController() {
   const connectionUrl = useConnectionStore((state) => state.url);
@@ -49,6 +64,7 @@ export function useOscController() {
 
   /** 依次查询设备信息，再设置通道，最后开始采样 */
   const start = useCallback(async (channels: ChannelConfig[]) => {
+    stopStoreFlushTimer();
     resetHistory(channels);
     setStartError(null);
     frameRouter.reset();
@@ -111,11 +127,6 @@ export function useOscController() {
           if (!channels[idx]) return;
           oscBuffer.append(channels[idx].channelNo, samples, receivedAt);
         });
-
-        if (oscBuffer.shouldFlush(receivedAt, STORE_FLUSH_INTERVAL_MS)) {
-          const drained = oscBuffer.drain(receivedAt);
-          if (drained) appendSamples(drained.batch, drained.elapsedMs);
-        }
       });
     }
 
@@ -166,6 +177,7 @@ export function useOscController() {
 
       oscBuffer.reset(performance.now());
       registerOscHandler();
+      startStoreFlushTimer(appendSamples);
       wsClient.send(buildStartOsc());
       setRunning(true);
 
@@ -177,6 +189,8 @@ export function useOscController() {
     } catch (err) {
       console.error('[osc] start failed', err);
       wsClient.send(buildStopOsc());
+      stopStoreFlushTimer();
+      oscBuffer.clear();
       frameRouter.reset();
       setStartError(err instanceof Error ? err.message : '地址示波器启动失败');
       setRunning(false);
@@ -191,6 +205,7 @@ export function useOscController() {
       clearInterval(heartbeatTimer);
       heartbeatTimer = null;
     }
+    stopStoreFlushTimer();
     const drained = oscBuffer.drain(performance.now());
     if (drained) appendSamples(drained.batch);
     oscBuffer.clear();

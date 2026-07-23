@@ -17,4 +17,19 @@ assert.match(
   'stop must append the final realtime batch before clearing it',
 );
 
+const handlerStart = source.indexOf('frameRouter.onOscFrame((frame) => {');
+const handlerEnd = source.indexOf('\n      });', handlerStart);
+const handlerBody = source.slice(handlerStart, handlerEnd);
+assert.ok(handlerStart >= 0 && handlerEnd > handlerStart, 'waveform handler source must be found');
+assert.doesNotMatch(
+  handlerBody,
+  /appendSamples\(/,
+  'WebSocket frame handling must not synchronously update the chart store',
+);
+assert.match(
+  source,
+  /storeFlushTimer = setInterval\([\s\S]*?oscBuffer\.drain\(performance\.now\(\)\)[\s\S]*?STORE_FLUSH_INTERVAL_MS/,
+  'a fixed-cadence timer must drain the realtime buffer',
+);
+
 console.log('osc fast start regression passed');

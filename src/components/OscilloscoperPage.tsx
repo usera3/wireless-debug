@@ -13,6 +13,7 @@ import { useOscController } from '../hooks/useOscController';
 import { exportCsv, importCsv } from '../lib/csvWave';
 import { resolveConnectionTarget } from '../lib/connectionTarget';
 import { describeOscTransport } from '../lib/oscTransport';
+import { oscPlotPointBudget } from '../lib/oscRenderBudget';
 
 function createMockOscData(): Map<number, number[]> {
   const samples = 30_000;
@@ -128,7 +129,7 @@ export function OscilloscoperPage() {
       channelNos,
       selectedStartSeconds,
       selectedEndSeconds,
-      2400,
+      oscPlotPointBudget(channelNos.length),
     );
   }, [hasHistory, channelKey, historyVersion, selectedStartSeconds, selectedEndSeconds]);
 

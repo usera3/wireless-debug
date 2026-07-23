@@ -11,6 +11,7 @@ import { useModbusOscController } from '../hooks/useModbusOscController';
 import { OscChart } from './OscChart';
 import { exportCsv, importCsv } from '../lib/csvWave';
 import type { AlignedData } from '../lib/oscHistory';
+import { oscPlotPointBudget } from '../lib/oscRenderBudget';
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -173,7 +174,7 @@ export function ModbusOscPage() {
       channelNos,
       selectedStartSeconds,
       selectedEndSeconds,
-      2400,
+      oscPlotPointBudget(channelNos.length),
     );
   }, [hasHistory, aliases.length, channelKey, historyVersion, selectedStartSeconds, selectedEndSeconds, channelNos]);
   const viewWindowOptions = useMemo(() => {
