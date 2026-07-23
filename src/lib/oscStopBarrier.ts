@@ -28,3 +28,11 @@ export async function waitForOscStopBarrier({
     return 'timeout';
   }
 }
+
+export async function waitForSequencedOscStopBarrier(
+  priorStop: Promise<OscStopBarrierResult> | null,
+  options: OscStopBarrierOptions,
+): Promise<OscStopBarrierResult> {
+  if (priorStop) await priorStop;
+  return waitForOscStopBarrier(options);
+}

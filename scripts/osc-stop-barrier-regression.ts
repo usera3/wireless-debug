@@ -2,7 +2,10 @@ import { strict as assert } from 'node:assert';
 import { crc16 } from '../src/lib/crc16';
 import { FrameRouter } from '../src/lib/frameRouter';
 import { buildStopOsc } from '../src/lib/oscilloscope';
-import { waitForOscStopBarrier } from '../src/lib/oscStopBarrier';
+import {
+  waitForOscStopBarrier,
+  waitForSequencedOscStopBarrier,
+} from '../src/lib/oscStopBarrier';
 
 function makeOscFrame(frameLen: number): Uint8Array {
   const payload = new Uint8Array(frameLen - 10);
@@ -62,5 +65,36 @@ const timedOut = waitForOscStopBarrier({
 });
 assert.equal(await timedOut, 'timeout');
 assert.equal(timeoutFinalized, true, 'missing ACK must fall back to bounded cleanup');
+
+const sequencedRouter = new FrameRouter();
+const sequencedFrames: Uint8Array[] = [];
+let stopRequests = 0;
+sequencedRouter.setFrameLen(250);
+sequencedRouter.onOscFrame((frame) => sequencedFrames.push(frame));
+
+const startupStop = waitForOscStopBarrier({
+  timeoutMs: 100,
+  subscribe: (handler) => sequencedRouter.subscribeModbusFrame(handler),
+  send: () => { stopRequests += 1; },
+});
+const currentStop = waitForSequencedOscStopBarrier(startupStop, {
+  timeoutMs: 100,
+  subscribe: (handler) => sequencedRouter.subscribeModbusFrame(handler),
+  send: () => { stopRequests += 1; },
+});
+assert.equal(stopRequests, 1, 'the current stop must not overlap the startup stop waiter');
+
+sequencedRouter.feed(buildStopOsc());
+await Promise.resolve();
+await Promise.resolve();
+assert.equal(stopRequests, 2, 'the current stop is sent only after the stale startup ACK is consumed');
+
+const sequencedTail = makeOscFrame(250);
+sequencedRouter.feed(sequencedTail.slice(0, 3));
+sequencedRouter.feed(sequencedTail.slice(3));
+assert.equal(sequencedFrames.length, 1);
+sequencedRouter.feed(buildStopOsc());
+assert.equal(await currentStop, 'ack');
+assert.equal(sequencedFrames.length, 1, 'the current ACK must follow the final frame');
 
 console.log('osc stop barrier regression passed');

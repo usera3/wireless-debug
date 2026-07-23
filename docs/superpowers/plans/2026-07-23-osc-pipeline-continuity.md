@@ -524,8 +524,9 @@ git commit -m "perf: pace bursty cloud osc samples"
 **Interfaces:**
 - Consumes: `FrameRouter.subscribeModbusFrame`, `wsClient.send`, and the CRC
   validated `0x72` matching in `waitForOscResponse`.
-- Produces: `waitForOscStopBarrier(options): Promise<'ack' | 'timeout'>` and an
-  idempotent asynchronous controller stop operation.
+- Produces: `waitForOscStopBarrier(options): Promise<'ack' | 'timeout'>`,
+  `waitForSequencedOscStopBarrier(priorStop, options)`, and an idempotent
+  asynchronous controller stop operation.
 
 - [ ] **Step 1: Add the failing ordered-tail regression**
 
@@ -565,6 +566,34 @@ the waveform handler, and `FrameRouter`.
 Run: `npm run test:osc-fast-start`
 
 Expected: PASS and source ordering from barrier to timer stop to tail drain.
+
+- [ ] **Step 7: Reproduce a stale cloud-startup ACK**
+
+Extend the barrier regression with two stop operations. Keep the runtime stop
+queued behind the preliminary startup stop, feed the startup `0x72` ACK, then a
+split final waveform frame, and finally the runtime `0x72` ACK. Assert that only
+one stop request is in flight at a time and that the runtime promise does not
+resolve on the startup ACK.
+
+- [ ] **Step 8: Sequence identical stop requests**
+
+Store the cloud fast-start preliminary stop promise in the controller. Runtime
+stop and start-error cleanup must call `waitForSequencedOscStopBarrier`, which
+awaits that promise before registering a fresh waiter and sending the current
+stop request. Clear the stored promise only after the ordered operation has
+finished.
+
+- [ ] **Step 9: Verify stale-ACK ordering**
+
+Run: `npm run test:osc-stop-barrier`
+
+Expected: PASS for `startup ACK -> late split frame -> runtime ACK`, with the
+second stop request sent only after the first ACK is consumed.
+
+Run: `npm run test:osc-fast-start`
+
+Expected: PASS and source evidence that startup and runtime stop waiters are
+sequenced rather than overlapped.
 
 ### Task 6: Verify, Deploy, and Synchronize Assets
 

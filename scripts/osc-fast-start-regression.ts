@@ -44,8 +44,13 @@ assert.match(
 );
 assert.match(
   source,
-  /const stop = useCallback[\s\S]*?waitForOscStopBarrier\([\s\S]*?\.then\(\(\) => \{[\s\S]*?stopStoreFlushTimer\(\)[\s\S]*?cloudJitterBuffer\.drainAll\(\)/,
+  /const stop = useCallback[\s\S]*?waitForSequencedOscStopBarrier\([\s\S]*?\.then\(\(\) => \{[\s\S]*?stopStoreFlushTimer\(\)[\s\S]*?cloudJitterBuffer\.drainAll\(\)/,
   'runtime cleanup must wait for the ordered stop ACK barrier',
+);
+assert.match(
+  source,
+  /startupStopPromise = waitForOscStopBarrier\([\s\S]*?waitForSequencedOscStopBarrier\(startupStopPromise/,
+  'a stale cloud-startup stop ACK must be consumed before the runtime stop waiter starts',
 );
 
 console.log('osc fast start regression passed');
