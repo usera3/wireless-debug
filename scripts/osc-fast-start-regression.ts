@@ -31,5 +31,16 @@ assert.match(
   /storeFlushTimer = setInterval\([\s\S]*?oscBuffer\.drain\(performance\.now\(\)\)[\s\S]*?STORE_FLUSH_INTERVAL_MS/,
   'a fixed-cadence timer must drain the realtime buffer',
 );
+assert.match(source, /new OscJitterBuffer\(\)/, 'cloud address samples need a bounded jitter reserve');
+assert.match(
+  source,
+  /target\.kind === 'cloud'[\s\S]*?targetLatencyMs: 300[\s\S]*?resumeLatencyMs: 100/,
+  'only cloud address playback should use the measured 300 ms reserve',
+);
+assert.match(
+  source,
+  /const cloudTail = cloudJitterBuffer\.drainAll\(\)[\s\S]*?appendSamples\(cloudTail\.batch\)/,
+  'stop must append every sample still held by the cloud jitter reserve',
+);
 
 console.log('osc fast start regression passed');

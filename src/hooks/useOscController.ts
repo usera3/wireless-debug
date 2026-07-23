@@ -16,6 +16,7 @@ import { useOscStore, ChannelConfig } from '../store/oscStore';
 import { frameRouter } from '../lib/frameRouter';
 import { waitForOscResponse, waitForOscResponseWithRetry } from '../lib/oscRequest';
 import { OscRealtimeBuffer } from '../lib/oscRealtimeBuffer';
+import { OscJitterBuffer } from '../lib/oscJitterBuffer';
 import { useConnectionStore } from '../store/connectionStore';
 import { resolveConnectionTarget } from '../lib/connectionTarget';
 import {
@@ -30,6 +31,7 @@ let storeFlushTimer: ReturnType<typeof setInterval> | null = null;
 
 // 接收回调只写缓冲，固定节奏统一触发 store 和图表更新。
 const oscBuffer = new OscRealtimeBuffer();
+const cloudJitterBuffer = new OscJitterBuffer();
 const STORE_FLUSH_INTERVAL_MS = 50;
 const OSC_HANDSHAKE_TIMEOUT_MS = 8000;
 const OSC_STOP_DRAIN_TIMEOUT_MS = 2500;
@@ -41,10 +43,15 @@ function stopStoreFlushTimer() {
   storeFlushTimer = null;
 }
 
-function startStoreFlushTimer(appendSamples: (batch: Map<number, number[]>) => void) {
+function startStoreFlushTimer(
+  appendSamples: (batch: Map<number, number[]>) => void,
+  useCloudJitter: boolean,
+) {
   stopStoreFlushTimer();
   storeFlushTimer = setInterval(() => {
-    const drained = oscBuffer.drain(performance.now());
+    const drained = useCloudJitter
+      ? cloudJitterBuffer.drainDue(performance.now())
+      : oscBuffer.drain(performance.now());
     if (drained) appendSamples(drained.batch);
   }, STORE_FLUSH_INTERVAL_MS);
 }
@@ -117,11 +124,22 @@ export function useOscController() {
       }
     }
 
-    function registerOscHandler() {
+    function registerOscHandler(useCloudJitter: boolean) {
       const channelDescs = channels.map((c) => ({ byteWidth: c.byteWidth, paramType: c.paramType }));
       frameRouter.onOscFrame((frame) => {
         const osc = parseOscDataFrame(frame, channelDescs);
         if (!osc) return;
+
+        if (useCloudJitter) {
+          const batch = new Map<number, number[]>();
+          osc.channels.forEach((samples, idx) => {
+            const channel = channels[idx];
+            if (channel) batch.set(channel.channelNo, samples);
+          });
+          cloudJitterBuffer.appendBatch(batch);
+          return;
+        }
+
         const receivedAt = performance.now();
         osc.channels.forEach((samples, idx) => {
           if (!channels[idx]) return;
@@ -175,9 +193,23 @@ export function useOscController() {
         catch { console.warn('[osc] 0x73 not supported by device, ignored'); }
       }
 
-      oscBuffer.reset(performance.now());
-      registerOscHandler();
-      startStoreFlushTimer(appendSamples);
+      const useCloudJitter = target.kind === 'cloud';
+      if (useCloudJitter) {
+        oscBuffer.clear();
+        cloudJitterBuffer.reset({
+          channelNos: channels.map((channel) => channel.channelNo),
+          sampleRate: capabilities.sampleRate,
+          targetLatencyMs: 300,
+          resumeLatencyMs: 100,
+          tickMs: STORE_FLUSH_INTERVAL_MS,
+          nowMs: performance.now(),
+        });
+      } else {
+        cloudJitterBuffer.clear();
+        oscBuffer.reset(performance.now());
+      }
+      registerOscHandler(useCloudJitter);
+      startStoreFlushTimer(appendSamples, useCloudJitter);
       wsClient.send(buildStartOsc());
       setRunning(true);
 
@@ -191,6 +223,7 @@ export function useOscController() {
       wsClient.send(buildStopOsc());
       stopStoreFlushTimer();
       oscBuffer.clear();
+      cloudJitterBuffer.clear();
       frameRouter.reset();
       setStartError(err instanceof Error ? err.message : '地址示波器启动失败');
       setRunning(false);
@@ -208,7 +241,10 @@ export function useOscController() {
     stopStoreFlushTimer();
     const drained = oscBuffer.drain(performance.now());
     if (drained) appendSamples(drained.batch);
+    const cloudTail = cloudJitterBuffer.drainAll();
+    if (cloudTail) appendSamples(cloudTail.batch);
     oscBuffer.clear();
+    cloudJitterBuffer.clear();
     frameRouter.onOscFrame(() => {}); // 清除示波 handler
     frameRouter.reset();
   }, [appendSamples, setRunning, setStartError]);

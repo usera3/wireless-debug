@@ -14,7 +14,8 @@
 - Keep the existing uPlot chart; do not add Smoothie or another chart library.
 - Do not add authentication or other security behavior.
 - Do not change cloud transport configuration or ESP32 transport code.
-- Do not add artificial playback delay.
+- Cloud address playback may use only the measured 300 ms jitter reserve; do
+  not restore the previous multi-second playback queue.
 - Preserve parameter timeout-gap behavior and parameter-table behavior.
 - Use `/tmp/osc-c52c-local-30s.json` as the 30-second `0xC52C` golden capture.
 
@@ -365,7 +366,152 @@ git add package.json scripts/osc-fast-start-regression.ts scripts/osc-render-bud
 git commit -m "perf: bound oscilloscope render cadence"
 ```
 
-### Task 4: Verify, Deploy, and Synchronize Assets
+### Task 4: Pace Bursty Cloud Samples With a Bounded Jitter Reserve
+
+**Files:**
+- Create: `scripts/osc-jitter-buffer-regression.ts`
+- Create: `src/lib/oscJitterBuffer.ts`
+- Modify: `scripts/osc-fast-start-regression.ts`
+- Modify: `src/hooks/useOscController.ts`
+- Modify: `package.json`
+
+**Interfaces:**
+- Consumes: parsed cloud batches, configured channel numbers, sample rate, and
+  `performance.now()` ticks.
+- Produces: `OscJitterBuffer.reset(options)`, `appendBatch(batch)`,
+  `drainDue(nowMs)`, `drainAll()`, `clear()`, and `bufferedSamples`.
+
+- [ ] **Step 1: Add a failing burst and underrun regression**
+
+Create `scripts/osc-jitter-buffer-regression.ts` with a 1 kHz, two-channel
+buffer configured for a 300 ms initial reserve, 100 ms resume reserve, and
+50 ms tick. Append ordered samples in bursts, leave a measured-size 200 ms
+arrival gap, and assert every pacing tick returns a batch. Append the remaining
+samples and assert `drainAll()` makes the complete output sequence equal the
+input sequence.
+
+Also exhaust a started buffer, append 99 ms of samples and require no restart,
+then append the 100th sample and require immediate restart. The core assertions
+are:
+
+```ts
+assert.deepEqual([...played, ...tail], samples(0, sourceCount));
+assert.equal(resumeBuffer.drainDue(resumeAt), null);
+resumeBuffer.appendBatch(batch(1, 99));
+assert.ok(resumeBuffer.drainDue(resumeAt + 50));
+```
+
+Add this package script:
+
+```json
+"test:osc-jitter-buffer": "esbuild scripts/osc-jitter-buffer-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/osc-jitter-buffer-regression.mjs && node node_modules/.tmp/osc-jitter-buffer-regression.mjs"
+```
+
+- [ ] **Step 2: Run the jitter regression and verify RED**
+
+Run: `npm run test:osc-jitter-buffer`
+
+Expected: build failure because `src/lib/oscJitterBuffer.ts` does not exist.
+
+- [ ] **Step 3: Implement indexed per-channel queues**
+
+Create `src/lib/oscJitterBuffer.ts` with these public options:
+
+```ts
+export interface OscJitterBufferOptions {
+  channelNos: number[];
+  sampleRate: number;
+  targetLatencyMs: number;
+  resumeLatencyMs: number;
+  tickMs: number;
+  nowMs?: number;
+}
+```
+
+Each channel queue stores an array plus a read offset. `take(count)` advances
+the offset and compacts only after at least 4,096 consumed values and when the
+offset covers at least half the array. Do not use `splice(0, count)` and do not
+drop overflow samples.
+
+`drainDue()` arms at `targetLatencyMs` for the first playback and at
+`resumeLatencyMs` after an actual empty queue. It converts elapsed time to
+sample count, caps catch-up at two ticks, and applies at most a two-percent
+occupancy correction:
+
+```ts
+const elapsedMs = Math.min(this.tickMs * 2, Math.max(0, now - this.lastDrainAtMs));
+const occupancyError = (available - this.targetSamples) / this.targetSamples;
+const rateScale = 1 + clamp(occupancyError * 0.05, -0.02, 0.02);
+const exactSamples = elapsedMs * this.sampleRate / 1000 * rateScale + this.fractionalSamples;
+```
+
+`drainAll()` returns every unread sample in channel order for stop/export and
+leaves the queues empty.
+
+- [ ] **Step 4: Run the jitter regression and verify GREEN**
+
+Run: `npm run test:osc-jitter-buffer`
+
+Expected: PASS, with continuous ticks across the 200 ms receive gap, a 100 ms
+resume threshold, and exact source/output sample equality.
+
+- [ ] **Step 5: Add the failing cloud-controller integration assertion**
+
+Extend `scripts/osc-fast-start-regression.ts`:
+
+```ts
+assert.match(source, /new OscJitterBuffer\(\)/);
+assert.match(source, /target\.kind === 'cloud'[\s\S]*?targetLatencyMs: 300/);
+assert.match(source, /const cloudTail = cloudJitterBuffer\.drainAll\(\)[\s\S]*?appendSamples\(cloudTail\.batch\)/);
+```
+
+- [ ] **Step 6: Run controller regression and verify RED**
+
+Run: `npm run test:osc-fast-start`
+
+Expected: FAIL because the controller has no cloud jitter buffer.
+
+- [ ] **Step 7: Route only cloud address samples through the jitter reserve**
+
+In `useOscController.ts`, keep local samples in `OscRealtimeBuffer`. For cloud
+targets, convert each parsed frame to one channel map and append it to
+`OscJitterBuffer`. The 50 ms store timer calls `drainDue(performance.now())` for
+cloud and `oscBuffer.drain(performance.now())` for local.
+
+Configure cloud reset exactly as:
+
+```ts
+cloudJitterBuffer.reset({
+  channelNos: channels.map((channel) => channel.channelNo),
+  sampleRate: capabilities.sampleRate,
+  targetLatencyMs: 300,
+  resumeLatencyMs: 100,
+  tickMs: STORE_FLUSH_INTERVAL_MS,
+  nowMs: performance.now(),
+});
+```
+
+Stop the timer before draining both possible tails. Append `cloudTail.batch`
+and `localTail.batch` before clearing either buffer.
+
+- [ ] **Step 8: Run controller and pipeline regressions**
+
+Run: `npm run test:osc-fast-start`
+
+Expected: PASS.
+
+Run: `npm run test:osc-pipeline-replay -- /tmp/osc-c52c-local-30s.json`
+
+Expected: all four modes retain 10,002 frames and 300,060 samples.
+
+- [ ] **Step 9: Commit cloud pacing**
+
+```bash
+git add package.json scripts/osc-jitter-buffer-regression.ts scripts/osc-fast-start-regression.ts src/lib/oscJitterBuffer.ts src/hooks/useOscController.ts docs/superpowers
+git commit -m "perf: pace bursty cloud osc samples"
+```
+
+### Task 5: Verify, Deploy, and Synchronize Assets
 
 **Files:**
 - Generated locally: `dist/**`
@@ -453,4 +599,3 @@ With the computer connected to the ESP32 AP, run one 30-second `0xC52C` local
 capture and compare it to the page export. Verify local and cloud address
 oscilloscopes, parameter oscilloscope, parameter table, STA indicator, and page
 navigation without device reset.
-

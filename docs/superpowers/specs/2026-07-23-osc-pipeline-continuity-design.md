@@ -43,6 +43,13 @@ largest losses happen after bytes enter the page:
    receive-driven store updates. In the reference run canvas redraw intervals
    averaged about 79 ms and reached a 124 ms P95.
 
+Follow-up browser instrumentation showed that one uPlot draw task has a 1.3 ms
+P95 and no long tasks. The remaining unevenness follows browser WebSocket
+delivery: even with server pacing configured to 2,048 bytes every 20 ms,
+in-page message intervals have a 0.8 ms median, 75.9 ms P95, and 182.6 ms
+maximum. TCP/WebSocket scheduling therefore delivers paced server writes in
+bursts, and a small consumer-side jitter reserve is required.
+
 ## Data Flow
 
 ```text
@@ -51,8 +58,8 @@ ESP32 byte stream
   -> FrameRouter byte carry
   -> complete oscilloscope frames
   -> sample parser
-  -> realtime producer buffer
-  -> fixed-cadence store flush
+  -> local realtime buffer or cloud jitter reserve
+  -> sample-rate-paced store flush
   -> contiguous address history
   -> channel-aware point budget
   -> existing uPlot chart
@@ -97,9 +104,20 @@ The oscilloscope frame handler only parses frames and appends samples to
 `OscRealtimeBuffer`. It does not update Zustand directly.
 
 A single 50 ms interval drains the latest accumulated batch into the store.
-There is no artificial playback delay. This prevents a delayed render from
-causing the next queued WebSocket event to synchronously start another render
-before other queued data can be parsed.
+This prevents a delayed render from causing the next queued WebSocket event to
+synchronously start another render before other queued data can be parsed.
+
+Local ESP32 traffic keeps the direct realtime buffer because it already arrives
+smoothly. Cloud address traffic uses a sample-based jitter reserve with a
+300 ms initial target and a 100 ms resume threshold after a true underrun. The
+consumer advances by sample rate rather than packet timing and caps one delayed
+timer catch-up to 100 ms. This is not the old multi-second playback queue: it
+adds only the reserve required to cover the measured 183 ms delivery burst and
+does not wait another 300 ms after every minor shortage.
+
+The jitter reserve uses indexed queues rather than repeated `splice(0, n)` and
+never drops samples. Stop drains all reserved samples into history before
+cleanup, so CSV export remains byte/sample complete.
 
 Starting replaces any old flush timer. Stopping clears the timer, drains the
 pending batch once, appends it, and only then clears the buffer and router
@@ -132,6 +150,8 @@ Automated verification must prove all of the following:
   whose simulated receive times are two seconds apart.
 - Stop appends a pending realtime batch before clearing it.
 - Four visible channels receive a 1,200-point-per-series render budget.
+- Cloud jitter playback remains continuous across a simulated 183 ms receive
+  gap and drains every source sample on stop.
 - Existing frame, Modbus, oscilloscope request, local/cloud transport, and
   parameter regressions continue to pass.
 - `npm run build` succeeds.
@@ -148,3 +168,20 @@ The browser acceptance replay uses the same 30-second capture and requires:
 Cloud assets and ESP32 embedded assets are synchronized only after these checks
 pass. Firmware transport code is not changed by this web fix.
 
+## Measured Acceptance
+
+The local production build was replayed for 30 seconds through the deployed
+cloud fanout on 2026-07-23. It produced:
+
+- Browser bytes: 2,500,761 of 2,500,761, exact SHA-256 match
+- Browser frames: 10,002 of 10,002, exact order/hash match
+- Exported CH1 samples: 300,060
+- Blank rows and continuity mismatches: 0
+- Canvas interval mean: 49.92 ms
+- Canvas interval P95: 53.0 ms
+- Canvas intervals over 100 ms: 0
+- Browser/page errors: 0
+
+The raw browser WebSocket messages remained bursty (0.7 ms median and 76.8 ms
+P95), confirming that the stable canvas cadence comes from sample-based jitter
+pacing rather than an unobserved transport change.
