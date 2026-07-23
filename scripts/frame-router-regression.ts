@@ -50,6 +50,24 @@ function clearOscCrc(frame: Uint8Array): Uint8Array {
 {
   const router = new FrameRouter();
   const frames: Uint8Array[] = [];
+  const oscFrame = makeOscFrame(250);
+
+  router.setFrameLen(250);
+  router.onOscFrame((frame) => frames.push(frame));
+  router.feed(oscFrame.slice(0, 3));
+  router.feed(oscFrame.slice(3));
+
+  assert.equal(
+    frames.length,
+    1,
+    'FF 77 AA at the end of one WebSocket message must join 55 in the next message',
+  );
+  assert.equal(hex(frames[0]), hex(oscFrame));
+}
+
+{
+  const router = new FrameRouter();
+  const frames: Uint8Array[] = [];
 
   router.onModbusFrame((frame) => frames.push(frame));
 

@@ -47,6 +47,21 @@ function matchMagic(buf: Uint8Array, offset: number): boolean {
   return true;
 }
 
+function trailingMagicPrefixLength(data: Uint8Array): number {
+  for (let length = Math.min(MAGIC_LEN - 1, data.length); length > 0; length--) {
+    const start = data.length - length;
+    let matches = true;
+    for (let index = 0; index < length; index++) {
+      if (data[start + index] !== OSC_MAGIC[index]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return length;
+  }
+  return 0;
+}
+
 function expectedModbusFrameLength(buf: Uint8Array, offset: number): number | null {
   const remaining = buf.length - offset;
   if (remaining < 2) return null;
@@ -130,7 +145,9 @@ export class FrameRouter {
 
       if (headerPos < 0) {
         // buffer 中无任何 osc 帧头，按 Modbus 帧长消费完整帧；不完整尾包继续等待。
-        const consumed = this.dispatchModbus(this.buf);
+        const preservedBytes = trailingMagicPrefixLength(this.buf);
+        const dispatchEnd = this.buf.length - preservedBytes;
+        const consumed = this.dispatchModbus(this.buf.slice(0, dispatchEnd));
         this.buf = this.buf.slice(consumed);
         if (this.buf.length > 512) {
           this.buf = this.buf.slice(-3);
