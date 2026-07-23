@@ -42,5 +42,10 @@ assert.match(
   /const cloudTail = cloudJitterBuffer\.drainAll\(\)[\s\S]*?appendSamples\(cloudTail\.batch\)/,
   'stop must append every sample still held by the cloud jitter reserve',
 );
+assert.match(
+  source,
+  /const stop = useCallback[\s\S]*?waitForOscStopBarrier\([\s\S]*?\.then\(\(\) => \{[\s\S]*?stopStoreFlushTimer\(\)[\s\S]*?cloudJitterBuffer\.drainAll\(\)/,
+  'runtime cleanup must wait for the ordered stop ACK barrier',
+);
 
 console.log('osc fast start regression passed');

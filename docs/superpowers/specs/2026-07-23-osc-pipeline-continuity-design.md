@@ -18,7 +18,8 @@ changes are outside this work.
 
 ## Evidence
 
-The reference capture is `/tmp/osc-c52c-local-30s.json`:
+The reference capture is committed as
+`fixtures/osc-c52c-local-30s.json.gz`:
 
 - Address: `0xC52C`
 - Duration: 30 seconds
@@ -70,7 +71,8 @@ Every boundary has one invariant:
 - WebSocket to router: message boundaries do not change frame count or order.
 - Router to parser: only complete CRC-valid frames are emitted.
 - Parser to buffer: every parsed sample is appended once.
-- Buffer to history: stop flushes pending samples before cleanup.
+- Buffer to history: an ordered `0x72` ACK forms the stop barrier, then all
+  pending samples are flushed before cleanup.
 - History to chart: address time advances by sample count, not delivery time.
 - Chart: render work is bounded by visible series count.
 
@@ -119,10 +121,12 @@ The jitter reserve uses indexed queues rather than repeated `splice(0, n)` and
 never drops samples. Stop drains all reserved samples into history before
 cleanup, so CSV export remains byte/sample complete.
 
-Starting replaces any old flush timer. Stopping clears the timer, drains the
-pending batch once, appends it, and only then clears the buffer and router
-handler. Failed startup keeps the existing rollback behavior and also removes
-the timer if it was created.
+Starting replaces any old flush timer. Stopping first registers a strict
+`0x72` response waiter and sends the stop request while parsing and pacing stay
+active. Because the device uplink and browser fanout preserve order, receipt of
+that ACK means all earlier waveform bytes have reached `FrameRouter`. Only then
+does cleanup stop the timer, drain both pending buffers, and clear the handler.
+A 2.5 second timeout provides bounded cleanup after a lost connection.
 
 ### Bound uPlot work by channel count
 
@@ -148,7 +152,8 @@ Automated verification must prove all of the following:
   2,048-byte, 8,192-byte, and one-chunk boundaries.
 - The address store has 200 contiguous samples after two 100-sample batches
   whose simulated receive times are two seconds apart.
-- Stop appends a pending realtime batch before clearing it.
+- A final split frame delivered after stop is requested is appended before the
+  ordered stop ACK allows cleanup.
 - Four visible channels receive a 1,200-point-per-series render budget.
 - Cloud jitter playback remains continuous across a simulated 183 ms receive
   gap and drains every source sample on stop.

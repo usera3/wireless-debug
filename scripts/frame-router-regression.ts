@@ -47,20 +47,20 @@ function clearOscCrc(frame: Uint8Array): Uint8Array {
   return copy;
 }
 
-{
+for (const splitOffset of [1, 2, 3]) {
   const router = new FrameRouter();
   const frames: Uint8Array[] = [];
   const oscFrame = makeOscFrame(250);
 
   router.setFrameLen(250);
   router.onOscFrame((frame) => frames.push(frame));
-  router.feed(oscFrame.slice(0, 3));
-  router.feed(oscFrame.slice(3));
+  router.feed(oscFrame.slice(0, splitOffset));
+  router.feed(oscFrame.slice(splitOffset));
 
   assert.equal(
     frames.length,
     1,
-    'FF 77 AA at the end of one WebSocket message must join 55 in the next message',
+    `a ${splitOffset}-byte osc magic prefix must join the next WebSocket message`,
   );
   assert.equal(hex(frames[0]), hex(oscFrame));
 }

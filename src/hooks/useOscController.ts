@@ -17,6 +17,7 @@ import { frameRouter } from '../lib/frameRouter';
 import { waitForOscResponse, waitForOscResponseWithRetry } from '../lib/oscRequest';
 import { OscRealtimeBuffer } from '../lib/oscRealtimeBuffer';
 import { OscJitterBuffer } from '../lib/oscJitterBuffer';
+import { waitForOscStopBarrier } from '../lib/oscStopBarrier';
 import { useConnectionStore } from '../store/connectionStore';
 import { resolveConnectionTarget } from '../lib/connectionTarget';
 import {
@@ -28,6 +29,7 @@ import {
 // 模块级心跳 timer，与组件生命周期无关，切页不会丢失
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let storeFlushTimer: ReturnType<typeof setInterval> | null = null;
+let stopPromise: Promise<void> | null = null;
 
 // 接收回调只写缓冲，固定节奏统一触发 store 和图表更新。
 const oscBuffer = new OscRealtimeBuffer();
@@ -231,22 +233,32 @@ export function useOscController() {
   }, [connectionUrl, appendSamples, resetHistory, setFrameLen, setMaxChannels, setRunning, setSampleRate, setStartError, commRateLimit]);
 
   const stop = useCallback(() => {
-    wsClient.send(buildStopOsc());
+    if (stopPromise) return stopPromise;
     setStartError(null);
-    setRunning(false);
     if (heartbeatTimer) {
       clearInterval(heartbeatTimer);
       heartbeatTimer = null;
     }
-    stopStoreFlushTimer();
-    const drained = oscBuffer.drain(performance.now());
-    if (drained) appendSamples(drained.batch);
-    const cloudTail = cloudJitterBuffer.drainAll();
-    if (cloudTail) appendSamples(cloudTail.batch);
-    oscBuffer.clear();
-    cloudJitterBuffer.clear();
-    frameRouter.onOscFrame(() => {}); // 清除示波 handler
-    frameRouter.reset();
+
+    stopPromise = waitForOscStopBarrier({
+      timeoutMs: OSC_STOP_DRAIN_TIMEOUT_MS,
+      subscribe: (handler) => frameRouter.subscribeModbusFrame(handler),
+      send: (request) => wsClient.send(request),
+    }).then(() => {
+      setRunning(false);
+      stopStoreFlushTimer();
+      const drained = oscBuffer.drain(performance.now());
+      if (drained) appendSamples(drained.batch);
+      const cloudTail = cloudJitterBuffer.drainAll();
+      if (cloudTail) appendSamples(cloudTail.batch);
+      oscBuffer.clear();
+      cloudJitterBuffer.clear();
+      frameRouter.onOscFrame(() => {}); // 清除示波 handler
+      frameRouter.reset();
+    }).finally(() => {
+      stopPromise = null;
+    });
+    return stopPromise;
   }, [appendSamples, setRunning, setStartError]);
 
   return { start, stop };

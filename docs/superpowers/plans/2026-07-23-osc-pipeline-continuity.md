@@ -17,7 +17,8 @@
 - Cloud address playback may use only the measured 300 ms jitter reserve; do
   not restore the previous multi-second playback queue.
 - Preserve parameter timeout-gap behavior and parameter-table behavior.
-- Use `/tmp/osc-c52c-local-30s.json` as the 30-second `0xC52C` golden capture.
+- Use the checksum-pinned `fixtures/osc-c52c-local-30s.json.gz` as the 30-second
+  `0xC52C` golden capture.
 
 ---
 
@@ -31,7 +32,7 @@
 
 **Interfaces:**
 - Consumes: `FrameRouter.feed(chunk: Uint8Array)` and the capture schema's `chunks` and `analysis.logical_frame_hashes_sha256` fields.
-- Produces: `trailingMagicPrefixLength(data: Uint8Array): number` as a private module helper and `npm run test:osc-pipeline-replay -- /tmp/osc-c52c-local-30s.json`.
+- Produces: `trailingMagicPrefixLength(data: Uint8Array): number` as a private module helper and `npm run test:osc-pipeline-replay`.
 
 - [ ] **Step 1: Add the failing split-marker regression**
 
@@ -117,7 +118,7 @@ last pending batch before assertions. Add this package script:
 
 - [ ] **Step 6: Run the golden replay**
 
-Run: `npm run test:osc-pipeline-replay -- /tmp/osc-c52c-local-30s.json`
+Run: `npm run test:osc-pipeline-replay`
 
 Expected: all four boundary modes report 10,002 frames, 300,060 CH1 samples,
 zero hash mismatches, and zero history null samples.
@@ -500,7 +501,7 @@ Run: `npm run test:osc-fast-start`
 
 Expected: PASS.
 
-Run: `npm run test:osc-pipeline-replay -- /tmp/osc-c52c-local-30s.json`
+Run: `npm run test:osc-pipeline-replay`
 
 Expected: all four modes retain 10,002 frames and 300,060 samples.
 
@@ -511,7 +512,61 @@ git add package.json scripts/osc-jitter-buffer-regression.ts scripts/osc-fast-st
 git commit -m "perf: pace bursty cloud osc samples"
 ```
 
-### Task 5: Verify, Deploy, and Synchronize Assets
+### Task 5: Wait for an Ordered Stop Barrier
+
+**Files:**
+- Create: `scripts/osc-stop-barrier-regression.ts`
+- Create: `src/lib/oscStopBarrier.ts`
+- Modify: `scripts/osc-fast-start-regression.ts`
+- Modify: `src/hooks/useOscController.ts`
+- Modify: `package.json`
+
+**Interfaces:**
+- Consumes: `FrameRouter.subscribeModbusFrame`, `wsClient.send`, and the CRC
+  validated `0x72` matching in `waitForOscResponse`.
+- Produces: `waitForOscStopBarrier(options): Promise<'ack' | 'timeout'>` and an
+  idempotent asynchronous controller stop operation.
+
+- [ ] **Step 1: Add the failing ordered-tail regression**
+
+Start the barrier, feed a valid oscilloscope frame whose header is split after
+three magic bytes, and assert finalization has not happened. Then feed the
+CRC-valid `buildStopOsc()` ACK and require finalization to observe exactly one
+frame. Add a second 10 ms timeout case to prove bounded cleanup.
+
+- [ ] **Step 2: Verify RED**
+
+Run: `npm run test:osc-stop-barrier`
+
+Expected: build failure because `src/lib/oscStopBarrier.ts` does not exist.
+
+- [ ] **Step 3: Implement the strict ACK waiter**
+
+Call `waitForOscResponse` with `request: buildStopOsc()`. Return `ack` when its
+function code and CRC match, and `timeout` after any rejected or timed-out
+request so cleanup cannot wait forever.
+
+- [ ] **Step 4: Verify the barrier GREEN**
+
+Run: `npm run test:osc-stop-barrier`
+
+Expected: PASS for the late split frame, ACK ordering, and timeout fallback.
+
+- [ ] **Step 5: Integrate an idempotent asynchronous stop**
+
+Keep one module-level `stopPromise`. The first call stops heartbeat traffic and
+starts `waitForOscStopBarrier` while waveform parsing and pacing continue.
+Repeated calls return the same promise. In `.then()`, set running false, stop
+the store timer, append local and cloud tails, and finally clear both buffers,
+the waveform handler, and `FrameRouter`.
+
+- [ ] **Step 6: Verify controller lifecycle**
+
+Run: `npm run test:osc-fast-start`
+
+Expected: PASS and source ordering from barrier to timer stop to tail drain.
+
+### Task 6: Verify, Deploy, and Synchronize Assets
 
 **Files:**
 - Generated locally: `dist/**`
@@ -519,7 +574,7 @@ git commit -m "perf: pace bursty cloud osc samples"
 - Deploy after acceptance: `/home/ubuntu/wireless-debug-cloud/web/orig/**` on `tencent-wireless`
 
 **Interfaces:**
-- Consumes: all fixes from Tasks 1-3 and `/tmp/osc-c52c-local-30s.json`.
+- Consumes: all fixes from Tasks 1-5 and the committed golden fixture.
 - Produces: verified production web assets shared by cloud and ESP32.
 
 - [ ] **Step 1: Run all oscilloscope and transport regressions**
@@ -528,7 +583,8 @@ Run each command and require exit code 0:
 
 ```bash
 npm run test:frame-router
-npm run test:osc-pipeline-replay -- /tmp/osc-c52c-local-30s.json
+npm run test:osc-pipeline-replay
+npm run test:osc-stop-barrier
 npm run test:osc-real-time-axis
 npm run test:osc-realtime-buffer
 npm run test:osc-fast-start

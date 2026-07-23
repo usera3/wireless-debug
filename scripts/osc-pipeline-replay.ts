@@ -1,10 +1,17 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 import { FrameRouter } from '../src/lib/frameRouter';
 import { OscHistory } from '../src/lib/oscHistory';
-import { OscRealtimeBuffer } from '../src/lib/oscRealtimeBuffer';
+import { OscJitterBuffer } from '../src/lib/oscJitterBuffer';
 import { parseOscDataFrame } from '../src/lib/oscilloscope';
+
+const EXPECTED_STREAM_SHA256 = '4557c782316db3206f7f07f9c0e2062ddfae8937993d2511024b2fcb963e36ef';
+const EXPECTED_STREAM_BYTES = 2_500_761;
+const EXPECTED_FRAMES = 10_002;
+const EXPECTED_CH1_SAMPLES = 300_060;
+const TICK_MS = 50;
 
 type CaptureChunk = {
   t_ms: number;
@@ -74,7 +81,7 @@ function oneChunk(capture: Capture): ReplayChunk[] {
 function runReplay(mode: string, capture: Capture, chunks: ReplayChunk[]): ReplayResult {
   const router = new FrameRouter();
   const history = new OscHistory();
-  const realtime = new OscRealtimeBuffer();
+  const jitter = new OscJitterBuffer();
   const channels = Array.from({ length: capture.config.channel_count }, (_, index) => ({
     channelNo: index + 1,
     byteWidth: 2,
@@ -85,31 +92,50 @@ function runReplay(mode: string, capture: Capture, chunks: ReplayChunk[]): Repla
   const frameHashes: string[] = [];
   const baseTimeMs = 1_000;
   let currentTimeMs = baseTimeMs;
+  let nextTickMs = 0;
   let parsedCh1Samples = 0;
 
   router.setFrameLen(capture.config.frame_len);
   history.reset(channels.map((channel) => channel.channelNo), capture.config.sample_rate, 60);
-  realtime.reset(baseTimeMs);
+  jitter.reset({
+    channelNos: channels.map((channel) => channel.channelNo),
+    sampleRate: capture.config.sample_rate,
+    targetLatencyMs: 300,
+    resumeLatencyMs: 100,
+    tickMs: TICK_MS,
+    nowMs: baseTimeMs,
+  });
   router.onOscFrame((frame) => {
     frameHashes.push(sha256(frame));
     const parsed = parseOscDataFrame(frame, descriptors, { requireCrc: true });
     assert(parsed, `${mode}: router emitted an invalid frame`);
     parsedCh1Samples += parsed.channels[0]?.length ?? 0;
-    parsed.channels.forEach((samples, index) => {
-      realtime.append(channels[index].channelNo, samples, currentTimeMs);
-    });
-    if (realtime.shouldFlush(currentTimeMs, 50)) {
-      const drained = realtime.drain(currentTimeMs);
-      if (drained) history.appendBatch(drained.batch);
-    }
+    jitter.appendBatch(new Map(parsed.channels.map((samples, index) => [
+      channels[index].channelNo,
+      samples,
+    ])));
   });
 
+  const flushAt = (relativeMs: number) => {
+    currentTimeMs = baseTimeMs + relativeMs;
+    const drained = jitter.drainDue(currentTimeMs);
+    if (drained) history.appendBatch(drained.batch);
+  };
+
   for (const chunk of chunks) {
+    while (nextTickMs <= chunk.tMs) {
+      flushAt(nextTickMs);
+      nextTickMs += TICK_MS;
+    }
     currentTimeMs = baseTimeMs + chunk.tMs;
     router.feed(chunk.data);
   }
 
-  const finalDrain = realtime.drain(currentTimeMs);
+  for (let guard = 0; jitter.bufferedSamples > 0 && guard < 2000; guard++) {
+    flushAt(nextTickMs);
+    nextTickMs += TICK_MS;
+  }
+  const finalDrain = jitter.drainAll();
   if (finalDrain) history.appendBatch(finalDrain.batch);
 
   const exported = history.exportColumns([1]).columns[0];
@@ -124,16 +150,30 @@ function runReplay(mode: string, capture: Capture, chunks: ReplayChunk[]): Repla
     historyNullSamples: nullSamples,
   };
 
-  assert.equal(frameHashes.length, expectedHashes.length, `${mode}: frame count`);
+  assert.equal(frameHashes.length, EXPECTED_FRAMES, `${mode}: frame count`);
   assert.deepEqual(frameHashes, expectedHashes, `${mode}: frame order/hash`);
-  assert.equal(parsedCh1Samples, capture.analysis.ch1_samples, `${mode}: parsed CH1 samples`);
+  assert.equal(parsedCh1Samples, EXPECTED_CH1_SAMPLES, `${mode}: parsed CH1 samples`);
   assert.equal(exported.length, parsedCh1Samples, `${mode}: retained CH1 samples`);
   assert.equal(nullSamples, 0, `${mode}: address history must remain contiguous`);
   return result;
 }
 
-const capturePath = process.argv[2] ?? '/tmp/osc-c52c-local-30s.json';
-const capture = JSON.parse(readFileSync(capturePath, 'utf8')) as Capture;
+const capturePath = process.argv[2] ?? 'fixtures/osc-c52c-local-30s.json.gz';
+const captureFile = readFileSync(capturePath);
+const captureText = capturePath.endsWith('.gz')
+  ? gunzipSync(captureFile).toString('utf8')
+  : captureFile.toString('utf8');
+const capture = JSON.parse(captureText) as Capture;
+const sourceBytes = Buffer.concat(originalChunks(capture).map((chunk) => Buffer.from(chunk.data)));
+
+assert.equal(capture.config.duration_seconds, 30);
+assert.equal(capture.config.frame_len, 250);
+assert.equal(capture.config.sample_rate, 10_000);
+assert.equal(capture.config.channel_count, 4);
+assert.equal(sourceBytes.length, EXPECTED_STREAM_BYTES);
+assert.equal(sha256(sourceBytes), EXPECTED_STREAM_SHA256);
+assert.equal(capture.analysis.logical_frame_hashes_sha256.length, EXPECTED_FRAMES);
+assert.equal(capture.analysis.ch1_samples, EXPECTED_CH1_SAMPLES);
 const results = [
   runReplay('original', capture, originalChunks(capture)),
   runReplay('2048-byte', capture, fixedSizeChunks(capture, 2048)),
