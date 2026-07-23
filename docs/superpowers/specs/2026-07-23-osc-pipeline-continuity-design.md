@@ -138,6 +138,14 @@ The debt is reset only after the connection target changes and the previous
 waiter has settled. Identical ACKs therefore cannot release runtime cleanup
 before the current run's final waveform bytes arrive.
 
+Each queued stop also captures the canonical WebSocket target and a monotonic
+connection generation. Reconnect, disconnect, and target switch advance that
+generation. A deferred stop whose generation is no longer current is marked
+superseded before it subscribes or sends, and an active old-generation waiter
+ignores new-generation ACKs until its bounded timeout. The controller creates
+the next sequence only after old waiters settle, so an old target's deferred
+request cannot be transmitted on the new target or create debt there.
+
 ### Bound uPlot work by channel count
 
 The visible-history downsampling budget becomes channel-aware:
@@ -167,6 +175,8 @@ Automated verification must prove all of the following:
 - A delayed cloud-startup stop ACK, including one arriving after startup
   timeout, pays only the older request's ACK debt and cannot satisfy the
   runtime stop barrier.
+- A stop queued on target A is never sent or acknowledged through target B
+  after the WebSocket connection generation changes.
 - Four visible channels receive a 1,200-point-per-series render budget.
 - Cloud jitter playback remains continuous across a simulated 183 ms receive
   gap and drains every source sample on stop.

@@ -36,6 +36,7 @@
     "test:parameter-source-policy": "esbuild scripts/parameter-source-policy-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/parameter-source-policy-regression.mjs && node node_modules/.tmp/parameter-source-policy-regression.mjs",
     "test:local-network-access": "esbuild scripts/local-network-access-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/local-network-access-regression.mjs && node node_modules/.tmp/local-network-access-regression.mjs",
     "test:sta-feedback": "esbuild scripts/sta-connect-feedback-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/sta-connect-feedback-regression.mjs && node node_modules/.tmp/sta-connect-feedback-regression.mjs",
+    "test:ws-client-generation": "esbuild scripts/ws-client-generation-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/ws-client-generation-regression.mjs && node node_modules/.tmp/ws-client-generation-regression.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

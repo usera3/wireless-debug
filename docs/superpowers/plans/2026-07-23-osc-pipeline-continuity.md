@@ -584,12 +584,23 @@ after those ACKs plus its own response arrive; otherwise it uses the bounded
 timeout. Recreate the sequence only when the connection target changes after
 the prior waiter has settled.
 
+Bind every queued barrier to the canonical WebSocket target and the
+`WsClient.generation` captured for that sequence. Increment the generation on
+connect, disconnect, and current-socket close/error. A deferred barrier from an
+older generation returns `superseded` without subscribing or sending, while an
+already active old-generation barrier ignores all newer-generation ACKs.
+
 - [ ] **Step 9: Verify stale-ACK ordering**
 
 Run: `npm run test:osc-stop-barrier`
 
 Expected: PASS for both `startup ACK -> late split frame -> runtime ACK` and
 `startup timeout -> stale startup ACK -> late split frame -> runtime ACK`.
+
+Run: `npm run test:ws-client-generation`
+
+Expected: PASS and prove that connect, target replacement, and disconnect each
+advance the monotonic WebSocket generation.
 
 Run: `npm run test:osc-fast-start`
 

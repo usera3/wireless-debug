@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import fs from 'node:fs';
 
 const source = fs.readFileSync('src/hooks/useOscController.ts', 'utf8');
+const wsClientSource = fs.readFileSync('src/lib/wsClient.ts', 'utf8');
 
 assert.match(source, /selectOscStartupMode/);
 assert.match(source, /oscCapabilityCache/);
@@ -61,6 +62,12 @@ assert.doesNotMatch(
   source,
   /waitForSequencedOscStopBarrier/,
   'the controller must not use promise completion as proof that a timed-out ACK was consumed',
+);
+assert.match(wsClientSource, /get generation\(\): number/);
+assert.match(
+  source,
+  /stopBarrierConnectionGeneration[\s\S]*?isCurrent:[\s\S]*?wsClient\.generation/,
+  'queued stop barriers must be bound to the active WebSocket generation',
 );
 
 console.log('osc fast start regression passed');

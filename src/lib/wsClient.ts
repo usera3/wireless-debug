@@ -4,6 +4,7 @@ type StateHook = () => void;
 
 export class WsClient {
   private ws: WebSocket | null = null;
+  private connectionGeneration = 0;
   private handlers: FrameHandler[] = [];
   private rawSendHooks: RawHook[] = [];
   private openHook: StateHook = () => {};
@@ -11,17 +12,31 @@ export class WsClient {
 
   connect(url: string) {
     if (this.ws) this.disconnect();
-    this.ws = new WebSocket(url);
-    this.ws.binaryType = 'arraybuffer';
-    this.ws.onopen = () => this.openHook();
-    this.ws.onclose = () => this.closeHook();
-    this.ws.onerror = () => this.closeHook();
-    this.ws.onmessage = (e) => this.onData(new Uint8Array(e.data as ArrayBuffer));
+    const socket = new WebSocket(url);
+    this.ws = socket;
+    this.connectionGeneration += 1;
+    socket.binaryType = 'arraybuffer';
+    socket.onopen = () => {
+      if (this.ws === socket) this.openHook();
+    };
+    const closeCurrentSocket = () => {
+      if (this.ws !== socket) return;
+      this.ws = null;
+      this.connectionGeneration += 1;
+      this.closeHook();
+    };
+    socket.onclose = closeCurrentSocket;
+    socket.onerror = closeCurrentSocket;
+    socket.onmessage = (e) => {
+      if (this.ws === socket) this.onData(new Uint8Array(e.data as ArrayBuffer));
+    };
   }
 
   disconnect() {
-    this.ws?.close();
+    const socket = this.ws;
     this.ws = null;
+    this.connectionGeneration += 1;
+    socket?.close();
   }
 
   send(data: Uint8Array) {
@@ -42,6 +57,10 @@ export class WsClient {
 
   get readyState(): number {
     return this.ws?.readyState ?? WebSocket.CLOSED;
+  }
+
+  get generation(): number {
+    return this.connectionGeneration;
   }
 
   onOpen(hook: StateHook) { this.openHook = hook; }

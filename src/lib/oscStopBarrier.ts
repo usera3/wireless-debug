@@ -7,9 +7,10 @@ export interface OscStopBarrierOptions {
   timeoutMs: number;
   subscribe: (handler: FrameHandler) => () => void;
   send: (frame: Uint8Array) => void;
+  isCurrent?: () => boolean;
 }
 
-export type OscStopBarrierResult = 'ack' | 'timeout';
+export type OscStopBarrierResult = 'ack' | 'timeout' | 'superseded';
 
 export async function waitForOscStopBarrier({
   timeoutMs,
@@ -49,7 +50,9 @@ export class OscStopBarrierSequence {
     timeoutMs,
     subscribe,
     send,
+    isCurrent = () => true,
   }: OscStopBarrierOptions): Promise<OscStopBarrierResult> {
+    if (!isCurrent()) return 'superseded';
     const requiredAcks = this.pendingAcks + 1;
     let receivedAcks = 0;
 
@@ -60,6 +63,7 @@ export class OscStopBarrierSequence {
         subscribe,
         send,
         acceptResponse: () => {
+          if (!isCurrent()) return false;
           receivedAcks += 1;
           return receivedAcks >= requiredAcks;
         },
@@ -67,6 +71,7 @@ export class OscStopBarrierSequence {
       this.pendingAcks = 0;
       return 'ack';
     } catch {
+      if (!isCurrent()) return 'superseded';
       this.pendingAcks = Math.max(0, requiredAcks - receivedAcks);
       return 'timeout';
     }

@@ -34,7 +34,8 @@ let storeFlushTimer: ReturnType<typeof setInterval> | null = null;
 let stopPromise: Promise<void> | null = null;
 let stopBarrierSequence = new OscStopBarrierSequence();
 let lastStopBarrierPromise: Promise<OscStopBarrierResult> | null = null;
-let stopBarrierConnectionUrl: string | null = null;
+let stopBarrierTargetKey: string | null = null;
+let stopBarrierConnectionGeneration: number | null = null;
 
 // 接收回调只写缓冲，固定节奏统一触发 store 和图表更新。
 const oscBuffer = new OscRealtimeBuffer();
@@ -45,10 +46,14 @@ const OSC_STOP_DRAIN_TIMEOUT_MS = 2500;
 const OSC_QUERY_RETRY_DELAY_MS = 250;
 
 function queueOscStopBarrier(): Promise<OscStopBarrierResult> {
+  const expectedGeneration = stopBarrierConnectionGeneration ?? wsClient.generation;
   const barrier = stopBarrierSequence.wait({
     timeoutMs: OSC_STOP_DRAIN_TIMEOUT_MS,
     subscribe: (handler) => frameRouter.subscribeModbusFrame(handler),
-    send: (request) => wsClient.send(request),
+    send: (request) => {
+      if (wsClient.generation === expectedGeneration) wsClient.send(request);
+    },
+    isCurrent: () => wsClient.generation === expectedGeneration,
   });
   lastStopBarrierPromise = barrier;
   return barrier;
@@ -90,10 +95,17 @@ export function useOscController() {
   const start = useCallback(async (channels: ChannelConfig[]) => {
     if (stopPromise) await stopPromise;
     else if (lastStopBarrierPromise) await lastStopBarrierPromise;
-    if (stopBarrierConnectionUrl !== connectionUrl) {
+    const target = resolveConnectionTarget(connectionUrl, window.location.origin);
+    const targetKey = target.kind === 'invalid' ? connectionUrl : target.wsUrl;
+    const connectionGeneration = wsClient.generation;
+    if (
+      stopBarrierTargetKey !== targetKey ||
+      stopBarrierConnectionGeneration !== connectionGeneration
+    ) {
       stopBarrierSequence = new OscStopBarrierSequence();
       lastStopBarrierPromise = null;
-      stopBarrierConnectionUrl = connectionUrl;
+      stopBarrierTargetKey = targetKey;
+      stopBarrierConnectionGeneration = connectionGeneration;
     }
     stopStoreFlushTimer();
     resetHistory(channels);
@@ -171,7 +183,6 @@ export function useOscController() {
     }
 
     try {
-      const target = resolveConnectionTarget(connectionUrl, window.location.origin);
       const cachedCapabilities = oscCapabilityCache.read(target);
       const startupMode = selectOscStartupMode(target, cachedCapabilities);
       await stopAndDrainPreviousRun(target.kind !== 'cloud');

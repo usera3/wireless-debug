@@ -140,4 +140,29 @@ timeoutDebtRouter.feed(buildStopOsc());
 assert.equal(await stopAfterStartupTimeout, 'ack');
 assert.equal(timeoutDebtFrames.length, 1, 'the runtime ACK must follow the timeout-path tail');
 
+const targetSwitchRouter = new FrameRouter();
+const targetSwitchSequence = new OscStopBarrierSequence();
+let connectionGeneration = 1;
+let targetSwitchRequests = 0;
+const targetAOptions = {
+  timeoutMs: 20,
+  subscribe: (handler: (frame: Uint8Array) => void) => targetSwitchRouter.subscribeModbusFrame(handler),
+  send: () => { targetSwitchRequests += 1; },
+  isCurrent: () => connectionGeneration === 1,
+};
+
+const activeTargetAStop = targetSwitchSequence.wait(targetAOptions);
+const queuedTargetAStop = targetSwitchSequence.wait(targetAOptions);
+assert.equal(targetSwitchRequests, 1);
+
+connectionGeneration = 2;
+targetSwitchRouter.feed(buildStopOsc());
+assert.equal(await activeTargetAStop, 'superseded');
+assert.equal(await queuedTargetAStop, 'superseded');
+assert.equal(
+  targetSwitchRequests,
+  1,
+  'a deferred target-A stop must not be sent through target B',
+);
+
 console.log('osc stop barrier regression passed');
