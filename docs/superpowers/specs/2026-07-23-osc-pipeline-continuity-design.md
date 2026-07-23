@@ -129,11 +129,14 @@ does cleanup stop the timer, drain both pending buffers, and clear the handler.
 A 2.5 second timeout provides bounded cleanup after a lost connection.
 
 Cloud fast start also sends a preliminary stop without delaying channel setup.
-That request keeps its own ACK waiter. A later runtime stop first waits for the
-preliminary waiter to consume its ACK (or time out), then registers a new waiter
-and sends the current `0x72`. Stop requests and their identical ACKs therefore
-cannot overlap, so a delayed startup ACK cannot release runtime cleanup before
-the current run's final waveform bytes arrive.
+All preliminary, runtime, and start-error stops enter one sequence. The
+sequence retains an ACK debt when a request times out; a later waiter must
+consume every outstanding ACK plus the ACK for its own `0x72` before cleanup.
+If an old ACK never arrives, cleanup uses the existing bounded timeout instead
+of treating a newer ACK as proof that every earlier request was acknowledged.
+The debt is reset only after the connection target changes and the previous
+waiter has settled. Identical ACKs therefore cannot release runtime cleanup
+before the current run's final waveform bytes arrive.
 
 ### Bound uPlot work by channel count
 
@@ -161,8 +164,9 @@ Automated verification must prove all of the following:
   whose simulated receive times are two seconds apart.
 - A final split frame delivered after stop is requested is appended before the
   ordered stop ACK allows cleanup.
-- A delayed cloud-startup stop ACK is consumed before the runtime stop request
-  is sent, and cannot satisfy the runtime stop barrier.
+- A delayed cloud-startup stop ACK, including one arriving after startup
+  timeout, pays only the older request's ACK debt and cannot satisfy the
+  runtime stop barrier.
 - Four visible channels receive a 1,200-point-per-series render budget.
 - Cloud jitter playback remains continuous across a simulated 183 ms receive
   gap and drains every source sample on stop.

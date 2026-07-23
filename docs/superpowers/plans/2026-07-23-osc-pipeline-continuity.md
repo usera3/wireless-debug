@@ -525,8 +525,8 @@ git commit -m "perf: pace bursty cloud osc samples"
 - Consumes: `FrameRouter.subscribeModbusFrame`, `wsClient.send`, and the CRC
   validated `0x72` matching in `waitForOscResponse`.
 - Produces: `waitForOscStopBarrier(options): Promise<'ack' | 'timeout'>`,
-  `waitForSequencedOscStopBarrier(priorStop, options)`, and an idempotent
-  asynchronous controller stop operation.
+  `OscStopBarrierSequence.wait(options)`, and an idempotent asynchronous
+  controller stop operation.
 
 - [ ] **Step 1: Add the failing ordered-tail regression**
 
@@ -575,20 +575,21 @@ split final waveform frame, and finally the runtime `0x72` ACK. Assert that only
 one stop request is in flight at a time and that the runtime promise does not
 resolve on the startup ACK.
 
-- [ ] **Step 8: Sequence identical stop requests**
+- [ ] **Step 8: Sequence identical stop requests and retain timeout debt**
 
-Store the cloud fast-start preliminary stop promise in the controller. Runtime
-stop and start-error cleanup must call `waitForSequencedOscStopBarrier`, which
-awaits that promise before registering a fresh waiter and sending the current
-stop request. Clear the stored promise only after the ordered operation has
-finished.
+Route cloud fast-start, runtime, local initialization, and start-error stops
+through one `OscStopBarrierSequence`. It serializes requests and retains the
+number of unconsumed ACKs when a waiter times out. The next waiter accepts only
+after those ACKs plus its own response arrive; otherwise it uses the bounded
+timeout. Recreate the sequence only when the connection target changes after
+the prior waiter has settled.
 
 - [ ] **Step 9: Verify stale-ACK ordering**
 
 Run: `npm run test:osc-stop-barrier`
 
-Expected: PASS for `startup ACK -> late split frame -> runtime ACK`, with the
-second stop request sent only after the first ACK is consumed.
+Expected: PASS for both `startup ACK -> late split frame -> runtime ACK` and
+`startup timeout -> stale startup ACK -> late split frame -> runtime ACK`.
 
 Run: `npm run test:osc-fast-start`
 

@@ -44,13 +44,23 @@ assert.match(
 );
 assert.match(
   source,
-  /const stop = useCallback[\s\S]*?waitForSequencedOscStopBarrier\([\s\S]*?\.then\(\(\) => \{[\s\S]*?stopStoreFlushTimer\(\)[\s\S]*?cloudJitterBuffer\.drainAll\(\)/,
+  /const stop = useCallback[\s\S]*?queueOscStopBarrier\(\)[\s\S]*?\.then\(\(\) => \{[\s\S]*?stopStoreFlushTimer\(\)[\s\S]*?cloudJitterBuffer\.drainAll\(\)/,
   'runtime cleanup must wait for the ordered stop ACK barrier',
 );
 assert.match(
   source,
-  /startupStopPromise = waitForOscStopBarrier\([\s\S]*?waitForSequencedOscStopBarrier\(startupStopPromise/,
-  'a stale cloud-startup stop ACK must be consumed before the runtime stop waiter starts',
+  /let stopBarrierSequence = new OscStopBarrierSequence\(\)[\s\S]*?function queueOscStopBarrier\([\s\S]*?stopBarrierSequence\.wait\(/,
+  'all stop requests must share one ACK-debt sequence',
+);
+assert.match(
+  source,
+  /async function stopAndDrainPreviousRun[\s\S]*?queueOscStopBarrier\(\)[\s\S]*?if \(!waitForAck\)/,
+  'cloud startup stop must enter the same sequence without delaying fast start',
+);
+assert.doesNotMatch(
+  source,
+  /waitForSequencedOscStopBarrier/,
+  'the controller must not use promise completion as proof that a timed-out ACK was consumed',
 );
 
 console.log('osc fast start regression passed');

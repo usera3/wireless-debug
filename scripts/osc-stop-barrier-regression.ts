@@ -3,8 +3,8 @@ import { crc16 } from '../src/lib/crc16';
 import { FrameRouter } from '../src/lib/frameRouter';
 import { buildStopOsc } from '../src/lib/oscilloscope';
 import {
+  OscStopBarrierSequence,
   waitForOscStopBarrier,
-  waitForSequencedOscStopBarrier,
 } from '../src/lib/oscStopBarrier';
 
 function makeOscFrame(frameLen: number): Uint8Array {
@@ -68,16 +68,17 @@ assert.equal(timeoutFinalized, true, 'missing ACK must fall back to bounded clea
 
 const sequencedRouter = new FrameRouter();
 const sequencedFrames: Uint8Array[] = [];
+const sequencedStops = new OscStopBarrierSequence();
 let stopRequests = 0;
 sequencedRouter.setFrameLen(250);
 sequencedRouter.onOscFrame((frame) => sequencedFrames.push(frame));
 
-const startupStop = waitForOscStopBarrier({
+sequencedStops.wait({
   timeoutMs: 100,
   subscribe: (handler) => sequencedRouter.subscribeModbusFrame(handler),
   send: () => { stopRequests += 1; },
 });
-const currentStop = waitForSequencedOscStopBarrier(startupStop, {
+const currentStop = sequencedStops.wait({
   timeoutMs: 100,
   subscribe: (handler) => sequencedRouter.subscribeModbusFrame(handler),
   send: () => { stopRequests += 1; },
@@ -85,8 +86,7 @@ const currentStop = waitForSequencedOscStopBarrier(startupStop, {
 assert.equal(stopRequests, 1, 'the current stop must not overlap the startup stop waiter');
 
 sequencedRouter.feed(buildStopOsc());
-await Promise.resolve();
-await Promise.resolve();
+await new Promise((resolve) => setTimeout(resolve, 0));
 assert.equal(stopRequests, 2, 'the current stop is sent only after the stale startup ACK is consumed');
 
 const sequencedTail = makeOscFrame(250);
@@ -96,5 +96,48 @@ assert.equal(sequencedFrames.length, 1);
 sequencedRouter.feed(buildStopOsc());
 assert.equal(await currentStop, 'ack');
 assert.equal(sequencedFrames.length, 1, 'the current ACK must follow the final frame');
+
+const timeoutDebtRouter = new FrameRouter();
+const timeoutDebtFrames: Uint8Array[] = [];
+const timeoutDebtSequence = new OscStopBarrierSequence();
+let timeoutDebtRequests = 0;
+timeoutDebtRouter.setFrameLen(250);
+timeoutDebtRouter.onOscFrame((frame) => timeoutDebtFrames.push(frame));
+
+const timedOutStartupStop = timeoutDebtSequence.wait({
+  timeoutMs: 10,
+  subscribe: (handler) => timeoutDebtRouter.subscribeModbusFrame(handler),
+  send: () => { timeoutDebtRequests += 1; },
+});
+assert.equal(await timedOutStartupStop, 'timeout');
+
+let timeoutDebtStopResolved = false;
+const stopAfterStartupTimeout = timeoutDebtSequence.wait({
+  timeoutMs: 100,
+  subscribe: (handler) => timeoutDebtRouter.subscribeModbusFrame(handler),
+  send: () => { timeoutDebtRequests += 1; },
+}).then((result) => {
+  timeoutDebtStopResolved = true;
+  return result;
+});
+await Promise.resolve();
+await Promise.resolve();
+assert.equal(timeoutDebtRequests, 2);
+
+timeoutDebtRouter.feed(buildStopOsc());
+await new Promise((resolve) => setTimeout(resolve, 0));
+assert.equal(
+  timeoutDebtStopResolved,
+  false,
+  'a stale ACK after startup timeout must not release the runtime stop barrier',
+);
+
+const timeoutDebtTail = makeOscFrame(250);
+timeoutDebtRouter.feed(timeoutDebtTail.slice(0, 3));
+timeoutDebtRouter.feed(timeoutDebtTail.slice(3));
+assert.equal(timeoutDebtFrames.length, 1);
+timeoutDebtRouter.feed(buildStopOsc());
+assert.equal(await stopAfterStartupTimeout, 'ack');
+assert.equal(timeoutDebtFrames.length, 1, 'the runtime ACK must follow the timeout-path tail');
 
 console.log('osc stop barrier regression passed');

@@ -7,19 +7,17 @@ import {
   buildSetBaudRate,
   buildSetChannel,
   buildStartOsc,
-  buildStopOsc,
   buildHeartbeat,
   parseFC04Response,
   parseOscDataFrame,
 } from '../lib/oscilloscope';
 import { useOscStore, ChannelConfig } from '../store/oscStore';
 import { frameRouter } from '../lib/frameRouter';
-import { waitForOscResponse, waitForOscResponseWithRetry } from '../lib/oscRequest';
+import { waitForOscResponseWithRetry } from '../lib/oscRequest';
 import { OscRealtimeBuffer } from '../lib/oscRealtimeBuffer';
 import { OscJitterBuffer } from '../lib/oscJitterBuffer';
 import {
-  waitForOscStopBarrier,
-  waitForSequencedOscStopBarrier,
+  OscStopBarrierSequence,
   type OscStopBarrierResult,
 } from '../lib/oscStopBarrier';
 import { useConnectionStore } from '../store/connectionStore';
@@ -34,7 +32,9 @@ import {
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let storeFlushTimer: ReturnType<typeof setInterval> | null = null;
 let stopPromise: Promise<void> | null = null;
-let startupStopPromise: Promise<OscStopBarrierResult> | null = null;
+let stopBarrierSequence = new OscStopBarrierSequence();
+let lastStopBarrierPromise: Promise<OscStopBarrierResult> | null = null;
+let stopBarrierConnectionUrl: string | null = null;
 
 // 接收回调只写缓冲，固定节奏统一触发 store 和图表更新。
 const oscBuffer = new OscRealtimeBuffer();
@@ -43,6 +43,16 @@ const STORE_FLUSH_INTERVAL_MS = 50;
 const OSC_HANDSHAKE_TIMEOUT_MS = 8000;
 const OSC_STOP_DRAIN_TIMEOUT_MS = 2500;
 const OSC_QUERY_RETRY_DELAY_MS = 250;
+
+function queueOscStopBarrier(): Promise<OscStopBarrierResult> {
+  const barrier = stopBarrierSequence.wait({
+    timeoutMs: OSC_STOP_DRAIN_TIMEOUT_MS,
+    subscribe: (handler) => frameRouter.subscribeModbusFrame(handler),
+    send: (request) => wsClient.send(request),
+  });
+  lastStopBarrierPromise = barrier;
+  return barrier;
+}
 
 function stopStoreFlushTimer() {
   if (!storeFlushTimer) return;
@@ -78,9 +88,12 @@ export function useOscController() {
 
   /** 依次查询设备信息，再设置通道，最后开始采样 */
   const start = useCallback(async (channels: ChannelConfig[]) => {
-    if (startupStopPromise) {
-      await startupStopPromise;
-      startupStopPromise = null;
+    if (stopPromise) await stopPromise;
+    else if (lastStopBarrierPromise) await lastStopBarrierPromise;
+    if (stopBarrierConnectionUrl !== connectionUrl) {
+      stopBarrierSequence = new OscStopBarrierSequence();
+      lastStopBarrierPromise = null;
+      stopBarrierConnectionUrl = connectionUrl;
     }
     stopStoreFlushTimer();
     resetHistory(channels);
@@ -116,27 +129,13 @@ export function useOscController() {
     }
 
     async function stopAndDrainPreviousRun(waitForAck = true) {
+      const stopping = queueOscStopBarrier();
       if (!waitForAck) {
-        startupStopPromise = waitForOscStopBarrier({
-          timeoutMs: OSC_STOP_DRAIN_TIMEOUT_MS,
-          subscribe: (handler) => frameRouter.subscribeModbusFrame(handler),
-          send: (request) => wsClient.send(request),
-        });
         frameRouter.reset();
         return;
       }
-      try {
-        await waitForOscResponse({
-          request: buildStopOsc(),
-          timeoutMs: OSC_STOP_DRAIN_TIMEOUT_MS,
-          subscribe: (handler) => frameRouter.subscribeModbusFrame(handler),
-          send: (request) => wsClient.send(request),
-        });
-      } catch {
-        // 设备本来就未运行时可能不回停止帧，继续执行初始化即可。
-      } finally {
-        frameRouter.reset();
-      }
+      await stopping;
+      frameRouter.reset();
     }
 
     function registerOscHandler(useCloudJitter: boolean) {
@@ -235,11 +234,7 @@ export function useOscController() {
       }, 1000);
     } catch (err) {
       console.error('[osc] start failed', err);
-      startupStopPromise = waitForSequencedOscStopBarrier(startupStopPromise, {
-        timeoutMs: OSC_STOP_DRAIN_TIMEOUT_MS,
-        subscribe: (handler) => frameRouter.subscribeModbusFrame(handler),
-        send: (request) => wsClient.send(request),
-      });
+      queueOscStopBarrier();
       stopStoreFlushTimer();
       oscBuffer.clear();
       cloudJitterBuffer.clear();
@@ -257,11 +252,7 @@ export function useOscController() {
       heartbeatTimer = null;
     }
 
-    stopPromise = waitForSequencedOscStopBarrier(startupStopPromise, {
-      timeoutMs: OSC_STOP_DRAIN_TIMEOUT_MS,
-      subscribe: (handler) => frameRouter.subscribeModbusFrame(handler),
-      send: (request) => wsClient.send(request),
-    }).then(() => {
+    stopPromise = queueOscStopBarrier().then(() => {
       setRunning(false);
       stopStoreFlushTimer();
       const drained = oscBuffer.drain(performance.now());
@@ -273,7 +264,6 @@ export function useOscController() {
       frameRouter.onOscFrame(() => {}); // 清除示波 handler
       frameRouter.reset();
     }).finally(() => {
-      startupStopPromise = null;
       stopPromise = null;
     });
     return stopPromise;

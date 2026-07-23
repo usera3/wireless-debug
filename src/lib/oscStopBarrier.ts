@@ -29,10 +29,46 @@ export async function waitForOscStopBarrier({
   }
 }
 
-export async function waitForSequencedOscStopBarrier(
-  priorStop: Promise<OscStopBarrierResult> | null,
-  options: OscStopBarrierOptions,
-): Promise<OscStopBarrierResult> {
-  if (priorStop) await priorStop;
-  return waitForOscStopBarrier(options);
+export class OscStopBarrierSequence {
+  private pendingAcks = 0;
+  private tail: Promise<void> | null = null;
+
+  wait(options: OscStopBarrierOptions): Promise<OscStopBarrierResult> {
+    const operation = this.tail
+      ? this.tail.then(() => this.waitForNext(options))
+      : this.waitForNext(options);
+    const settled = operation.then(() => undefined, () => undefined);
+    this.tail = settled;
+    void settled.then(() => {
+      if (this.tail === settled) this.tail = null;
+    });
+    return operation;
+  }
+
+  private async waitForNext({
+    timeoutMs,
+    subscribe,
+    send,
+  }: OscStopBarrierOptions): Promise<OscStopBarrierResult> {
+    const requiredAcks = this.pendingAcks + 1;
+    let receivedAcks = 0;
+
+    try {
+      await waitForOscResponse({
+        request: buildStopOsc(),
+        timeoutMs,
+        subscribe,
+        send,
+        acceptResponse: () => {
+          receivedAcks += 1;
+          return receivedAcks >= requiredAcks;
+        },
+      });
+      this.pendingAcks = 0;
+      return 'ack';
+    } catch {
+      this.pendingAcks = Math.max(0, requiredAcks - receivedAcks);
+      return 'timeout';
+    }
+  }
 }
