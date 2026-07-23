@@ -5,6 +5,12 @@ import { useParamStore, type ParamDef } from '../store/paramStore';
 import { useModbusOscStore } from '../store/modbusOscStore';
 import { frameRouter } from '../lib/frameRouter';
 import { completeOscSample } from '../lib/modbusOscSample';
+import { resolveConnectionTarget } from '../lib/connectionTarget';
+import { useConnectionStore } from '../store/connectionStore';
+import {
+  modbusOscCycleAction,
+  modbusOscResponseTimeoutMs,
+} from '../lib/modbusOscTransportPolicy';
 
 /** 等待一个匹配当前 FC03 请求的 Modbus 响应帧，超时 reject */
 function waitModbusFrame(timeoutMs: number, expectedRegisterCount: number): Promise<Uint8Array> {
@@ -26,8 +32,6 @@ function waitModbusFrame(timeoutMs: number, expectedRegisterCount: number): Prom
 // 模块级 timer，切页不会丢失，stop 始终能清掉
 let modbusOscTimer: ReturnType<typeof setInterval> | null = null;
 let modbusOscBusy = false;
-
-const MODBUS_TIMEOUT_MS = 1000; // 单次 Modbus 响应超时，与采样间隔无关
 
 function registerWidth(param: ParamDef): number {
   return param.isFloat ? 2 : 1;
@@ -75,6 +79,11 @@ export function useModbusOscController() {
     }
 
     const { interval: currentInterval, readChunkSize: currentChunkSize } = useModbusOscStore.getState();
+    const target = resolveConnectionTarget(
+      useConnectionStore.getState().url,
+      window.location.origin,
+    );
+    const responseTimeoutMs = modbusOscResponseTimeoutMs(target.kind);
     resetHistory(pageParams.map((param) => param.alias), 1000 / Math.max(100, currentInterval));
     resetIoStats();
     frameRouter.reset();
@@ -96,6 +105,7 @@ export function useModbusOscController() {
       if (modbusOscBusy) return;
       modbusOscBusy = true;
       const samples: Record<string, number> = {};
+      let cycleError: Error | null = null;
       try {
         for (const chunk of chunks) {
           const addrs = chunk.map((p) => p.regAddr);
@@ -104,15 +114,14 @@ export function useModbusOscController() {
           const count = maxAddr - minAddr + 1;
 
           const frame = buildReadHolding(minAddr, count);
-          const waitP = waitModbusFrame(MODBUS_TIMEOUT_MS, count);
+          const waitP = waitModbusFrame(responseTimeoutMs, count);
           recordIoRequest();
           wsClient.send(frame);
           const resp = await waitP;
           recordIoResponse(resp.length);
           const regs = parseReadResponse(resp, count, { allowBadCrc: true });
           if (!regs) {
-            recordIoError('响应格式错误');
-            continue;
+            throw new Error('响应格式错误');
           }
 
           for (const p of chunk) {
@@ -123,18 +132,28 @@ export function useModbusOscController() {
         }
 
         if (Object.keys(samples).length === 0) {
-          recordIoError('未解析到有效参数');
+          throw new Error('未解析到有效参数');
         }
       } catch (err) {
-        recordIoError((err as Error).message || '通信错误');
+        cycleError = err instanceof Error ? err : new Error('通信错误');
+        recordIoError(cycleError.message || '通信错误');
       } finally {
-        const completedSamples = completeOscSample(
-          pageParams.map((param) => param.alias),
-          samples,
-        );
-        pushSamples(completedSamples);
-        recordIoSamples(pageParams.length);
+        const cycleAction = modbusOscCycleAction(target.kind, cycleError !== null);
+        if (cycleAction === 'append') {
+          const completedSamples = completeOscSample(
+            pageParams.map((param) => param.alias),
+            samples,
+          );
+          pushSamples(completedSamples);
+          recordIoSamples(pageParams.length);
+        }
         modbusOscBusy = false;
+        if (cycleAction === 'stop') {
+          if (modbusOscTimer) clearInterval(modbusOscTimer);
+          modbusOscTimer = null;
+          frameRouter.onModbusFrame(() => {});
+          setRunning(false);
+        }
       }
     };
 
