@@ -44,6 +44,7 @@ esp_err_t cloud_mqtt_init(const cloud_mqtt_config_t *config,
 void cloud_mqtt_notify_wifi_state(const wifi_manager_status_t *status);
 void cloud_mqtt_publish_status_now(void);
 void cloud_mqtt_publish_ws_frame(const uint8_t *data, size_t len);
+void cloud_mqtt_note_realtime_control(const uint8_t *data, size_t len);
 bool cloud_mqtt_publish_ws_fallback(const uint8_t *data, size_t len, void *ctx);
 
 #endif /* CLOUD_MQTT_H */

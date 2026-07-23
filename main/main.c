@@ -557,6 +557,12 @@ static esp_err_t cloud_send_ws_frame(const uint8_t *data, size_t len, void *ctx)
     return written == (int)len ? ESP_OK : ESP_FAIL;
 }
 
+static esp_err_t cloud_handle_ws_downlink(const uint8_t *data, size_t len, void *ctx)
+{
+    cloud_mqtt_note_realtime_control(data, len);
+    return cloud_send_ws_frame(data, len, ctx);
+}
+
 static void cloud_get_wifi_status(wifi_manager_status_t *out, void *ctx)
 {
     (void)ctx;
@@ -989,8 +995,10 @@ void app_main(void)
         .base_uri = CONFIG_CLOUD_WS_UPLINK_URI,
         .device_id = s_cloud_device_id,
         .enabled = CONFIG_CLOUD_MQTT_ENABLE && CONFIG_CLOUD_WS_UPLINK_ENABLE,
-        .fallback = cloud_mqtt_publish_ws_fallback,
+        .fallback = NULL,
         .fallback_ctx = NULL,
+        .on_downlink = cloud_handle_ws_downlink,
+        .downlink_ctx = NULL,
     };
     esp_err_t cloud_ws_ret = cloud_ws_uplink_init(&cloud_ws_config);
     if (cloud_ws_ret != ESP_OK) {

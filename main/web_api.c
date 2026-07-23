@@ -1081,7 +1081,7 @@ static esp_err_t device_status_handler(httpd_req_t *req)
     cloud_ws_uplink_get_stats(&uplink);
     http_prepare_json(req);
 
-    char resp[2304];
+    char resp[2432];
     int written = snprintf(resp, sizeof(resp),
              "{\"ok\":true,\"net\":\"%s\",\"comm\":\"%s\",\"uart_baud\":%lu,"
              "\"ble_ready\":%s,\"wifi_ws_client\":%s,"
@@ -1110,7 +1110,9 @@ static esp_err_t device_status_handler(httpd_req_t *req)
              "\"queued_fallback_frames\":%lu,\"fallback_failures\":%lu,"
              "\"stop_dropped_frames\":%lu,\"connect_events\":%lu,"
              "\"disconnect_events\":%lu,\"error_events\":%lu,"
-             "\"closed_events\":%lu,\"last_event_id\":%ld},"
+             "\"closed_events\":%lu,\"downlink_frames\":%lu,"
+             "\"downlink_bytes\":%lu,\"downlink_failures\":%lu,"
+             "\"last_event_id\":%ld},"
              "\"motor_params\":{\"count\":%u,\"capacity\":%u}}",
              system_menu_net_name(menu.net_mode),
              system_menu_comm_name(menu.comm_mode),
@@ -1167,6 +1169,9 @@ static esp_err_t device_status_handler(httpd_req_t *req)
              (unsigned long)uplink.disconnect_events,
              (unsigned long)uplink.error_events,
              (unsigned long)uplink.closed_events,
+             (unsigned long)uplink.downlink_frames,
+             (unsigned long)uplink.downlink_bytes,
+             (unsigned long)uplink.downlink_failures,
              (long)uplink.last_event_id,
              (unsigned)motor_diag_param_count(),
              (unsigned)motor_diag_param_capacity());

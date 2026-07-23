@@ -40,6 +40,7 @@ static bool s_started;
 static bool s_connected;
 static bool s_ws_osc_streaming;
 static int64_t s_ws_active_until_us;
+static uint32_t s_ws_lease_generation;
 static portMUX_TYPE s_ws_osc_state_lock = portMUX_INITIALIZER_UNLOCKED;
 static char s_status_topic[CLOUD_MQTT_TOPIC_MAX_LEN];
 static char s_availability_topic[CLOUD_MQTT_TOPIC_MAX_LEN];
@@ -49,12 +50,24 @@ static char s_inbox_topic[CLOUD_MQTT_TOPIC_MAX_LEN];
 static char s_bus_ack_topic[CLOUD_MQTT_TOPIC_MAX_LEN];
 static char s_pub_topic[CLOUD_MQTT_TOPIC_MAX_LEN];
 
-static void ws_osc_state_set(bool streaming, int64_t active_until_us)
+static uint32_t ws_osc_next_generation_locked(void)
 {
+    s_ws_lease_generation++;
+    if (s_ws_lease_generation == 0) {
+        s_ws_lease_generation = 1;
+    }
+    return s_ws_lease_generation;
+}
+
+static uint32_t ws_osc_state_set(bool streaming, int64_t active_until_us)
+{
+    uint32_t generation = 0;
     portENTER_CRITICAL(&s_ws_osc_state_lock);
     s_ws_osc_streaming = streaming;
     s_ws_active_until_us = active_until_us;
+    generation = ws_osc_next_generation_locked();
     portEXIT_CRITICAL(&s_ws_osc_state_lock);
+    return generation;
 }
 
 static void ws_osc_state_snapshot(bool *streaming, int64_t *active_until_us)
@@ -69,30 +82,30 @@ static void ws_osc_state_snapshot(bool *streaming, int64_t *active_until_us)
     portEXIT_CRITICAL(&s_ws_osc_state_lock);
 }
 
-static bool ws_osc_state_expire(int64_t now_us)
+static uint32_t ws_osc_state_expire(int64_t now_us)
 {
-    bool expired = false;
+    uint32_t generation = 0;
     portENTER_CRITICAL(&s_ws_osc_state_lock);
-    if (s_ws_osc_streaming && now_us > s_ws_active_until_us) {
+    if (s_ws_active_until_us > 0 && now_us > s_ws_active_until_us) {
         s_ws_osc_streaming = false;
         s_ws_active_until_us = 0;
-        expired = true;
+        generation = ws_osc_next_generation_locked();
     }
     portEXIT_CRITICAL(&s_ws_osc_state_lock);
-    return expired;
+    return generation;
 }
 
-static bool ws_osc_state_refresh(bool start_streaming, int64_t active_until_us)
+static uint32_t ws_osc_state_refresh(bool start_streaming, int64_t active_until_us)
 {
-    bool streaming = false;
+    uint32_t generation = 0;
     portENTER_CRITICAL(&s_ws_osc_state_lock);
     if (start_streaming) {
         s_ws_osc_streaming = true;
     }
     s_ws_active_until_us = active_until_us;
-    streaming = s_ws_osc_streaming;
+    generation = ws_osc_next_generation_locked();
     portEXIT_CRITICAL(&s_ws_osc_state_lock);
-    return streaming;
+    return generation;
 }
 
 static bool is_osc_stop_frame(const uint8_t *data, size_t len)
@@ -304,6 +317,9 @@ static void add_cloud_ws_uplink_status(cJSON *root)
     cJSON_AddNumberToObject(obj, "disconnect_events", (double)stats.disconnect_events);
     cJSON_AddNumberToObject(obj, "error_events", (double)stats.error_events);
     cJSON_AddNumberToObject(obj, "closed_events", (double)stats.closed_events);
+    cJSON_AddNumberToObject(obj, "downlink_frames", (double)stats.downlink_frames);
+    cJSON_AddNumberToObject(obj, "downlink_bytes", (double)stats.downlink_bytes);
+    cJSON_AddNumberToObject(obj, "downlink_failures", (double)stats.downlink_failures);
     cJSON_AddNumberToObject(obj, "last_event_id", (double)stats.last_event_id);
     cJSON_AddItemToObject(root, "cloud_ws_uplink", obj);
 }
@@ -382,8 +398,9 @@ static void add_motor_params_status(cJSON *root)
 static void status_timer_cb(void *arg)
 {
     (void)arg;
-    if (ws_osc_state_expire(esp_timer_get_time())) {
-        cloud_ws_uplink_set_active(false);
+    uint32_t lease_generation = ws_osc_state_expire(esp_timer_get_time());
+    if (lease_generation != 0) {
+        cloud_ws_uplink_set_active(false, lease_generation);
     }
     cloud_mqtt_publish_status_now();
 }
@@ -478,9 +495,8 @@ static bool publish_ws_frame_mqtt(const uint8_t *data, size_t len)
 
 static void publish_ws_frame(const uint8_t *data, size_t len)
 {
-    bool osc_streaming = false;
     int64_t active_until_us = 0;
-    ws_osc_state_snapshot(&osc_streaming, &active_until_us);
+    ws_osc_state_snapshot(NULL, &active_until_us);
     if (data == NULL || len == 0 ||
         esp_timer_get_time() > active_until_us) {
         return;
@@ -489,9 +505,7 @@ static void publish_ws_frame(const uint8_t *data, size_t len)
     size_t offset = 0;
     while (offset < len) {
         size_t chunk_len = MIN(len - offset, CLOUD_MQTT_WS_FRAME_MAX_LEN);
-        if (!osc_streaming || !cloud_ws_uplink_send(data + offset, chunk_len)) {
-            cloud_mqtt_publish_ws_fallback(data + offset, chunk_len, NULL);
-        }
+        (void)cloud_ws_uplink_send(data + offset, chunk_len);
         offset += chunk_len;
     }
 }
@@ -652,18 +666,26 @@ static void handle_bus_ws_frame(const char *message_id, const char *channel, con
         return;
     }
 
-    if (is_osc_stop_frame(frame, frame_len)) {
-        ws_osc_state_set(false, 0);
-        cloud_ws_uplink_set_active(false);
-    } else {
-        bool osc_streaming = ws_osc_state_refresh(
-            is_osc_start_frame(frame, frame_len),
-            esp_timer_get_time() + CLOUD_MQTT_WS_ACTIVE_US);
-        cloud_ws_uplink_set_active(osc_streaming);
-    }
+    cloud_mqtt_note_realtime_control(frame, frame_len);
     esp_err_t err = s_runtime.send_ws_frame(frame, frame_len, s_runtime.ctx);
     bool ok = err == ESP_OK;
     publish_bus_ack(message_id, channel, ok, ok ? "ws forwarded" : esp_err_to_name(err));
+}
+
+void cloud_mqtt_note_realtime_control(const uint8_t *data, size_t len)
+{
+    if (data == NULL || len == 0) {
+        return;
+    }
+    if (is_osc_stop_frame(data, len)) {
+        uint32_t lease_generation = ws_osc_state_set(false, 0);
+        cloud_ws_uplink_set_active(false, lease_generation);
+        return;
+    }
+    uint32_t lease_generation = ws_osc_state_refresh(
+        is_osc_start_frame(data, len),
+        esp_timer_get_time() + CLOUD_MQTT_WS_ACTIVE_US);
+    cloud_ws_uplink_set_active(true, lease_generation);
 }
 
 static void handle_command(const char *payload, int payload_len)

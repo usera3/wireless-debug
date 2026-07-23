@@ -1,4 +1,6 @@
 #include "cloud_ws_uplink.h"
+#include "cloud_ws_downlink_reassembly.h"
+#include "cloud_ws_lease.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -39,12 +41,14 @@ static bool s_initialized;
 static bool s_started;
 static bool s_wifi_ready;
 static bool s_active;
+static cloud_ws_lease_gate_t s_lease_gate;
 static bool s_queue_in_psram;
 static volatile bool s_connected;
 static char s_uri[CLOUD_WS_UPLINK_URI_MAX_LEN];
 static portMUX_TYPE s_state_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_stats_lock = portMUX_INITIALIZER_UNLOCKED;
 static cloud_ws_uplink_stats_t s_stats;
+static cloud_ws_downlink_reassembly_t s_downlink_reassembly;
 
 static void stats_increment(uint32_t *counter, uint32_t amount)
 {
@@ -53,25 +57,50 @@ static void stats_increment(uint32_t *counter, uint32_t amount)
     portEXIT_CRITICAL(&s_stats_lock);
 }
 
-static void fallback_frame(const cloud_ws_uplink_send_frame_t *frame)
+static void downlink_reset(void)
 {
-    if (frame != NULL && frame->len > 0 && s_config.fallback != NULL) {
-        bool complete = true;
-        size_t offset = 0;
-        while (offset < frame->len) {
-            size_t chunk_len = frame->len - offset;
-            if (chunk_len > CLOUD_WS_UPLINK_MAX_FRAME) {
-                chunk_len = CLOUD_WS_UPLINK_MAX_FRAME;
-            }
-            if (!s_config.fallback(frame->data + offset, chunk_len, s_config.fallback_ctx)) {
-                complete = false;
-            }
-            offset += chunk_len;
-        }
-        if (complete) {
-            stats_increment(&s_stats.queued_fallback_frames, frame->source_frames);
-        }
+    cloud_ws_downlink_reassembly_reset(&s_downlink_reassembly);
+}
+
+static void handle_downlink_data(const esp_websocket_event_data_t *event)
+{
+    if (event == NULL ||
+        (event->op_code != CLOUD_WS_OPCODE_BINARY &&
+         event->op_code != CLOUD_WS_OPCODE_CONTINUATION)) {
+        return;
     }
+    if (event->data_len < 0 || event->payload_len < 0 || event->payload_offset < 0) {
+        downlink_reset();
+        stats_increment(&s_stats.downlink_failures, 1);
+        return;
+    }
+
+    const uint8_t *frame = NULL;
+    size_t frame_len = 0;
+    cloud_ws_downlink_result_t result = cloud_ws_downlink_reassembly_push(
+        &s_downlink_reassembly,
+        event->op_code,
+        event->fin,
+        (size_t)event->payload_len,
+        (size_t)event->payload_offset,
+        (const uint8_t *)event->data_ptr,
+        (size_t)event->data_len,
+        &frame,
+        &frame_len);
+    if (result == CLOUD_WS_DOWNLINK_REJECTED) {
+        stats_increment(&s_stats.downlink_failures, 1);
+        return;
+    }
+    if (result != CLOUD_WS_DOWNLINK_COMPLETE) {
+        return;
+    }
+    if (s_config.on_downlink == NULL ||
+        s_config.on_downlink(frame, frame_len, s_config.downlink_ctx) != ESP_OK) {
+        stats_increment(&s_stats.downlink_failures, 1);
+        return;
+    }
+    stats_increment(&s_stats.downlink_frames, 1);
+    stats_increment(&s_stats.downlink_bytes, (uint32_t)frame_len);
 }
 
 static void sender_task(void *arg)
@@ -92,7 +121,7 @@ static void sender_task(void *arg)
         portENTER_CRITICAL(&s_state_lock);
         active = s_active;
         should_run = s_initialized && s_config.enabled && s_client != NULL &&
-                     s_wifi_ready && active;
+                     s_wifi_ready;
         portEXIT_CRITICAL(&s_state_lock);
 
         if (should_run && !s_started) {
@@ -123,6 +152,11 @@ static void sender_task(void *arg)
             continue;
         }
 
+        if (!s_connected || s_client == NULL) {
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+
         if (xQueueReceive(s_queue, &chunk, 0) == pdTRUE) {
             frame->len = chunk.len;
             frame->source_frames = chunk.source_frames;
@@ -136,11 +170,6 @@ static void sender_task(void *arg)
                 frame->len += next.len;
                 frame->source_frames += next.source_frames;
             }
-            if (!s_connected || s_client == NULL) {
-                fallback_frame(frame);
-                continue;
-            }
-
             int sent = esp_websocket_client_send_bin(
                 s_client,
                 (const char *)frame->data,
@@ -148,8 +177,8 @@ static void sender_task(void *arg)
                 pdMS_TO_TICKS(CLOUD_WS_UPLINK_SEND_TIMEOUT_MS));
             if (sent != (int)frame->len) {
                 stats_increment(&s_stats.send_failures, 1);
+                stats_increment(&s_stats.overload_dropped_frames, frame->source_frames);
                 ESP_LOGW(TAG, "binary send failed: sent=%d len=%u", sent, (unsigned)frame->len);
-                fallback_frame(frame);
             } else {
                 stats_increment(&s_stats.sent_frames, frame->source_frames);
                 stats_increment(&s_stats.sent_bytes, (uint32_t)frame->len);
@@ -170,20 +199,26 @@ static void websocket_event_handler(void *handler_args,
     portEXIT_CRITICAL(&s_stats_lock);
     if (event_id == WEBSOCKET_EVENT_CONNECTED) {
         stats_increment(&s_stats.connect_events, 1);
+        downlink_reset();
         s_connected = true;
         ESP_LOGI(TAG, "binary uplink connected: %s", s_uri);
     } else if (event_id == WEBSOCKET_EVENT_DISCONNECTED) {
         stats_increment(&s_stats.disconnect_events, 1);
         s_connected = false;
+        downlink_reset();
         ESP_LOGW(TAG, "binary uplink disconnected: event=%ld", (long)event_id);
     } else if (event_id == WEBSOCKET_EVENT_CLOSED) {
         stats_increment(&s_stats.closed_events, 1);
         s_connected = false;
+        downlink_reset();
         ESP_LOGW(TAG, "binary uplink closed: event=%ld", (long)event_id);
     } else if (event_id == WEBSOCKET_EVENT_ERROR) {
         stats_increment(&s_stats.error_events, 1);
         s_connected = false;
+        downlink_reset();
         ESP_LOGW(TAG, "binary uplink error: event=%ld data=%p", (long)event_id, event_data);
+    } else if (event_id == WEBSOCKET_EVENT_DATA && event_data != NULL) {
+        handle_downlink_data((const esp_websocket_event_data_t *)event_data);
     }
 }
 
@@ -293,16 +328,22 @@ void cloud_ws_uplink_notify_wifi_state(const wifi_manager_status_t *status)
     xTaskNotifyGive(s_sender_task);
 }
 
-void cloud_ws_uplink_set_active(bool active)
+void cloud_ws_uplink_set_active(bool active, uint32_t lease_generation)
 {
     if (!s_initialized || !s_config.enabled || s_client == NULL) {
         return;
     }
 
+    bool applied = false;
     portENTER_CRITICAL(&s_state_lock);
-    s_active = active;
+    applied = cloud_ws_lease_gate_apply(&s_lease_gate, lease_generation, active);
+    if (applied) {
+        s_active = active;
+    }
     portEXIT_CRITICAL(&s_state_lock);
-    xTaskNotifyGive(s_sender_task);
+    if (applied) {
+        xTaskNotifyGive(s_sender_task);
+    }
 }
 
 bool cloud_ws_uplink_send(const uint8_t *data, size_t len)
@@ -317,7 +358,7 @@ bool cloud_ws_uplink_send(const uint8_t *data, size_t len)
     memcpy(frame.data, data, len);
     if (xQueueSend(s_queue, &frame, 0) != pdTRUE) {
         stats_increment(&s_stats.queue_full, 1);
-        if (!s_connected || xQueueReceive(s_queue, &dropped, 0) != pdTRUE) {
+        if (xQueueReceive(s_queue, &dropped, 0) != pdTRUE) {
             return false;
         }
         stats_increment(&s_stats.overload_dropped_frames, dropped.source_frames);

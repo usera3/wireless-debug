@@ -32,7 +32,13 @@ assert source.index('injection["cloud_poll_frames"] = await capture_fallback_win
     'fallback_window_start = time.monotonic()')
 assert 'deadline = time.monotonic() + 2.0' in source
 
-module.ensure_current_firmware({"cloud_ws_uplink": {"schema_version": 4}})
+module.ensure_current_firmware({"cloud_ws_uplink": {"schema_version": 5}})
+try:
+    module.ensure_current_firmware({"cloud_ws_uplink": {"schema_version": 4}})
+except RuntimeError as exc:
+    assert "schema 5" in str(exc)
+else:
+    raise AssertionError("one-way schema 4 firmware must be rejected")
 try:
     module.ensure_current_firmware({})
 except RuntimeError as exc:
@@ -178,7 +184,7 @@ cloud = module.evaluate_result(
     fallback_window_frames=3,
     mqtt_poll_frames=2,
     fallback_injection_completed=True,
-    uplink_schema_version=4,
+    uplink_schema_version=5,
 )
 assert cloud["passed"] is True
 
@@ -239,7 +245,7 @@ unaccounted = module.evaluate_result(
     fallback_window_frames=3,
     mqtt_poll_frames=2,
     fallback_injection_completed=True,
-    uplink_schema_version=4,
+    uplink_schema_version=5,
 )
 assert unaccounted["passed"] is False
 assert unaccounted["checks"]["uplink_frames_accounted"] is False

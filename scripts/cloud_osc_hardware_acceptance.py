@@ -92,8 +92,8 @@ def status_deltas(before: dict[str, Any], after: dict[str, Any]) -> dict[str, in
 
 
 def ensure_current_firmware(status: dict[str, Any]) -> None:
-    if nested_int(status, "cloud_ws_uplink", "schema_version") < 4:
-        raise RuntimeError("latest firmware with cloud WebSocket uplink schema 2 is required")
+    if nested_int(status, "cloud_ws_uplink", "schema_version") < 5:
+        raise RuntimeError("latest firmware with cloud WebSocket uplink schema 5 is required")
 
 
 def percentile(values: list[float], ratio: float) -> float:
@@ -162,7 +162,7 @@ def evaluate_result(mode: str, metrics: dict[str, Any], deltas: dict[str, int],
         })
     else:
         checks.update({
-            "uplink_schema_current": uplink_schema_version >= 2,
+            "uplink_schema_current": uplink_schema_version >= 5,
             "binary_uplink_queued": deltas.get("uplink_queued_frames", 0) > 0,
             "binary_uplink_sent": deltas.get("uplink_sent_frames", 0) > 0,
             "binary_uplink_bytes": deltas.get("uplink_sent_bytes", 0) > 0,

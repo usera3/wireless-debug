@@ -3,6 +3,9 @@ import { readFileSync } from 'node:fs';
 
 const source = readFileSync('main/cloud_mqtt.c', 'utf8');
 const uplink = readFileSync('main/cloud_ws_uplink.c', 'utf8');
+const uplinkHeader = readFileSync('main/cloud_ws_uplink.h', 'utf8');
+const leaseHeader = readFileSync('main/cloud_ws_lease.h', 'utf8');
+const downlinkHeader = readFileSync('main/cloud_ws_downlink_reassembly.h', 'utf8');
 const mainSource = readFileSync('main/main.c', 'utf8');
 const manifest = readFileSync('main/idf_component.yml', 'utf8');
 const cmake = readFileSync('main/CMakeLists.txt', 'utf8');
@@ -15,6 +18,54 @@ assert.match(
   /CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768/,
   'WAN waveform uplink needs a TCP send window large enough to keep data in flight',
 );
+
+assert.ok(
+  uplinkHeader.includes('#define CLOUD_WS_UPLINK_SCHEMA_VERSION 5U'),
+  'raw duplex downlink telemetry must use schema version 5',
+);
+for (const token of [
+  'cloud_ws_uplink_downlink_fn_t',
+  'on_downlink',
+  'downlink_ctx',
+  'downlink_frames',
+  'downlink_bytes',
+  'downlink_failures',
+]) {
+  assert.ok(uplinkHeader.includes(token), `firmware downlink API missing token: ${token}`);
+}
+for (const token of [
+  'CLOUD_WS_DOWNLINK_MAX_BYTES 512U',
+  'cloud_ws_downlink_reassembly_t',
+  'cloud_ws_downlink_reassembly_push',
+  'CLOUD_WS_DOWNLINK_COMPLETE',
+  'CLOUD_WS_DOWNLINK_REJECTED',
+]) {
+  assert.ok(downlinkHeader.includes(token), `bounded downlink reassembly missing token: ${token}`);
+}
+assert.match(
+  uplink,
+  /handle_downlink_data[\s\S]*cloud_ws_downlink_reassembly_push[\s\S]*CLOUD_WS_DOWNLINK_COMPLETE[\s\S]*s_config\.on_downlink/,
+  'completed binary websocket downlink messages must invoke the configured callback',
+);
+assert.match(
+  uplink,
+  /WEBSOCKET_EVENT_DATA[\s\S]*handle_downlink_data/,
+  'binary websocket data events must enter the bounded downlink handler',
+);
+assert.match(
+  mainSource,
+  /cloud_handle_ws_downlink[\s\S]*cloud_mqtt_note_realtime_control\(data, len\)[\s\S]*cloud_send_ws_frame\(data, len, ctx\)/,
+  'direct cloud frames must refresh the response lease before UART forwarding',
+);
+assert.match(
+  mainSource,
+  /cloud_ws_uplink_config_t[\s\S]*\.on_downlink = cloud_handle_ws_downlink[\s\S]*\.downlink_ctx = NULL/,
+  'application startup must wire the raw WSS downlink callback',
+);
+for (const token of ['downlink_frames', 'downlink_bytes', 'downlink_failures']) {
+  assert.ok(source.includes(token), `cloud status missing ${token}`);
+  assert.ok(webApi.includes(token), `local status missing ${token}`);
+}
 assert.match(
   sdkconfig,
   /CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y/,
@@ -29,8 +80,8 @@ assert.match(
 
 assert.match(
   source,
-  /static void publish_ws_frame\([\s\S]*while \(offset < len\)[\s\S]*if \(!osc_streaming \|\| !cloud_ws_uplink_send\(data \+ offset, chunk_len\)\)[\s\S]*cloud_mqtt_publish_ws_fallback\(data \+ offset, chunk_len, NULL\)/,
-  'active osc UART chunks must use MQTT only when the binary uplink cannot accept the newest frame',
+  /static void publish_ws_frame\([\s\S]*while \(offset < len\)[\s\S]*cloud_ws_uplink_send\(data \+ offset, chunk_len\)/,
+  'active cloud UART chunks must use the binary uplink',
 );
 const localStatusBody = webApi.match(
   /static esp_err_t device_status_handler\(httpd_req_t \*req\)\n\{([\s\S]*?)\n\}/,
@@ -58,8 +109,12 @@ const overloadSendBody = uplink.match(
 )?.[1] || '';
 assert.match(
   overloadSendBody,
-  /xQueueSend\(s_queue, &frame, 0\)[\s\S]*s_connected[\s\S]*xQueueReceive\(s_queue, &dropped, 0\)[\s\S]*overload_dropped_frames[\s\S]*xQueueSend\(s_queue, &frame, 0\)/,
-  'connected queue overload must evict the oldest waveform frame and retry the newest frame',
+  /xQueueSend\(s_queue, &frame, 0\)[\s\S]*xQueueReceive\(s_queue, &dropped, 0\)[\s\S]*overload_dropped_frames[\s\S]*xQueueSend\(s_queue, &frame, 0\)/,
+  'queue overload must evict the oldest cloud UART frame and retry the newest frame',
+);
+assert.ok(
+  !overloadSendBody.includes('!s_connected'),
+  'a disconnected uplink must retain the newest bounded data instead of rejecting it',
 );
 for (const token of [
   'WEBSOCKET_EVENT_CONNECTED',
@@ -96,9 +151,15 @@ assert.ok(
   'cloud UART publisher must not reject complete UART callbacks larger than one uplink chunk',
 );
 assert.match(
-  source,
-  /static bool publish_ws_frame_mqtt\([\s\S]*ws_osc_state_snapshot\(&osc_streaming, &active_until_us\)[\s\S]*osc_streaming[\s\S]*esp_mqtt_client_enqueue\([\s\S]*s_client, s_pub_topic, json, 0, 0, 0, true\)/,
-  'active osc MQTT fallback must enqueue QoS 0 frames for asynchronous delivery',
+  publishWsFrameBody,
+  /\(void\)cloud_ws_uplink_send\(data \+ offset, chunk_len\)/,
+  'cloud UART data must be dropped when the binary uplink cannot accept it',
+);
+assert.ok(
+  !publishWsFrameBody.includes('publish_ws_frame_mqtt') &&
+    !publishWsFrameBody.includes('cloud_mqtt_publish_ws_fallback') &&
+    !publishWsFrameBody.includes('!osc_streaming'),
+  'active parameter responses must never fall back to MQTT',
 );
 assert.match(
   source,
@@ -107,7 +168,7 @@ assert.match(
 );
 assert.match(
   source,
-  /is_osc_stop_frame[\s\S]*cloud_ws_uplink_set_active\(false\)/,
+  /is_osc_stop_frame[\s\S]*lease_generation = ws_osc_state_set\(false, 0\)[\s\S]*cloud_ws_uplink_set_active\(false, lease_generation\)/,
   'receiving an osc stop frame must stop the on-demand binary uplink',
 );
 assert.match(
@@ -117,13 +178,21 @@ assert.match(
 );
 assert.match(
   source,
-  /is_osc_start_frame[\s\S]*cloud_ws_uplink_set_active\(osc_streaming\)/,
-  'receiving an osc start frame must start the on-demand binary uplink',
+  /is_osc_start_frame[\s\S]*lease_generation = ws_osc_state_refresh\([\s\S]*cloud_ws_uplink_set_active\(true, lease_generation\)/,
+  'every non-stop cloud UART request must open the binary uplink data window',
 );
 assert.match(
   source,
-  /status_timer_cb[\s\S]*ws_osc_state_expire\(esp_timer_get_time\(\)\)[\s\S]*cloud_ws_uplink_set_active\(false\)/,
+  /status_timer_cb[\s\S]*lease_generation = ws_osc_state_expire\(esp_timer_get_time\(\)\)[\s\S]*cloud_ws_uplink_set_active\(false, lease_generation\)/,
   'expired cloud osc heartbeat window must automatically stop the binary uplink',
+);
+const expireBody = source.match(
+  /static uint32_t ws_osc_state_expire\([^)]*\)\n\{([\s\S]*?)\n\}/,
+)?.[1] || '';
+assert.ok(
+  expireBody.includes('s_ws_active_until_us > 0') &&
+    !expireBody.includes('s_ws_osc_streaming &&'),
+  'inactive parameter polling leases must expire even when address streaming is false',
 );
 for (const token of [
   'static portMUX_TYPE s_ws_osc_state_lock = portMUX_INITIALIZER_UNLOCKED',
@@ -152,8 +221,8 @@ const busWsFrameBody = source.match(
 )?.[1] || '';
 assert.match(
   busWsFrameBody,
-  /bool osc_streaming = ws_osc_state_refresh\([\s\S]*is_osc_start_frame\(frame, frame_len\),[\s\S]*cloud_ws_uplink_set_active\(osc_streaming\)/,
-  'heartbeat refresh and uplink activation must use one atomic osc-state transition result',
+  /cloud_mqtt_note_realtime_control\(frame, frame_len\)/,
+  'MQTT parameter reads and direct WSS reads must share one response lease policy',
 );
 assert.ok(
   !busWsFrameBody.includes('ws_osc_state_snapshot') && !busWsFrameBody.includes('ws_osc_state_set(osc_streaming'),
@@ -209,8 +278,8 @@ assert.match(
 );
 assert.match(
   uplink,
-  /static void sender_task\([\s\S]*uxQueueMessagesWaiting\(s_queue\) == 0[\s\S]*ulTaskNotifyTake\(pdTRUE, portMAX_DELAY\)[\s\S]*active = s_active[\s\S]*s_wifi_ready && active[\s\S]*esp_websocket_client_start[\s\S]*esp_websocket_client_stop[\s\S]*xQueueReceive\(s_queue, &chunk, 0\)/,
-  'one notification-driven worker must own WebSocket lifecycle and non-blocking queue draining',
+  /static void sender_task\([\s\S]*uxQueueMessagesWaiting\(s_queue\) == 0[\s\S]*ulTaskNotifyTake\(pdTRUE, portMAX_DELAY\)[\s\S]*active = s_active[\s\S]*should_run = [\s\S]*s_wifi_ready;[\s\S]*esp_websocket_client_start[\s\S]*esp_websocket_client_stop[\s\S]*if \(!active\)[\s\S]*xQueueReceive\(s_queue, &chunk, 0\)/,
+  'the worker must preconnect on STA readiness and gate only cloud UART data on the active lease',
 );
 const senderTaskBody = uplink.match(
   /static void sender_task\(void \*arg\)\n\{([\s\S]*?)\n\}/,
@@ -250,6 +319,15 @@ for (const api of ['cloud_ws_uplink_notify_wifi_state', 'cloud_ws_uplink_set_act
   );
 }
 assert.ok(
+  uplinkHeader.includes('cloud_ws_uplink_set_active(bool active, uint32_t lease_generation)'),
+  'uplink activation API must carry the lease generation',
+);
+assert.ok(
+  leaseHeader.includes('cloud_ws_lease_gate_apply') &&
+    uplink.includes('cloud_ws_lease_gate_apply(&s_lease_gate, lease_generation, active)'),
+  'uplink desired state must reject stale lease updates through the tested gate',
+);
+assert.ok(
   !uplink.includes('xSemaphoreTake') && !uplink.includes('xSemaphoreCreateMutex'),
   'timer-reachable uplink state updates must not block on a FreeRTOS mutex',
 );
@@ -263,8 +341,8 @@ assert.ok(
 );
 assert.match(
   uplinkSendBody,
-  /if \(xQueueSend\(s_queue, &frame, 0\) != pdTRUE\)[\s\S]*if \(!s_connected \|\| xQueueReceive/,
-  'transient disconnects may continue buffering until queue overload requires MQTT fallback',
+  /if \(xQueueSend\(s_queue, &frame, 0\) != pdTRUE\)[\s\S]*xQueueReceive\(s_queue, &dropped, 0\)/,
+  'transient disconnects must retain newest data with bounded oldest-frame eviction',
 );
 assert.ok(
   uplink.includes('#define CLOUD_WS_UPLINK_QUEUE_DEPTH 64U'),
@@ -283,6 +361,20 @@ assert.match(
   senderTaskBody,
   /cloud_ws_uplink_frame_t next[\s\S]*xQueuePeek\(s_queue, &next,[\s\S]*frame->len \+ next\.len <= CLOUD_WS_UPLINK_SEND_FRAME_MAX[\s\S]*xQueueReceive\(s_queue, &next, 0\)[\s\S]*memcpy\(frame->data \+ frame->len/,
   'cloud uplink worker must coalesce adjacent UART chunks before binary send',
+);
+assert.match(
+  senderTaskBody,
+  /if \(!s_connected \|\| s_client == NULL\) \{[\s\S]*vTaskDelay[\s\S]*continue;[\s\S]*xQueueReceive\(s_queue, &chunk, 0\)/,
+  'a disconnected WSS worker must preserve queued responses without busy spinning',
+);
+assert.ok(
+  !senderTaskBody.includes('fallback_frame('),
+  'queued WSS data must never be drained into MQTT',
+);
+assert.match(
+  senderTaskBody,
+  /sent != \(int\)frame->len[\s\S]*send_failures[\s\S]*overload_dropped_frames, frame->source_frames/,
+  'failed WSS sends must account for dropped source frames without MQTT fallback',
 );
 assert.match(
   uplink,
@@ -347,33 +439,9 @@ assert.ok(
 );
 assert.match(
   mainSource,
-  /\.fallback = cloud_mqtt_publish_ws_fallback/,
-  'async binary WebSocket send failures must fall back to the MQTT waveform publisher',
+  /\.fallback = NULL/,
+  'binary uplink failures must not fall back to MQTT',
 );
-assert.match(
-  source,
-  /bool cloud_mqtt_publish_ws_fallback\([\s\S]*if \(!publish_ws_frame_mqtt\(data, len\)\)[\s\S]*cloud_ws_uplink_note_fallback_failure\(\)[\s\S]*return false;[\s\S]*cloud_ws_uplink_note_fallback\(\)[\s\S]*return true;/,
-  'MQTT fallback must be counted only after the broker accepts the publish',
-);
-assert.match(
-  source,
-  /static bool publish_ws_frame_mqtt\([\s\S]*int message_id = osc_streaming[\s\S]*esp_mqtt_client_enqueue\([\s\S]*esp_mqtt_client_publish\([\s\S]*published = message_id >= 0;[\s\S]*return published;/,
-  'MQTT waveform publisher must expose enqueue success to fallback accounting',
-);
-assert.match(
-  uplink,
-  /void cloud_ws_uplink_note_fallback\(void\)[\s\S]*stats_increment\(&s_stats\.fallback_frames, 1\)/,
-  'all MQTT waveform fallbacks must be observable in uplink telemetry',
-);
-assert.match(
-  uplink,
-  /void cloud_ws_uplink_note_fallback_failure\(void\)[\s\S]*stats_increment\(&s_stats\.fallback_failures, 1\)/,
-  'failed MQTT waveform fallbacks must be observable in uplink telemetry',
-);
-assert.match(
-  uplink,
-  /static void fallback_frame\([\s\S]*while \(offset < frame->len\)[\s\S]*s_config\.fallback\(frame->data \+ offset, chunk_len[\s\S]*if \(complete\)[\s\S]*stats_increment\(&s_stats\.queued_fallback_frames, frame->source_frames\)/,
-  'successful fallback of an already queued frame must be tracked separately',
-);
+assert.ok(!uplink.includes('static void fallback_frame'), 'the WSS worker must not contain an MQTT fallback path');
 
 console.log('cloud osc transport regression passed');

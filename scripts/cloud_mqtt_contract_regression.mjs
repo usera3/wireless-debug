@@ -21,6 +21,7 @@ for (const token of [
   'cloud_mqtt_notify_wifi_state',
   'cloud_mqtt_publish_status_now',
   'cloud_mqtt_publish_ws_frame',
+  'cloud_mqtt_note_realtime_control',
   'set_wifi_mode',
   'set_uart_baud',
   'set_comm_mode',
@@ -122,6 +123,7 @@ for (const token of [
   'handle_bus_ws_frame',
   'publish_ws_frame',
   'send_ws_frame',
+  'cloud_mqtt_note_realtime_control',
   's_runtime.set_wifi_mode',
   's_runtime.set_uart_baud',
   's_runtime.set_comm_mode',
@@ -143,6 +145,12 @@ assert.match(source, /s_runtime\.display_text\(payload_text/,
   'notify channel must render message text through the display callback');
 
 assert.ok(!source.includes('command scaffold only'), 'command scaffold message must be removed');
+
+assert.match(
+  source,
+  /void cloud_mqtt_note_realtime_control\(const uint8_t \*data, size_t len\)[\s\S]*is_osc_stop_frame[\s\S]*ws_osc_state_set\(false, 0\)[\s\S]*ws_osc_state_refresh[\s\S]*cloud_ws_uplink_set_active/,
+  'direct WSS controls must use the existing stop/non-stop response lease policy',
+);
 
 const main = readFileSync(resolve(root, 'main/main.c'), 'utf8');
 for (const token of [

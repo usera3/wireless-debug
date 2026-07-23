@@ -8,6 +8,108 @@ from collections import deque
 from typing import Callable
 
 
+class _DeviceDownlink:
+    def __init__(self, connection=None) -> None:
+        self.connection = connection
+        self.send_lock = threading.Lock()
+
+
+class DeviceDownlinkRouter:
+    """Own active device connections and serialize sends per connection."""
+
+    def __init__(self, max_frame_bytes: int = 512) -> None:
+        self.max_frame_bytes = max(1, int(max_frame_bytes))
+        self._lock = threading.RLock()
+        self._devices: dict[str, _DeviceDownlink] = {}
+        self._sent_frames = 0
+        self._sent_bytes = 0
+        self._dropped_frames = 0
+        self._send_failures = 0
+
+    def attach(self, device_id: str, connection):
+        key = str(device_id)
+        with self._lock:
+            entry = self._devices.get(key)
+            if entry is None:
+                entry = _DeviceDownlink()
+                self._devices[key] = entry
+        with entry.send_lock:
+            with self._lock:
+                previous = entry.connection
+                entry.connection = connection
+        return previous
+
+    def detach(self, device_id: str, connection) -> bool:
+        key = str(device_id)
+        with self._lock:
+            entry = self._devices.get(key)
+        if entry is None:
+            return False
+        with entry.send_lock:
+            with self._lock:
+                if entry.connection is not connection:
+                    return False
+                entry.connection = None
+            return True
+
+    def connected(self, device_id: str) -> bool:
+        with self._lock:
+            entry = self._devices.get(str(device_id))
+            return entry is not None and entry.connection is not None
+
+    def device_count(self) -> int:
+        with self._lock:
+            return sum(entry.connection is not None for entry in self._devices.values())
+
+    def send(self, device_id: str, payload: bytes) -> tuple[bool, str]:
+        data = bytes(payload or b"")
+        if not data:
+            self._note_drop()
+            return False, "empty frame"
+        if len(data) > self.max_frame_bytes:
+            self._note_drop()
+            return False, "frame too large"
+
+        key = str(device_id)
+        with self._lock:
+            entry = self._devices.get(key)
+        if entry is None:
+            self._note_drop()
+            return False, "uplink disconnected"
+
+        with entry.send_lock:
+            with self._lock:
+                connection = entry.connection
+            if connection is None:
+                self._note_drop()
+                return False, "uplink disconnected"
+            try:
+                connection.send(data)
+            except Exception:
+                with self._lock:
+                    self._dropped_frames += 1
+                    self._send_failures += 1
+                return False, "uplink send failed"
+
+            with self._lock:
+                self._sent_frames += 1
+                self._sent_bytes += len(data)
+            return True, "sent"
+
+    def snapshot(self) -> dict[str, int]:
+        with self._lock:
+            return {
+                "sent_frames": self._sent_frames,
+                "sent_bytes": self._sent_bytes,
+                "dropped_frames": self._dropped_frames,
+                "send_failures": self._send_failures,
+            }
+
+    def _note_drop(self) -> None:
+        with self._lock:
+            self._dropped_frames += 1
+
+
 class BrowserSendPump:
     def __init__(self, connection, max_frames: int = 16,
                  on_error: Callable[[Exception], None] | None = None,

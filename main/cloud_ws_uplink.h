@@ -8,9 +8,10 @@
 #include "esp_err.h"
 #include "wifi_manager.h"
 
-#define CLOUD_WS_UPLINK_SCHEMA_VERSION 4U
+#define CLOUD_WS_UPLINK_SCHEMA_VERSION 5U
 
 typedef bool (*cloud_ws_uplink_fallback_fn_t)(const uint8_t *data, size_t len, void *ctx);
+typedef esp_err_t (*cloud_ws_uplink_downlink_fn_t)(const uint8_t *data, size_t len, void *ctx);
 
 typedef struct {
     const char *base_uri;
@@ -18,6 +19,8 @@ typedef struct {
     bool enabled;
     cloud_ws_uplink_fallback_fn_t fallback;
     void *fallback_ctx;
+    cloud_ws_uplink_downlink_fn_t on_downlink;
+    void *downlink_ctx;
 } cloud_ws_uplink_config_t;
 
 typedef struct {
@@ -39,12 +42,15 @@ typedef struct {
     uint32_t disconnect_events;
     uint32_t error_events;
     uint32_t closed_events;
+    uint32_t downlink_frames;
+    uint32_t downlink_bytes;
+    uint32_t downlink_failures;
     int32_t last_event_id;
 } cloud_ws_uplink_stats_t;
 
 esp_err_t cloud_ws_uplink_init(const cloud_ws_uplink_config_t *config);
 void cloud_ws_uplink_notify_wifi_state(const wifi_manager_status_t *status);
-void cloud_ws_uplink_set_active(bool active);
+void cloud_ws_uplink_set_active(bool active, uint32_t lease_generation);
 bool cloud_ws_uplink_send(const uint8_t *data, size_t len);
 bool cloud_ws_uplink_is_connected(void);
 void cloud_ws_uplink_note_fallback(void);

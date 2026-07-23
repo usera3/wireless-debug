@@ -296,16 +296,18 @@ assert.ok(
 );
 assert.match(
   app,
-  /def cloud_ws_uplink_connected\(device_id\):[\s\S]*cloud_ws_uplinks\.get\(device_id\)/,
-  'backend must expose a locked binary-uplink presence check',
+  /def cloud_ws_uplink_connected\(device_id\):[\s\S]*cloud_ws_downlinks\.connected\(device_id\)/,
+  'backend must expose the serialized router binary-uplink presence check',
 );
 for (const token of [
-  'cloud_ws_uplinks',
+  'cloud_ws_downlinks',
   "prefix = '/ws/uplink/'",
   'cloud_ws_browser_handler',
   'cloud_ws_uplink_handler',
+  'send_cloud_ws_downlink',
   'broadcast_remote_ws_bytes',
   'BrowserSendPump',
+  'DeviceDownlinkRouter',
   'CLOUD_WS_BROWSER_QUEUE_FRAMES',
   'CLOUD_WS_MAX_MESSAGE_BYTES',
   "'ws_browser_dropped_frames'",
@@ -314,6 +316,10 @@ for (const token of [
   "cloud websocket uplink connected",
   "'ws_uplink_devices'",
   "'ws_browser_clients'",
+  "'ws_downlink_sent_frames'",
+  "'ws_downlink_sent_bytes'",
+  "'ws_downlink_dropped_frames'",
+  "'ws_downlink_send_failures'",
 ]) {
   assert.ok(app.includes(token), `binary WebSocket uplink missing backend token: ${token}`);
 }
@@ -332,6 +338,24 @@ assert.ok(
 );
 assert.ok(!uplinkHandler.includes('db_connect()'), 'device uplink must not access PostgreSQL');
 assert.ok(!uplinkHandler.includes('mqtt_client'), 'device uplink must not route waveform data through MQTT');
+assert.ok(
+  uplinkHandler.includes('cloud_ws_downlinks.attach(device_id, connection)') &&
+    uplinkHandler.includes('cloud_ws_downlinks.detach(device_id, connection)'),
+  'device uplink lifecycle must be owned by the serialized direct-downlink router',
+);
+const browserHandler = app.match(
+  /def cloud_ws_browser_handler\(connection: ServerConnection, device_id\):([\s\S]*?)\n\ndef /,
+)?.[1] || '';
+assert.ok(browserHandler, 'backend must define a browser websocket handler');
+assert.ok(
+  browserHandler.includes('send_cloud_ws_downlink(device_id, data)'),
+  'browser UART frames must be sent directly through the device websocket',
+);
+assert.ok(
+  !browserHandler.includes('publish_remote_ws_frame') &&
+    !browserHandler.includes('mqtt_client'),
+  'browser websocket downlink must never fall back to MQTT',
+);
 const devicePublishBody = app.match(
   /def record_device_bus_publish\(device_id, payload\):([\s\S]*?)\n\ndef /,
 )?.[1] || '';

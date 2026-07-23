@@ -19,7 +19,7 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.server import ServerConnection, serve
-from ws_fanout import BrowserSendPump
+from ws_fanout import BrowserSendPump, DeviceDownlinkRouter
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -77,7 +77,7 @@ remote_ws_frames = defaultdict(lambda: deque(maxlen=REMOTE_WS_FRAME_LIMIT))
 remote_ws_lock = threading.Lock()
 remote_ws_seq = 0
 cloud_ws_clients = defaultdict(dict)
-cloud_ws_uplinks = {}
+cloud_ws_downlinks = DeviceDownlinkRouter(REMOTE_WS_FRAME_MAX_BYTES)
 cloud_ws_lock = threading.RLock()
 cloud_ws_started = False
 cloud_ws_browser_dropped_frames_total = 0
@@ -732,8 +732,11 @@ def enqueue_remote_ws_frame(device_id, payload_hex):
 
 
 def cloud_ws_uplink_connected(device_id):
-    with cloud_ws_lock:
-        return cloud_ws_uplinks.get(device_id) is not None
+    return cloud_ws_downlinks.connected(device_id)
+
+
+def send_cloud_ws_downlink(device_id, data):
+    return cloud_ws_downlinks.send(device_id, data)
 
 
 def publish_remote_ws_frame(device_id, data):
@@ -1001,9 +1004,9 @@ def cloud_ws_browser_handler(connection: ServerConnection, device_id):
                 data = message.encode('utf-8')
             else:
                 data = bytes(message or b'')
-            ok, msg, _message_id = publish_remote_ws_frame(device_id, data)
+            ok, msg = send_cloud_ws_downlink(device_id, data)
             if not ok:
-                app.logger.warning('cloud websocket publish failed for %s: %s', device_id, msg)
+                app.logger.warning('cloud websocket downlink dropped for %s: %s', device_id, msg)
     except ConnectionClosed as exc:
         app.logger.info(
             'cloud websocket browser closed for %s: code=%s reason=%s',
@@ -1021,10 +1024,7 @@ def cloud_ws_browser_handler(connection: ServerConnection, device_id):
 
 
 def cloud_ws_uplink_handler(connection: ServerConnection, device_id):
-    previous = None
-    with cloud_ws_lock:
-        previous = cloud_ws_uplinks.get(device_id)
-        cloud_ws_uplinks[device_id] = connection
+    previous = cloud_ws_downlinks.attach(device_id, connection)
     if previous is not None and previous is not connection:
         try:
             previous.close(code=1000, reason='uplink replaced')
@@ -1051,9 +1051,7 @@ def cloud_ws_uplink_handler(connection: ServerConnection, device_id):
     except Exception as exc:
         app.logger.warning('cloud websocket uplink closed for %s: %s', device_id, exc)
     finally:
-        with cloud_ws_lock:
-            if cloud_ws_uplinks.get(device_id) is connection:
-                cloud_ws_uplinks.pop(device_id, None)
+        cloud_ws_downlinks.detach(device_id, connection)
         app.logger.info('cloud websocket uplink disconnected: %s', device_id)
 
 
@@ -1412,17 +1410,21 @@ def logout():
 @app.get('/health')
 def health():
     with cloud_ws_lock:
-        ws_uplink_devices = len(cloud_ws_uplinks)
         ws_browser_clients = sum(len(clients) for clients in cloud_ws_clients.values())
         ws_browser_dropped_frames = cloud_ws_browser_dropped_frames_total
+    ws_downlink = cloud_ws_downlinks.snapshot()
     return jsonify({
         'ok': True,
         'mqtt_connected': mqtt_connected.is_set(),
         'namespace': MQTT_NAMESPACE,
         'cloud_ws_port': CLOUD_WS_PORT,
-        'ws_uplink_devices': ws_uplink_devices,
+        'ws_uplink_devices': cloud_ws_downlinks.device_count(),
         'ws_browser_clients': ws_browser_clients,
         'ws_browser_dropped_frames': ws_browser_dropped_frames,
+        'ws_downlink_sent_frames': ws_downlink['sent_frames'],
+        'ws_downlink_sent_bytes': ws_downlink['sent_bytes'],
+        'ws_downlink_dropped_frames': ws_downlink['dropped_frames'],
+        'ws_downlink_send_failures': ws_downlink['send_failures'],
     })
 
 
