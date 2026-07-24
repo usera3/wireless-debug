@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { appendCrc, crc16 } from '../src/lib/crc16';
 import { FrameRouter } from '../src/lib/frameRouter';
 import { parseReadResponse } from '../src/lib/modbus';
+import { parseOscDataFrame } from '../src/lib/oscilloscope';
 
 function hex(bytes: Uint8Array): string {
   return Array.from(bytes)
@@ -63,6 +64,51 @@ for (const splitOffset of [1, 2, 3]) {
     `a ${splitOffset}-byte osc magic prefix must join the next WebSocket message`,
   );
   assert.equal(hex(frames[0]), hex(oscFrame));
+}
+
+{
+  const router = new FrameRouter();
+  const frames: Uint8Array[] = [];
+  const oscFrame = makeOscFrame(250);
+  oscFrame.fill(0, 246, 250);
+
+  router.setFrameLen(250);
+  router.onOscFrame((frame) => frames.push(frame));
+  router.feed(oscFrame);
+
+  assert.equal(frames.length, 1, 'valid CRC must allow a zero osc footer');
+  assert.equal(hex(frames[0]), hex(oscFrame));
+}
+
+{
+  const oscFrame = makeOscFrame(250);
+  oscFrame.fill(0, 246, 250);
+  const parsed = parseOscDataFrame(
+    oscFrame,
+    [{ byteWidth: 2, paramType: 0x00 }],
+    { requireCrc: true },
+  );
+
+  assert.notEqual(parsed, null, 'parser must accept a zero footer when CRC is valid');
+  assert.equal(parsed?.rawData.length, 240);
+}
+
+{
+  const router = new FrameRouter();
+  const frames: Uint8Array[] = [];
+  const oscFrame = corruptOscCrc(makeOscFrame(250));
+  oscFrame.fill(0, 246, 250);
+
+  router.setFrameLen(250);
+  router.onOscFrame((frame) => frames.push(frame));
+  router.feed(oscFrame);
+
+  assert.equal(frames.length, 0, 'zero footer must not bypass an invalid CRC');
+  assert.equal(
+    parseOscDataFrame(oscFrame, [{ byteWidth: 2, paramType: 0x00 }]),
+    null,
+    'parser must reject a frame when both CRC and footer are invalid',
+  );
 }
 
 {

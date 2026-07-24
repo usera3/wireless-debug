@@ -289,8 +289,7 @@ export class FrameRouter {
 
   private isValidOscFrameLen(frameLen: number): boolean {
     if (frameLen < OSC_MIN_FRAME_LEN || this.buf.length < frameLen) return false;
-    const tailOffset = frameLen - MAGIC_LEN;
-    if (!matchMagic(this.buf, tailOffset)) return false;
+    if (!matchMagic(this.buf, 0)) return false;
     const crcOffset = frameLen - MAGIC_LEN - 2;
     return verifyCrc(this.buf.slice(MAGIC_LEN, crcOffset + 2));
   }
