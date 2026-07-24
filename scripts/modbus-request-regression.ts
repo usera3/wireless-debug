@@ -64,4 +64,22 @@ function createSource() {
   assert.equal(source.handlerCount(), 0, 'timed out waits must unsubscribe');
 }
 
+{
+  const source = createSource();
+  const controller = new AbortController();
+  const promise = waitForMatchingModbusFrame({
+    timeoutMs: 200,
+    subscribe: source.subscribe,
+    signal: controller.signal,
+  });
+
+  assert.equal(source.handlerCount(), 1, 'active waits must subscribe once');
+  controller.abort();
+  await assert.rejects(
+    promise,
+    (error: unknown) => error instanceof DOMException && error.name === 'AbortError',
+  );
+  assert.equal(source.handlerCount(), 0, 'aborted waits must unsubscribe immediately');
+}
+
 console.log('modbus request regression passed');
