@@ -34,6 +34,12 @@ function makeOscFrame(frameLen: number): Uint8Array {
   return frame;
 }
 
+function makeFooterAnchoredOscFrame(frameLen: number): Uint8Array {
+  const frame = makeOscFrame(frameLen);
+  frame.set([0x5f, 0x05, 0x01, 0xf4], 0);
+  return frame;
+}
+
 function corruptOscCrc(frame: Uint8Array): Uint8Array {
   const copy = frame.slice();
   copy[copy.length - 6] ^= 0x5a;
@@ -108,6 +114,45 @@ for (const splitOffset of [1, 2, 3]) {
     parseOscDataFrame(oscFrame, [{ byteWidth: 2, paramType: 0x00 }]),
     null,
     'parser must reject a frame when both CRC and footer are invalid',
+  );
+}
+
+{
+  const router = new FrameRouter();
+  const frames: Uint8Array[] = [];
+  const headerAnchored = makeOscFrame(250);
+  headerAnchored.fill(0, 246, 250);
+  const footerAnchored = makeFooterAnchoredOscFrame(250);
+
+  router.setFrameLen(250);
+  router.onOscFrame((frame) => frames.push(frame));
+  router.feed(headerAnchored);
+  router.feed(footerAnchored);
+
+  assert.equal(frames.length, 2, 'alternating valid boundary blocks must both be routed');
+  assert.notEqual(
+    parseOscDataFrame(footerAnchored, [{ byteWidth: 2, paramType: 0x00 }], { requireCrc: true }),
+    null,
+    'parser must accept a CRC-valid footer-anchored block',
+  );
+}
+
+{
+  const router = new FrameRouter();
+  const frames: Uint8Array[] = [];
+  const unanchored = makeOscFrame(250);
+  unanchored.fill(0, 0, 4);
+  unanchored.fill(0, 246, 250);
+
+  router.setFrameLen(250);
+  router.onOscFrame((frame) => frames.push(frame));
+  router.feed(unanchored);
+
+  assert.equal(frames.length, 0, 'CRC alone must not accept an unanchored block');
+  assert.equal(
+    parseOscDataFrame(unanchored, [{ byteWidth: 2, paramType: 0x00 }]),
+    null,
+    'parser must reject a block with neither boundary',
   );
 }
 

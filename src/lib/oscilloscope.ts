@@ -73,10 +73,7 @@ export function parseOscDataFrame(
 
   if (data.length < OVERHEAD) return null;
 
-  // 校验头 magic
-  for (let i = 0; i < HEADER_LEN; i++) {
-    if (data[i] !== MAGIC[i]) return null;
-  }
+  const headerValid = MAGIC.every((byte, index) => data[index] === byte);
 
   // payload 范围：[4 .. data.length - 6)，CRC 在 [data.length-6 .. data.length-4)
   const payloadStart = HEADER_LEN;
@@ -91,7 +88,8 @@ export function parseOscDataFrame(
   const footerValid = MAGIC.every(
     (byte, index) => data[data.length - FOOTER_LEN + index] === byte,
   );
-  if (!crcValid && (options.requireCrc || !footerValid)) return null;
+  if (!headerValid && !footerValid) return null;
+  if (!crcValid && (options.requireCrc || !headerValid || !footerValid)) return null;
 
   const stridePerSample = channels.reduce((a, c) => a + c.byteWidth, 0);
   if (stridePerSample === 0) return null;

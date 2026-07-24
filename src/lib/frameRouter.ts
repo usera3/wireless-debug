@@ -141,7 +141,8 @@ export class FrameRouter {
       }
 
       // ── 寻找 osc 帧头 ─────────────────────────────────────────────────────
-      const headerPos = this.findMagic(0);
+      const configuredFrameAtStart = this.isValidOscFrameLen(this.frameLen);
+      const headerPos = configuredFrameAtStart ? 0 : this.findMagic(0);
 
       if (headerPos < 0) {
         // buffer 中无任何 osc 帧头，按 Modbus 帧长消费完整帧；不完整尾包继续等待。
@@ -289,7 +290,9 @@ export class FrameRouter {
 
   private isValidOscFrameLen(frameLen: number): boolean {
     if (frameLen < OSC_MIN_FRAME_LEN || this.buf.length < frameLen) return false;
-    if (!matchMagic(this.buf, 0)) return false;
+    const headerValid = matchMagic(this.buf, 0);
+    const footerValid = matchMagic(this.buf, frameLen - MAGIC_LEN);
+    if (!headerValid && !footerValid) return false;
     const crcOffset = frameLen - MAGIC_LEN - 2;
     return verifyCrc(this.buf.slice(MAGIC_LEN, crcOffset + 2));
   }
