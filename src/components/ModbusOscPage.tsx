@@ -126,6 +126,10 @@ export function ModbusOscPage() {
   const oscRunning = useOscStore((s) => s.running);
   const { start, stop } = useModbusOscController();
 
+  useEffect(() => {
+    if (!connected && running) stop();
+  }, [connected, running, stop]);
+
   const [csvError, setCsvError] = useState<string | null>(null);
   const [resetViewSignal, setResetViewSignal] = useState(0);
   const importRef = useRef<HTMLInputElement>(null);

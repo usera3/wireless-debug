@@ -7,31 +7,31 @@ import { frameRouter } from '../lib/frameRouter';
 import { completeOscSample } from '../lib/modbusOscSample';
 import { resolveConnectionTarget } from '../lib/connectionTarget';
 import { useConnectionStore } from '../store/connectionStore';
+import { waitForMatchingModbusFrame } from '../lib/modbusRequest';
 import {
   modbusOscCycleAction,
   modbusOscResponseTimeoutMs,
 } from '../lib/modbusOscTransportPolicy';
 
-/** 等待一个匹配当前 FC03 请求的 Modbus 响应帧，超时 reject */
-function waitModbusFrame(timeoutMs: number, expectedRegisterCount: number): Promise<Uint8Array> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      frameRouter.onModbusFrame(() => {});
-      reject(new Error('modbus timeout'));
-    }, timeoutMs);
-
-    frameRouter.onModbusFrame((frame) => {
-      if (parseReadResponse(frame, expectedRegisterCount, { allowBadCrc: true }) == null) return;
-      clearTimeout(timer);
-      frameRouter.onModbusFrame(() => {});
-      resolve(frame);
-    });
+function waitModbusFrame(
+  timeoutMs: number,
+  expectedRegisterCount: number,
+  signal: AbortSignal,
+): Promise<Uint8Array> {
+  return waitForMatchingModbusFrame({
+    timeoutMs,
+    signal,
+    matches: (frame) => (
+      parseReadResponse(frame, expectedRegisterCount, { allowBadCrc: true }) != null
+    ),
   });
 }
 
 // 模块级 timer，切页不会丢失，stop 始终能清掉
 let modbusOscTimer: ReturnType<typeof setInterval> | null = null;
 let modbusOscBusy = false;
+let modbusOscAbortController: AbortController | null = null;
+let modbusOscConsecutiveFailures = 0;
 
 function registerWidth(param: ParamDef): number {
   return param.isFloat ? 2 : 1;
@@ -84,6 +84,10 @@ export function useModbusOscController() {
       window.location.origin,
     );
     const responseTimeoutMs = modbusOscResponseTimeoutMs(target.kind);
+    modbusOscAbortController?.abort();
+    modbusOscAbortController = new AbortController();
+    modbusOscConsecutiveFailures = 0;
+    const signal = modbusOscAbortController.signal;
     resetHistory(pageParams.map((param) => param.alias), 1000 / Math.max(100, currentInterval));
     resetIoStats();
     frameRouter.reset();
@@ -114,7 +118,7 @@ export function useModbusOscController() {
           const count = maxAddr - minAddr + 1;
 
           const frame = buildReadHolding(minAddr, count);
-          const waitP = waitModbusFrame(responseTimeoutMs, count);
+          const waitP = waitModbusFrame(responseTimeoutMs, count, signal);
           recordIoRequest();
           wsClient.send(frame);
           const resp = await waitP;
@@ -135,10 +139,20 @@ export function useModbusOscController() {
           throw new Error('未解析到有效参数');
         }
       } catch (err) {
-        cycleError = err instanceof Error ? err : new Error('通信错误');
-        recordIoError(cycleError.message || '通信错误');
+        if (!signal.aborted) {
+          cycleError = err instanceof Error ? err : new Error('通信错误');
+          recordIoError(cycleError.message || '通信错误');
+        }
       } finally {
-        const cycleAction = modbusOscCycleAction(target.kind, cycleError !== null);
+        modbusOscBusy = false;
+        if (signal.aborted) return;
+
+        modbusOscConsecutiveFailures = cycleError ? modbusOscConsecutiveFailures + 1 : 0;
+        const cycleAction = modbusOscCycleAction(
+          target.kind,
+          cycleError !== null,
+          modbusOscConsecutiveFailures,
+        );
         if (cycleAction === 'append') {
           const completedSamples = completeOscSample(
             pageParams.map((param) => param.alias),
@@ -147,11 +161,11 @@ export function useModbusOscController() {
           pushSamples(completedSamples);
           recordIoSamples(pageParams.length);
         }
-        modbusOscBusy = false;
         if (cycleAction === 'stop') {
           if (modbusOscTimer) clearInterval(modbusOscTimer);
           modbusOscTimer = null;
-          frameRouter.onModbusFrame(() => {});
+          modbusOscAbortController?.abort();
+          modbusOscAbortController = null;
           setRunning(false);
         }
       }
@@ -175,11 +189,13 @@ export function useModbusOscController() {
   ]);
 
   const stop = useCallback(() => {
+    modbusOscAbortController?.abort();
+    modbusOscAbortController = null;
+    modbusOscConsecutiveFailures = 0;
     if (modbusOscTimer) {
       clearInterval(modbusOscTimer);
       modbusOscTimer = null;
     }
-    frameRouter.onModbusFrame(() => {}); // 释放 handler
     modbusOscBusy = false;
     setRunning(false);
   }, [setRunning]);
