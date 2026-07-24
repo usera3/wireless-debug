@@ -345,16 +345,12 @@ assert.match(
   'transient disconnects must retain newest data with bounded oldest-frame eviction',
 );
 assert.ok(
-  uplink.includes('#define CLOUD_WS_UPLINK_QUEUE_DEPTH 64U'),
+  uplink.includes('#define CLOUD_WS_UPLINK_QUEUE_DEPTH 128U'),
   'cloud binary uplink queue must absorb mobile-network jitter without blocking UART',
 );
 assert.ok(
   uplink.includes('#define CLOUD_WS_UPLINK_SEND_FRAME_MAX 2048U'),
   'cloud worker must use smooth bounded binary WebSocket frames',
-);
-assert.ok(
-  uplink.includes('#define CLOUD_WS_UPLINK_COALESCE_WAIT_MS 10'),
-  'cloud worker must briefly wait for adjacent UART chunks before sending',
 );
 assert.match(
   uplink,
@@ -363,8 +359,8 @@ assert.match(
 );
 assert.match(
   senderTaskBody,
-  /cloud_ws_uplink_frame_t next[\s\S]*xQueuePeek\(s_queue, &next,[\s\S]*pdMS_TO_TICKS\(CLOUD_WS_UPLINK_COALESCE_WAIT_MS\)[\s\S]*frame->len \+ next\.len <= CLOUD_WS_UPLINK_SEND_FRAME_MAX[\s\S]*xQueueReceive\(s_queue, &next, 0\)[\s\S]*memcpy\(frame->data \+ frame->len/,
-  'cloud uplink worker must coalesce adjacent UART chunks before binary send',
+  /cloud_ws_uplink_frame_t next[\s\S]*xQueuePeek\(s_queue, &next, 0\)[\s\S]*frame->len \+ next\.len <= CLOUD_WS_UPLINK_SEND_FRAME_MAX[\s\S]*xQueueReceive\(s_queue, &next, 0\)[\s\S]*memcpy\(frame->data \+ frame->len/,
+  'cloud uplink worker must coalesce only an existing backlog without blocking UART flow',
 );
 assert.match(
   senderTaskBody,

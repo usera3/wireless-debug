@@ -15,8 +15,7 @@
 
 #define CLOUD_WS_UPLINK_MAX_FRAME 512U
 #define CLOUD_WS_UPLINK_SEND_FRAME_MAX 2048U
-#define CLOUD_WS_UPLINK_COALESCE_WAIT_MS 10
-#define CLOUD_WS_UPLINK_QUEUE_DEPTH 64U
+#define CLOUD_WS_UPLINK_QUEUE_DEPTH 128U
 #define CLOUD_WS_UPLINK_URI_MAX_LEN 192U
 #define CLOUD_WS_UPLINK_SEND_TIMEOUT_MS 5000
 
@@ -181,8 +180,7 @@ static void sender_task(void *arg)
             frame->len = chunk.len;
             frame->source_frames = chunk.source_frames;
             memcpy(frame->data, chunk.data, chunk.len);
-            while (xQueuePeek(s_queue, &next,
-                              pdMS_TO_TICKS(CLOUD_WS_UPLINK_COALESCE_WAIT_MS)) == pdTRUE &&
+            while (xQueuePeek(s_queue, &next, 0) == pdTRUE &&
                    frame->len + next.len <= CLOUD_WS_UPLINK_SEND_FRAME_MAX) {
                 if (xQueueReceive(s_queue, &next, 0) != pdTRUE) {
                     break;
