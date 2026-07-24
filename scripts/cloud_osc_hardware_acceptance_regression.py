@@ -325,6 +325,12 @@ async def verify_stream_control():
         uplink_url="ws://cloud/ws/uplink/device", connect=fake_connect,
         mark_fallback_window=mark_fallback_window)
     assert browser.sent[0] == module.STOP_FRAME
+    assert browser.sent[1:5] == [
+        module.set_channel_frame(1, param_type=0, address=0xC52C),
+        module.set_channel_frame(2, param_type=0, address=0),
+        module.set_channel_frame(3, param_type=0, address=0),
+        module.set_channel_frame(4, param_type=0, address=0),
+    ]
     assert module.START_FRAME in browser.sent
     assert module.HEARTBEAT_FRAME in browser.sent
     assert browser.sent[-1] == module.STOP_FRAME

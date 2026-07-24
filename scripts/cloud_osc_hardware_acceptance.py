@@ -23,6 +23,12 @@ OSC_HEADER = bytes.fromhex("ff77aa55")
 START_FRAME = bytes.fromhex("ff7100000000681f")
 STOP_FRAME = bytes.fromhex("ff72000000002c1f")
 HEARTBEAT_FRAME = bytes.fromhex("ff0800000000f5d5")
+OSC_CHANNEL_CONFIG = (
+    (0, 0xC52C),
+    (0, 0),
+    (0, 0),
+    (0, 0),
+)
 
 
 def crc16(data: bytes) -> int:
@@ -268,8 +274,8 @@ async def run_stream(ws: Any, duration: float, inject_fallback: bool,
     try:
         await ws.send(STOP_FRAME)
         await asyncio.sleep(0.25)
-        for channel in range(1, 5):
-            await ws.send(set_channel_frame(channel))
+        for channel, (param_type, address) in enumerate(OSC_CHANNEL_CONFIG, start=1):
+            await ws.send(set_channel_frame(channel, param_type, address))
             await asyncio.sleep(0.08)
         await ws.send(START_FRAME)
         await asyncio.sleep(1.0)
