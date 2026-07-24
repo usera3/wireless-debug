@@ -995,7 +995,7 @@ void app_main(void)
         .base_uri = CONFIG_CLOUD_WS_UPLINK_URI,
         .device_id = s_cloud_device_id,
         .enabled = CONFIG_CLOUD_MQTT_ENABLE && CONFIG_CLOUD_WS_UPLINK_ENABLE,
-        .fallback = NULL,
+        .fallback = cloud_mqtt_publish_ws_fallback,
         .fallback_ctx = NULL,
         .on_downlink = cloud_handle_ws_downlink,
         .downlink_ctx = NULL,

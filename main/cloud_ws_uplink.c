@@ -14,10 +14,10 @@
 #include "freertos/task.h"
 
 #define CLOUD_WS_UPLINK_MAX_FRAME 512U
-#define CLOUD_WS_UPLINK_SEND_FRAME_MAX 8192U
+#define CLOUD_WS_UPLINK_SEND_FRAME_MAX 2048U
 #define CLOUD_WS_UPLINK_QUEUE_DEPTH 64U
 #define CLOUD_WS_UPLINK_URI_MAX_LEN 192U
-#define CLOUD_WS_UPLINK_SEND_TIMEOUT_MS 1000
+#define CLOUD_WS_UPLINK_SEND_TIMEOUT_MS 5000
 
 typedef struct {
     size_t len;
@@ -103,6 +103,30 @@ static void handle_downlink_data(const esp_websocket_event_data_t *event)
     stats_increment(&s_stats.downlink_bytes, (uint32_t)frame_len);
 }
 
+static bool fallback_frame(const cloud_ws_uplink_send_frame_t *frame)
+{
+    if (frame == NULL || frame->len == 0 || s_config.fallback == NULL) {
+        return false;
+    }
+
+    bool complete = true;
+    size_t offset = 0;
+    while (offset < frame->len) {
+        size_t chunk_len = frame->len - offset;
+        if (chunk_len > CLOUD_WS_UPLINK_MAX_FRAME) {
+            chunk_len = CLOUD_WS_UPLINK_MAX_FRAME;
+        }
+        if (!s_config.fallback(frame->data + offset, chunk_len, s_config.fallback_ctx)) {
+            complete = false;
+        }
+        offset += chunk_len;
+    }
+    if (complete) {
+        stats_increment(&s_stats.queued_fallback_frames, frame->source_frames);
+    }
+    return complete;
+}
+
 static void sender_task(void *arg)
 {
     (void)arg;
@@ -152,11 +176,6 @@ static void sender_task(void *arg)
             continue;
         }
 
-        if (!s_connected || s_client == NULL) {
-            vTaskDelay(pdMS_TO_TICKS(20));
-            continue;
-        }
-
         if (xQueueReceive(s_queue, &chunk, 0) == pdTRUE) {
             frame->len = chunk.len;
             frame->source_frames = chunk.source_frames;
@@ -170,6 +189,12 @@ static void sender_task(void *arg)
                 frame->len += next.len;
                 frame->source_frames += next.source_frames;
             }
+            if (!s_connected || s_client == NULL) {
+                if (!fallback_frame(frame)) {
+                    stats_increment(&s_stats.overload_dropped_frames, frame->source_frames);
+                }
+                continue;
+            }
             int sent = esp_websocket_client_send_bin(
                 s_client,
                 (const char *)frame->data,
@@ -177,7 +202,9 @@ static void sender_task(void *arg)
                 pdMS_TO_TICKS(CLOUD_WS_UPLINK_SEND_TIMEOUT_MS));
             if (sent != (int)frame->len) {
                 stats_increment(&s_stats.send_failures, 1);
-                stats_increment(&s_stats.overload_dropped_frames, frame->source_frames);
+                if (!fallback_frame(frame)) {
+                    stats_increment(&s_stats.overload_dropped_frames, frame->source_frames);
+                }
                 ESP_LOGW(TAG, "binary send failed: sent=%d len=%u", sent, (unsigned)frame->len);
             } else {
                 stats_increment(&s_stats.sent_frames, frame->source_frames);

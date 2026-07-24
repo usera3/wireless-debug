@@ -74,7 +74,7 @@ assert.match(
 
 assert.match(
   uplink,
-  /#define CLOUD_WS_UPLINK_SEND_TIMEOUT_MS 1000/,
+  /#define CLOUD_WS_UPLINK_SEND_TIMEOUT_MS 5000/,
   'cloud websocket network operations must tolerate normal WAN latency',
 );
 
@@ -349,8 +349,8 @@ assert.ok(
   'cloud binary uplink queue must absorb mobile-network jitter without blocking UART',
 );
 assert.ok(
-  uplink.includes('#define CLOUD_WS_UPLINK_SEND_FRAME_MAX 8192U'),
-  'cloud worker must aggregate raw chunks into larger binary WebSocket frames',
+  uplink.includes('#define CLOUD_WS_UPLINK_SEND_FRAME_MAX 2048U'),
+  'cloud worker must use smooth bounded binary WebSocket frames',
 );
 assert.match(
   uplink,
@@ -364,17 +364,18 @@ assert.match(
 );
 assert.match(
   senderTaskBody,
-  /if \(!s_connected \|\| s_client == NULL\) \{[\s\S]*vTaskDelay[\s\S]*continue;[\s\S]*xQueueReceive\(s_queue, &chunk, 0\)/,
-  'a disconnected WSS worker must preserve queued responses without busy spinning',
-);
-assert.ok(
-  !senderTaskBody.includes('fallback_frame('),
-  'queued WSS data must never be drained into MQTT',
+  /if \(!s_connected \|\| s_client == NULL\)[\s\S]*fallback_frame\(frame\)/,
+  'a disconnected WSS worker must drain queued responses through MQTT fallback',
 );
 assert.match(
   senderTaskBody,
-  /sent != \(int\)frame->len[\s\S]*send_failures[\s\S]*overload_dropped_frames, frame->source_frames/,
-  'failed WSS sends must account for dropped source frames without MQTT fallback',
+  /sent != \(int\)frame->len[\s\S]*send_failures[\s\S]*fallback_frame\(frame\)/,
+  'failed WSS sends must retry the complete source frame through MQTT fallback',
+);
+assert.match(
+  uplink,
+  /fallback_frame[\s\S]*queued_fallback_frames/,
+  'successful queued fallback must account for every source frame',
 );
 assert.match(
   uplink,
@@ -439,9 +440,8 @@ assert.ok(
 );
 assert.match(
   mainSource,
-  /\.fallback = NULL/,
-  'binary uplink failures must not fall back to MQTT',
+  /\.fallback = cloud_mqtt_publish_ws_fallback[\s\S]*\.fallback_ctx = NULL/,
+  'binary uplink failures must fall back to the existing MQTT transport',
 );
-assert.ok(!uplink.includes('static void fallback_frame'), 'the WSS worker must not contain an MQTT fallback path');
 
 console.log('cloud osc transport regression passed');
