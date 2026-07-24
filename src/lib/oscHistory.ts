@@ -135,18 +135,31 @@ class ChannelHistory {
     return out;
   }
 
-  minMaxRange(startInclusive: number, endExclusive: number): { min: number; max: number } | null {
+  minMaxRange(startInclusive: number, endExclusive: number): {
+    min: number;
+    max: number;
+    minSampleIndex: number;
+    maxSampleIndex: number;
+  } | null {
     let min = Number.POSITIVE_INFINITY;
     let max = Number.NEGATIVE_INFINITY;
+    let minSampleIndex = -1;
+    let maxSampleIndex = -1;
 
-    this.forEachRange(startInclusive, endExclusive, (value) => {
+    this.forEachRange(startInclusive, endExclusive, (value, sampleIndex) => {
       if (!Number.isFinite(value)) return;
-      if (value < min) min = value;
-      if (value > max) max = value;
+      if (value < min) {
+        min = value;
+        minSampleIndex = sampleIndex;
+      }
+      if (value > max) {
+        max = value;
+        maxSampleIndex = sampleIndex;
+      }
     });
 
-    if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
-    return { min, max };
+    if (minSampleIndex < 0 || maxSampleIndex < 0) return null;
+    return { min, max, minSampleIndex, maxSampleIndex };
   }
 
   estimatedBytes(): number {
@@ -334,8 +347,11 @@ export class OscHistory {
           out[pointOffset] = null;
           if (bucketEnd - 1 !== bucketStart) out[pointOffset + 1] = null;
         } else {
-          out[pointOffset] = range.min;
-          if (bucketEnd - 1 !== bucketStart) out[pointOffset + 1] = range.max;
+          const minFirst = range.minSampleIndex <= range.maxSampleIndex;
+          out[pointOffset] = minFirst ? range.min : range.max;
+          if (bucketEnd - 1 !== bucketStart) {
+            out[pointOffset + 1] = minFirst ? range.max : range.min;
+          }
         }
       });
     }
