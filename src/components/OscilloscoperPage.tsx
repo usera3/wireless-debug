@@ -12,7 +12,7 @@ import { OscChart } from './OscChart';
 import { useOscController } from '../hooks/useOscController';
 import { exportCsv, importCsv } from '../lib/csvWave';
 import { resolveConnectionTarget } from '../lib/connectionTarget';
-import { describeOscTransport } from '../lib/oscTransport';
+import { describeOscTransport, shouldStopOscOnDisconnect } from '../lib/oscTransport';
 import { oscPlotPointBudget } from '../lib/oscRenderBudget';
 
 function createMockOscData(): Map<number, number[]> {
@@ -80,9 +80,13 @@ export function OscilloscoperPage() {
   const url = useConnectionStore((s) => s.url);
   const modbusOscRunning = useModbusOscStore((s) => s.running);
   const { start, stop } = useOscController();
-  const transport = useMemo(
-    () => describeOscTransport(resolveConnectionTarget(url, window.location.origin)),
+  const connectionTarget = useMemo(
+    () => resolveConnectionTarget(url, window.location.origin),
     [url],
+  );
+  const transport = useMemo(
+    () => describeOscTransport(connectionTarget),
+    [connectionTarget],
   );
 
   const [csvError, setCsvError] = useState<string | null>(null);
@@ -90,8 +94,8 @@ export function OscilloscoperPage() {
   const importRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!connected && running) stop();
-  }, [connected, running, stop]);
+    if (!connected && running && shouldStopOscOnDisconnect(connectionTarget.kind)) stop();
+  }, [connected, running, stop, connectionTarget.kind]);
 
   const configuredChannels = useMemo(() => buildChannelConfigs(configRows, numChannels), [configRows, numChannels]);
   const activeChannels = channels.length > 0 ? channels : configuredChannels;

@@ -12,6 +12,8 @@ import { OscChart } from './OscChart';
 import { exportCsv, importCsv } from '../lib/csvWave';
 import type { AlignedData } from '../lib/oscHistory';
 import { oscPlotPointBudget } from '../lib/oscRenderBudget';
+import { resolveConnectionTarget } from '../lib/connectionTarget';
+import { shouldStopOscOnDisconnect } from '../lib/oscTransport';
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -123,12 +125,17 @@ export function ModbusOscPage() {
   const pages = useParamStore((s) => s.pages);
   const params = useParamStore((s) => s.params);
   const connected = useConnectionStore((s) => s.connected);
+  const connectionUrl = useConnectionStore((s) => s.url);
+  const connectionKind = useMemo(
+    () => resolveConnectionTarget(connectionUrl, window.location.origin).kind,
+    [connectionUrl],
+  );
   const oscRunning = useOscStore((s) => s.running);
   const { start, stop } = useModbusOscController();
 
   useEffect(() => {
-    if (!connected && running) stop();
-  }, [connected, running, stop]);
+    if (!connected && running && shouldStopOscOnDisconnect(connectionKind)) stop();
+  }, [connected, running, stop, connectionKind]);
 
   const [csvError, setCsvError] = useState<string | null>(null);
   const [resetViewSignal, setResetViewSignal] = useState(0);

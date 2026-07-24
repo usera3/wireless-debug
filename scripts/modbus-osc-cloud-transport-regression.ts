@@ -25,10 +25,19 @@ assert.match(controller, /if \(cycleAction === 'append'\)[\s\S]*pushSamples/);
 assert.match(controller, /modbusOscAbortController\?\.abort\(\)/);
 
 const pageSource = readFileSync('src/components/ModbusOscPage.tsx', 'utf8');
+assert.match(pageSource, /shouldStopOscOnDisconnect/);
 assert.match(
   pageSource,
-  /useEffect\(\(\) => \{[\s\S]*if \(!connected && running\) stop\(\)/,
-  'connection loss must stop parameter polling immediately',
+  /if \(!connected && running && shouldStopOscOnDisconnect\(connectionKind\)\) stop\(\)/,
+  'only local connection loss must stop parameter polling immediately',
+);
+
+const oscPageSource = readFileSync('src/components/OscilloscoperPage.tsx', 'utf8');
+assert.match(oscPageSource, /shouldStopOscOnDisconnect/);
+assert.match(
+  oscPageSource,
+  /if \(!connected && running && shouldStopOscOnDisconnect\(connectionTarget\.kind\)\) stop\(\)/,
+  'cloud address sampling must survive transient browser reconnects',
 );
 
 console.log('modbus osc cloud transport regression passed');
