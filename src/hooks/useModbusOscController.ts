@@ -145,28 +145,28 @@ export function useModbusOscController() {
         }
       } finally {
         modbusOscBusy = false;
-        if (signal.aborted) return;
-
-        modbusOscConsecutiveFailures = cycleError ? modbusOscConsecutiveFailures + 1 : 0;
-        const cycleAction = modbusOscCycleAction(
-          target.kind,
-          cycleError !== null,
-          modbusOscConsecutiveFailures,
-        );
-        if (cycleAction === 'append') {
-          const completedSamples = completeOscSample(
-            pageParams.map((param) => param.alias),
-            samples,
+        if (!signal.aborted) {
+          modbusOscConsecutiveFailures = cycleError ? modbusOscConsecutiveFailures + 1 : 0;
+          const cycleAction = modbusOscCycleAction(
+            target.kind,
+            cycleError !== null,
+            modbusOscConsecutiveFailures,
           );
-          pushSamples(completedSamples);
-          recordIoSamples(pageParams.length);
-        }
-        if (cycleAction === 'stop') {
-          if (modbusOscTimer) clearInterval(modbusOscTimer);
-          modbusOscTimer = null;
-          modbusOscAbortController?.abort();
-          modbusOscAbortController = null;
-          setRunning(false);
+          if (cycleAction === 'append') {
+            const completedSamples = completeOscSample(
+              pageParams.map((param) => param.alias),
+              samples,
+            );
+            pushSamples(completedSamples);
+            recordIoSamples(pageParams.length);
+          }
+          if (cycleAction === 'stop') {
+            if (modbusOscTimer) clearInterval(modbusOscTimer);
+            modbusOscTimer = null;
+            modbusOscAbortController?.abort();
+            modbusOscAbortController = null;
+            setRunning(false);
+          }
         }
       }
     };
