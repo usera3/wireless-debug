@@ -92,6 +92,24 @@ def main() -> None:
     wait_until(lambda: len(paced_connection.sent) == 3)
     assert paced_connection.sent == [b"abcd", b"efgh", b"ijkl"]
     paced.close()
+
+    coalesced_connection = RecordingConnection()
+    coalesced = module.BrowserSendPump(
+        coalesced_connection,
+        max_frames=16,
+        chunk_bytes=8,
+        min_send_interval=0.05,
+    )
+    coalesced.start()
+    assert coalesced.enqueue(b"warm")
+    wait_until(lambda: coalesced_connection.sent == [b"warm"])
+    for payload in (b"ab", b"cd", b"ef", b"gh"):
+        assert coalesced.enqueue(payload)
+    wait_until(lambda: len(coalesced_connection.sent) >= 2)
+    assert coalesced_connection.sent[1] == b"abcdefgh", (
+        "small frames queued during pacing must share one browser send"
+    )
+    coalesced.close()
     print("cloud WebSocket fanout regression passed")
 
 

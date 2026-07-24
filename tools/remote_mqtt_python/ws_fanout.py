@@ -154,6 +154,17 @@ class BrowserSendPump:
             self._frames.clear()
             self._condition.notify_all()
 
+    def _coalesce_queued(self, payload: bytes) -> bytes:
+        if self.chunk_bytes <= 0 or len(payload) >= self.chunk_bytes:
+            return payload
+
+        merged = bytearray(payload)
+        with self._condition:
+            while (self._frames and
+                   len(merged) + len(self._frames[0]) <= self.chunk_bytes):
+                merged.extend(self._frames.popleft())
+        return bytes(merged)
+
     def _run(self) -> None:
         while True:
             with self._condition:
@@ -172,6 +183,7 @@ class BrowserSendPump:
                 delay = self.min_send_interval - (time.monotonic() - self._last_send_at)
                 if delay > 0:
                     time.sleep(delay)
+                chunk = self._coalesce_queued(chunk)
                 try:
                     self.connection.send(chunk)
                     self._last_send_at = time.monotonic()
