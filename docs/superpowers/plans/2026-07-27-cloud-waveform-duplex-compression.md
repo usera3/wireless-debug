@@ -14,7 +14,7 @@
 - Web root: `/mnt/d/Users/sunqi39/Desktop/.codex-osc-continuity-20260723` on branch `fix/cloud-osc-reliability-web-20260724`.
 - Envelope magic is `WDZ1`; codec `0` is raw; codec `1` is zlib; reserved bytes are zero; length and CRC32 are network-byte-order; maximum uncompressed aggregate is exactly `32768` bytes.
 - New firmware sends `WDC1`; the server never sends `WDC1` unsolicited; firmware consumes a complete reply and never forwards it to UART.
-- Use ESP ROM `miniz.h`, `mz_compress2(..., MZ_BEST_SPEED)`, and `mz_crc32(MZ_CRC32_INIT, ...)`; add no third-party compression component.
+- Use ESP ROM `miniz.h`, the level-1-equivalent `tdefl` flags (`TDEFL_WRITE_ZLIB_HEADER | TDEFL_GREEDY_PARSING_FLAG | 1`), and `mz_crc32(MZ_CRC32_INIT, ...)`; add no third-party compression component.
 - Preserve the existing 128-frame bounded PSRAM source queue, oldest-frame overload eviction, raw downlink controls, automatic reconnect, and bounded MQTT failure fallback.
 - Aggregation drains only chunks already queued and adds no coalescing delay.
 - Preserve local AP WebSocket bytes and all verified local parameter/address oscilloscope behavior.
@@ -394,7 +394,7 @@ Expected for schema-5 firmware: no server-sent `WDC1`, `waveform_codec.activatio
 - Modify: `main/CMakeLists.txt`
 
 **Interfaces:**
-- Produces: `cloud_waveform_encode(raw, raw_len, wire, wire_capacity, wire_len, result) -> bool`.
+- Produces: `cloud_waveform_encoder_workspace_size()`, `cloud_waveform_encoder_init()`, and `cloud_waveform_encode(encoder, raw, raw_len, wire, wire_capacity, wire_len, result) -> bool`.
 - Produces: `cloud_waveform_encode_result_t { codec, compression_failed, raw_len, wire_len }`.
 - Consumes: Task 1 fixture JSON and cloud `WaveformDecoder`.
 
@@ -441,13 +441,22 @@ typedef struct {
     size_t wire_len;
 } cloud_waveform_encode_result_t;
 
-bool cloud_waveform_encode(const uint8_t *raw, size_t raw_len,
+typedef struct {
+    void *workspace;
+    size_t workspace_size;
+} cloud_waveform_encoder_t;
+
+size_t cloud_waveform_encoder_workspace_size(void);
+bool cloud_waveform_encoder_init(cloud_waveform_encoder_t *encoder,
+                                 void *workspace, size_t workspace_size);
+bool cloud_waveform_encode(cloud_waveform_encoder_t *encoder,
+                           const uint8_t *raw, size_t raw_len,
                            uint8_t *wire, size_t wire_capacity,
                            size_t *wire_len,
                            cloud_waveform_encode_result_t *result);
 ```
 
-Write header fields byte-by-byte in network order. Call `mz_compress2(wire + 16, &compressed_len, raw, raw_len, MZ_BEST_SPEED)` with destination capacity `raw_len`; select codec `1` only when the call returns `MZ_OK` and `compressed_len < raw_len`. Otherwise copy raw bytes after the header, select codec `0`, and set `compression_failed` only when Miniz returned neither `MZ_OK` nor the expected no-gain/buffer result.
+Write header fields byte-by-byte in network order. Initialize a reusable caller-owned `tdefl_compressor` workspace, then call `tdefl_init()` with zlib header, greedy parsing, and one dictionary probe before `tdefl_compress(..., TDEFL_FINISH)` with destination capacity `raw_len`. Select codec `1` only when status is `TDEFL_STATUS_DONE`, all input was consumed, and output is smaller than raw; otherwise emit codec `0`. This is ESP ROM's available level-1-equivalent path because ESP32-S3 defines `MINIZ_NO_ZLIB_APIS` and does not expose `mz_compress2`.
 
 - [ ] **Step 4: Add the host Miniz shim and ESP component dependency**
 
@@ -554,7 +563,7 @@ Expected: FAIL because `cloud_ws_compression_state.h` is missing.
 
 - [ ] **Step 4: Add PSRAM-first raw and wire buffers**
 
-Replace the 2,048-byte aggregate object with two separately allocated buffers sized `CLOUD_WAVEFORM_MAX_RAW_SIZE` and `CLOUD_WAVEFORM_MAX_WIRE_SIZE`. Allocate each with `MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT`, fall back to internal RAM, and leave compression capability false if the wire buffer cannot be allocated while retaining legacy raw upload through the raw buffer. Preserve the existing 128-entry queue and 512-byte source chunks.
+Replace the 2,048-byte aggregate object with separately allocated raw, wire, and `tdefl_compressor` workspace buffers. Allocate each with `MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT`, fall back to internal RAM, and leave compression capability false if either wire buffer or compressor workspace cannot be allocated while retaining legacy raw upload through the raw buffer. Preserve the existing 128-entry queue and 512-byte source chunks.
 
 - [ ] **Step 5: Send one offer from the sender task and consume its reply**
 

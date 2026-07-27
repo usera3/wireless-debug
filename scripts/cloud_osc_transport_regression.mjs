@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 const source = readFileSync('main/cloud_mqtt.c', 'utf8');
 const uplink = readFileSync('main/cloud_ws_uplink.c', 'utf8');
 const uplinkHeader = readFileSync('main/cloud_ws_uplink.h', 'utf8');
+const compressionStateHeader = readFileSync('main/cloud_ws_compression_state.h', 'utf8');
 const leaseHeader = readFileSync('main/cloud_ws_lease.h', 'utf8');
 const downlinkHeader = readFileSync('main/cloud_ws_downlink_reassembly.h', 'utf8');
 const mainSource = readFileSync('main/main.c', 'utf8');
@@ -44,8 +45,15 @@ for (const token of [
 }
 assert.match(
   uplink,
-  /handle_downlink_data[\s\S]*cloud_ws_downlink_reassembly_push[\s\S]*CLOUD_WS_DOWNLINK_COMPLETE[\s\S]*s_config\.on_downlink/,
+  /handle_downlink_data[\s\S]*cloud_ws_downlink_reassembly_push[\s\S]*CLOUD_WS_DOWNLINK_COMPLETE[\s\S]*cloud_ws_compression_accept_reply[\s\S]*s_config\.on_downlink/,
   'completed binary websocket downlink messages must invoke the configured callback',
+);
+assert.ok(
+  compressionStateHeader.includes('CLOUD_WS_CAPABILITY "WDC1"') &&
+    compressionStateHeader.includes('cloud_ws_compression_take_offer') &&
+    compressionStateHeader.includes('cloud_ws_compression_accept_reply') &&
+    compressionStateHeader.includes('cloud_ws_compression_on_disconnected'),
+  'compression negotiation must use the tested connection-local state machine',
 );
 assert.match(
   uplink,
@@ -349,27 +357,59 @@ assert.ok(
   'cloud binary uplink queue must absorb mobile-network jitter without blocking UART',
 );
 assert.ok(
-  uplink.includes('#define CLOUD_WS_UPLINK_SEND_FRAME_MAX 2048U'),
-  'cloud worker must use smooth bounded binary WebSocket frames',
+  uplink.includes('CLOUD_WAVEFORM_MAX_RAW_SIZE'),
+  'cloud worker must drain a bounded 32768-byte raw aggregate',
 );
 assert.match(
   uplink,
-  /s_send_frame\s*=\s*heap_caps_calloc\([\s\S]*MALLOC_CAP_SPIRAM[\s\S]*if \(s_send_frame == NULL\)[\s\S]*heap_caps_calloc\([\s\S]*MALLOC_CAP_INTERNAL/,
-  'large aggregation buffer must prefer PSRAM and retain an internal-RAM fallback',
+  /s_raw_aggregate\s*=\s*heap_caps_calloc\([\s\S]*MALLOC_CAP_SPIRAM[\s\S]*if \(s_raw_aggregate == NULL\)[\s\S]*heap_caps_calloc\([\s\S]*MALLOC_CAP_INTERNAL/,
+  'raw aggregation buffer must prefer PSRAM and retain an internal-RAM fallback',
+);
+assert.match(
+  uplink,
+  /s_wire_aggregate\s*=\s*heap_caps_calloc\([\s\S]*MALLOC_CAP_SPIRAM[\s\S]*if \(s_wire_aggregate == NULL\)[\s\S]*heap_caps_calloc\([\s\S]*MALLOC_CAP_INTERNAL/,
+  'wire envelope buffer must prefer PSRAM and retain an internal-RAM fallback',
+);
+assert.match(
+  uplink,
+  /s_compressor_workspace\s*=\s*heap_caps_calloc\([\s\S]*MALLOC_CAP_SPIRAM[\s\S]*if \(s_compressor_workspace == NULL\)[\s\S]*heap_caps_calloc\([\s\S]*MALLOC_CAP_INTERNAL/,
+  'Miniz compressor workspace must prefer PSRAM and retain an internal-RAM fallback',
+);
+assert.match(
+  uplink,
+  /cloud_waveform_encoder_init\(\s*&s_waveform_encoder,[\s\S]*s_compressor_workspace/,
+  'uplink must bind the reusable Miniz workspace before advertising capability',
 );
 assert.match(
   senderTaskBody,
-  /cloud_ws_uplink_frame_t next[\s\S]*xQueuePeek\(s_queue, &next, 0\)[\s\S]*frame->len \+ next\.len <= CLOUD_WS_UPLINK_SEND_FRAME_MAX[\s\S]*xQueueReceive\(s_queue, &next, 0\)[\s\S]*memcpy\(frame->data \+ frame->len/,
+  /cloud_ws_uplink_frame_t next[\s\S]*xQueuePeek\(s_queue, &next, 0\)[\s\S]*raw_len \+ next\.len <= CLOUD_WAVEFORM_MAX_RAW_SIZE[\s\S]*xQueueReceive\(s_queue, &next, 0\)[\s\S]*memcpy\(s_raw_aggregate \+ raw_len/,
   'cloud uplink worker must coalesce only an existing backlog without blocking UART flow',
 );
+assert.doesNotMatch(
+  senderTaskBody,
+  /xQueueReceive\(s_queue, &chunk, 0\)[\s\S]{0,500}vTaskDelay[\s\S]{0,500}xQueuePeek/,
+  'waveform aggregation must not add a coalescing wait',
+);
 assert.match(
   senderTaskBody,
-  /if \(!s_connected \|\| s_client == NULL\)[\s\S]*fallback_frame\(frame\)/,
+  /cloud_ws_compression_take_offer[\s\S]*esp_websocket_client_send_bin\([\s\S]*CLOUD_WS_CAPABILITY/,
+  'only the sender task may transmit the capability offer',
+);
+const eventHandlerBody = uplink.match(
+  /static void websocket_event_handler\([^]*?\n\{([\s\S]*?)\n\}/,
+)?.[1] || '';
+assert.ok(
+  !eventHandlerBody.includes('esp_websocket_client_send_bin'),
+  'websocket event callback must never send or compress waveform data',
+);
+assert.match(
+  senderTaskBody,
+  /if \(!s_connected \|\| s_client == NULL\)[\s\S]*fallback_frame\(s_raw_aggregate, raw_len, source_frames\)/,
   'a disconnected WSS worker must drain queued responses through MQTT fallback',
 );
 assert.match(
   senderTaskBody,
-  /sent != \(int\)frame->len[\s\S]*send_failures[\s\S]*fallback_frame\(frame\)/,
+  /sent != \(int\)send_len[\s\S]*send_failures[\s\S]*fallback_frame\(s_raw_aggregate, raw_len, source_frames\)/,
   'failed WSS sends must retry the complete source frame through MQTT fallback',
 );
 assert.match(
@@ -384,8 +424,8 @@ assert.match(
 );
 assert.match(
   uplink,
-  /\.buffer_size\s*=\s*CLOUD_WS_UPLINK_SEND_FRAME_MAX/,
-  'websocket TX buffer must fit one aggregated uplink message without four internal writes',
+  /\.buffer_size\s*=\s*CLOUD_WS_UPLINK_WS_BUFFER_SIZE/,
+  'websocket receive/reassembly buffer must remain independently bounded',
 );
 assert.match(
   mainSource,

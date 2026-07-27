@@ -20,14 +20,20 @@ static uint32_t read_be32(const uint8_t *data)
 static void expect_round_trip(const uint8_t *raw, size_t raw_len,
                               cloud_waveform_codec_t expected_codec)
 {
+    void *workspace = calloc(1, cloud_waveform_encoder_workspace_size());
     uint8_t *wire = malloc(CLOUD_WAVEFORM_MAX_WIRE_SIZE);
     uint8_t *restored = malloc(raw_len);
+    assert(workspace != NULL);
     assert(wire != NULL);
     assert(restored != NULL);
 
+    cloud_waveform_encoder_t encoder = {0};
+    assert(cloud_waveform_encoder_init(
+        &encoder, workspace, cloud_waveform_encoder_workspace_size()));
+
     size_t wire_len = 0;
     cloud_waveform_encode_result_t result = {0};
-    assert(cloud_waveform_encode(raw, raw_len, wire,
+    assert(cloud_waveform_encode(&encoder, raw, raw_len, wire,
                                  CLOUD_WAVEFORM_MAX_WIRE_SIZE,
                                  &wire_len, &result));
     assert(wire_len == result.wire_len);
@@ -52,6 +58,7 @@ static void expect_round_trip(const uint8_t *raw, size_t raw_len,
         assert(restored_len == raw_len);
     }
     assert(memcmp(restored, raw, raw_len) == 0);
+    free(workspace);
     free(restored);
     free(wire);
 }
@@ -90,21 +97,36 @@ static void test_invalid_arguments(void)
     uint8_t wire[CLOUD_WAVEFORM_HEADER_SIZE + sizeof(raw)] = {0};
     size_t wire_len = 0;
     cloud_waveform_encode_result_t result = {0};
+    uint8_t workspace[1] = {0};
+    cloud_waveform_encoder_t encoder = {0};
 
-    assert(!cloud_waveform_encode(NULL, sizeof(raw), wire, sizeof(wire),
+    assert(!cloud_waveform_encoder_init(NULL, workspace, sizeof(workspace)));
+    assert(!cloud_waveform_encoder_init(&encoder, NULL, sizeof(workspace)));
+    assert(!cloud_waveform_encoder_init(&encoder, workspace, sizeof(workspace)));
+    assert(!cloud_waveform_encode(NULL, raw, sizeof(raw), wire, sizeof(wire),
                                   &wire_len, &result));
-    assert(!cloud_waveform_encode(raw, 0, wire, sizeof(wire),
+    assert(!cloud_waveform_encode(&encoder, raw, sizeof(raw), wire, sizeof(wire),
                                   &wire_len, &result));
-    assert(!cloud_waveform_encode(raw, CLOUD_WAVEFORM_MAX_RAW_SIZE + 1U,
+
+    void *full_workspace = calloc(1, cloud_waveform_encoder_workspace_size());
+    assert(full_workspace != NULL);
+    assert(cloud_waveform_encoder_init(
+        &encoder, full_workspace, cloud_waveform_encoder_workspace_size()));
+    assert(!cloud_waveform_encode(&encoder, NULL, sizeof(raw), wire, sizeof(wire),
+                                  &wire_len, &result));
+    assert(!cloud_waveform_encode(&encoder, raw, 0, wire, sizeof(wire),
+                                  &wire_len, &result));
+    assert(!cloud_waveform_encode(&encoder, raw, CLOUD_WAVEFORM_MAX_RAW_SIZE + 1U,
                                   wire, sizeof(wire), &wire_len, &result));
-    assert(!cloud_waveform_encode(raw, sizeof(raw), NULL, sizeof(wire),
+    assert(!cloud_waveform_encode(&encoder, raw, sizeof(raw), NULL, sizeof(wire),
                                   &wire_len, &result));
-    assert(!cloud_waveform_encode(raw, sizeof(raw), wire, sizeof(wire) - 1U,
+    assert(!cloud_waveform_encode(&encoder, raw, sizeof(raw), wire, sizeof(wire) - 1U,
                                   &wire_len, &result));
-    assert(!cloud_waveform_encode(raw, sizeof(raw), wire, sizeof(wire),
+    assert(!cloud_waveform_encode(&encoder, raw, sizeof(raw), wire, sizeof(wire),
                                   NULL, &result));
-    assert(!cloud_waveform_encode(raw, sizeof(raw), wire, sizeof(wire),
+    assert(!cloud_waveform_encode(&encoder, raw, sizeof(raw), wire, sizeof(wire),
                                   &wire_len, NULL));
+    free(full_workspace);
 }
 
 static int emit_stdin_envelope(void)
@@ -117,19 +139,26 @@ static int emit_stdin_envelope(void)
         return 2;
     }
     size_t raw_len = fread(raw, 1, CLOUD_WAVEFORM_MAX_RAW_SIZE + 1U, stdin);
+    void *workspace = calloc(1, cloud_waveform_encoder_workspace_size());
     size_t wire_len = 0;
     cloud_waveform_encode_result_t result = {0};
-    bool ok = raw_len <= CLOUD_WAVEFORM_MAX_RAW_SIZE &&
-              cloud_waveform_encode(raw, raw_len, wire,
+    cloud_waveform_encoder_t encoder = {0};
+    bool ok = workspace != NULL &&
+              cloud_waveform_encoder_init(
+                  &encoder, workspace, cloud_waveform_encoder_workspace_size()) &&
+              raw_len <= CLOUD_WAVEFORM_MAX_RAW_SIZE &&
+              cloud_waveform_encode(&encoder, raw, raw_len, wire,
                                     CLOUD_WAVEFORM_MAX_WIRE_SIZE,
                                     &wire_len, &result);
     if (!ok || fwrite(wire, 1, wire_len, stdout) != wire_len) {
         free(raw);
         free(wire);
+        free(workspace);
         return 3;
     }
     free(raw);
     free(wire);
+    free(workspace);
     return 0;
 }
 

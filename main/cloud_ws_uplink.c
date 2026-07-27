@@ -1,6 +1,8 @@
 #include "cloud_ws_uplink.h"
 #include "cloud_ws_downlink_reassembly.h"
+#include "cloud_ws_compression_state.h"
 #include "cloud_ws_lease.h"
+#include "cloud_waveform_codec.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -14,10 +16,10 @@
 #include "freertos/task.h"
 
 #define CLOUD_WS_UPLINK_MAX_FRAME 512U
-#define CLOUD_WS_UPLINK_SEND_FRAME_MAX 2048U
 #define CLOUD_WS_UPLINK_QUEUE_DEPTH 128U
 #define CLOUD_WS_UPLINK_URI_MAX_LEN 192U
 #define CLOUD_WS_UPLINK_SEND_TIMEOUT_MS 5000
+#define CLOUD_WS_UPLINK_WS_BUFFER_SIZE 2048U
 
 typedef struct {
     size_t len;
@@ -25,18 +27,17 @@ typedef struct {
     uint8_t data[CLOUD_WS_UPLINK_MAX_FRAME];
 } cloud_ws_uplink_frame_t;
 
-typedef struct {
-    size_t len;
-    uint32_t source_frames;
-    uint8_t data[CLOUD_WS_UPLINK_SEND_FRAME_MAX];
-} cloud_ws_uplink_send_frame_t;
-
 static const char *TAG = "cloud_ws_uplink";
 static cloud_ws_uplink_config_t s_config;
 static esp_websocket_client_handle_t s_client;
 static QueueHandle_t s_queue;
 static TaskHandle_t s_sender_task;
-static cloud_ws_uplink_send_frame_t *s_send_frame;
+static uint8_t *s_raw_aggregate;
+static uint8_t *s_wire_aggregate;
+static void *s_compressor_workspace;
+static size_t s_compressor_workspace_size;
+static cloud_waveform_encoder_t s_waveform_encoder;
+static bool s_compression_capable;
 static bool s_initialized;
 static bool s_started;
 static bool s_wifi_ready;
@@ -49,6 +50,7 @@ static portMUX_TYPE s_state_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_stats_lock = portMUX_INITIALIZER_UNLOCKED;
 static cloud_ws_uplink_stats_t s_stats;
 static cloud_ws_downlink_reassembly_t s_downlink_reassembly;
+static cloud_ws_compression_state_t s_compression_state;
 
 static void stats_increment(uint32_t *counter, uint32_t amount)
 {
@@ -94,6 +96,16 @@ static void handle_downlink_data(const esp_websocket_event_data_t *event)
     if (result != CLOUD_WS_DOWNLINK_COMPLETE) {
         return;
     }
+    bool capability_reply = false;
+    portENTER_CRITICAL(&s_state_lock);
+    capability_reply = cloud_ws_compression_accept_reply(
+        &s_compression_state, frame, frame_len);
+    portEXIT_CRITICAL(&s_state_lock);
+    if (capability_reply) {
+        xTaskNotifyGive(s_sender_task);
+        ESP_LOGI(TAG, "waveform compression negotiated");
+        return;
+    }
     if (s_config.on_downlink == NULL ||
         s_config.on_downlink(frame, frame_len, s_config.downlink_ctx) != ESP_OK) {
         stats_increment(&s_stats.downlink_failures, 1);
@@ -103,26 +115,26 @@ static void handle_downlink_data(const esp_websocket_event_data_t *event)
     stats_increment(&s_stats.downlink_bytes, (uint32_t)frame_len);
 }
 
-static bool fallback_frame(const cloud_ws_uplink_send_frame_t *frame)
+static bool fallback_frame(const uint8_t *data, size_t len, uint32_t source_frames)
 {
-    if (frame == NULL || frame->len == 0 || s_config.fallback == NULL) {
+    if (data == NULL || len == 0 || s_config.fallback == NULL) {
         return false;
     }
 
     bool complete = true;
     size_t offset = 0;
-    while (offset < frame->len) {
-        size_t chunk_len = frame->len - offset;
+    while (offset < len) {
+        size_t chunk_len = len - offset;
         if (chunk_len > CLOUD_WS_UPLINK_MAX_FRAME) {
             chunk_len = CLOUD_WS_UPLINK_MAX_FRAME;
         }
-        if (!s_config.fallback(frame->data + offset, chunk_len, s_config.fallback_ctx)) {
+        if (!s_config.fallback(data + offset, chunk_len, s_config.fallback_ctx)) {
             complete = false;
         }
         offset += chunk_len;
     }
     if (complete) {
-        stats_increment(&s_stats.queued_fallback_frames, frame->source_frames);
+        stats_increment(&s_stats.queued_fallback_frames, source_frames);
     }
     return complete;
 }
@@ -132,7 +144,6 @@ static void sender_task(void *arg)
     (void)arg;
     cloud_ws_uplink_frame_t chunk;
     cloud_ws_uplink_frame_t next;
-    cloud_ws_uplink_send_frame_t *frame = s_send_frame;
     while (true) {
         if (uxQueueMessagesWaiting(s_queue) == 0) {
             (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -142,10 +153,14 @@ static void sender_task(void *arg)
 
         bool active = false;
         bool should_run = false;
+        bool compression_active = false;
+        bool offer_pending = false;
         portENTER_CRITICAL(&s_state_lock);
         active = s_active;
         should_run = s_initialized && s_config.enabled && s_client != NULL &&
                      s_wifi_ready;
+        compression_active = s_compression_state.active;
+        offer_pending = cloud_ws_compression_take_offer(&s_compression_state);
         portEXIT_CRITICAL(&s_state_lock);
 
         if (should_run && !s_started) {
@@ -157,12 +172,29 @@ static void sender_task(void *arg)
                 xTaskNotifyGive(s_sender_task);
             }
         } else if (!should_run && s_started) {
+            portENTER_CRITICAL(&s_state_lock);
             s_connected = false;
+            cloud_ws_compression_on_disconnected(&s_compression_state);
+            portEXIT_CRITICAL(&s_state_lock);
             esp_err_t err = esp_websocket_client_stop(s_client);
             if (err != ESP_OK) {
                 ESP_LOGW(TAG, "binary uplink stop failed: %s", esp_err_to_name(err));
             }
             s_started = false;
+        }
+
+        if (offer_pending && s_connected && s_client != NULL) {
+            int offered = esp_websocket_client_send_bin(
+                s_client,
+                CLOUD_WS_CAPABILITY,
+                CLOUD_WS_CAPABILITY_LEN,
+                pdMS_TO_TICKS(CLOUD_WS_UPLINK_SEND_TIMEOUT_MS));
+            if (offered != CLOUD_WS_CAPABILITY_LEN) {
+                portENTER_CRITICAL(&s_state_lock);
+                cloud_ws_compression_offer_failed(&s_compression_state);
+                portEXIT_CRITICAL(&s_state_lock);
+                ESP_LOGW(TAG, "waveform capability offer failed: sent=%d", offered);
+            }
         }
 
         if (!active) {
@@ -177,38 +209,59 @@ static void sender_task(void *arg)
         }
 
         if (xQueueReceive(s_queue, &chunk, 0) == pdTRUE) {
-            frame->len = chunk.len;
-            frame->source_frames = chunk.source_frames;
-            memcpy(frame->data, chunk.data, chunk.len);
+            size_t raw_len = chunk.len;
+            uint32_t source_frames = chunk.source_frames;
+            memcpy(s_raw_aggregate, chunk.data, chunk.len);
             while (xQueuePeek(s_queue, &next, 0) == pdTRUE &&
-                   frame->len + next.len <= CLOUD_WS_UPLINK_SEND_FRAME_MAX) {
+                   raw_len + next.len <= CLOUD_WAVEFORM_MAX_RAW_SIZE) {
                 if (xQueueReceive(s_queue, &next, 0) != pdTRUE) {
                     break;
                 }
-                memcpy(frame->data + frame->len, next.data, next.len);
-                frame->len += next.len;
-                frame->source_frames += next.source_frames;
+                memcpy(s_raw_aggregate + raw_len, next.data, next.len);
+                raw_len += next.len;
+                source_frames += next.source_frames;
             }
             if (!s_connected || s_client == NULL) {
-                if (!fallback_frame(frame)) {
-                    stats_increment(&s_stats.overload_dropped_frames, frame->source_frames);
+                if (!fallback_frame(s_raw_aggregate, raw_len, source_frames)) {
+                    stats_increment(&s_stats.overload_dropped_frames, source_frames);
                 }
                 continue;
             }
+
+            const uint8_t *send_data = s_raw_aggregate;
+            size_t send_len = raw_len;
+            if (compression_active && s_wire_aggregate != NULL) {
+                cloud_waveform_encode_result_t encode_result = {0};
+                if (!cloud_waveform_encode(
+                        &s_waveform_encoder,
+                        s_raw_aggregate,
+                        raw_len,
+                        s_wire_aggregate,
+                        CLOUD_WAVEFORM_MAX_WIRE_SIZE,
+                        &send_len,
+                        &encode_result)) {
+                    stats_increment(&s_stats.send_failures, 1);
+                    if (!fallback_frame(s_raw_aggregate, raw_len, source_frames)) {
+                        stats_increment(&s_stats.overload_dropped_frames, source_frames);
+                    }
+                    continue;
+                }
+                send_data = s_wire_aggregate;
+            }
             int sent = esp_websocket_client_send_bin(
                 s_client,
-                (const char *)frame->data,
-                (int)frame->len,
+                (const char *)send_data,
+                (int)send_len,
                 pdMS_TO_TICKS(CLOUD_WS_UPLINK_SEND_TIMEOUT_MS));
-            if (sent != (int)frame->len) {
+            if (sent != (int)send_len) {
                 stats_increment(&s_stats.send_failures, 1);
-                if (!fallback_frame(frame)) {
-                    stats_increment(&s_stats.overload_dropped_frames, frame->source_frames);
+                if (!fallback_frame(s_raw_aggregate, raw_len, source_frames)) {
+                    stats_increment(&s_stats.overload_dropped_frames, source_frames);
                 }
-                ESP_LOGW(TAG, "binary send failed: sent=%d len=%u", sent, (unsigned)frame->len);
+                ESP_LOGW(TAG, "binary send failed: sent=%d len=%u", sent, (unsigned)send_len);
             } else {
-                stats_increment(&s_stats.sent_frames, frame->source_frames);
-                stats_increment(&s_stats.sent_bytes, (uint32_t)frame->len);
+                stats_increment(&s_stats.sent_frames, source_frames);
+                stats_increment(&s_stats.sent_bytes, (uint32_t)raw_len);
             }
         }
     }
@@ -227,21 +280,35 @@ static void websocket_event_handler(void *handler_args,
     if (event_id == WEBSOCKET_EVENT_CONNECTED) {
         stats_increment(&s_stats.connect_events, 1);
         downlink_reset();
+        portENTER_CRITICAL(&s_state_lock);
+        cloud_ws_compression_on_connected(
+            &s_compression_state, s_compression_capable);
         s_connected = true;
+        portEXIT_CRITICAL(&s_state_lock);
+        xTaskNotifyGive(s_sender_task);
         ESP_LOGI(TAG, "binary uplink connected: %s", s_uri);
     } else if (event_id == WEBSOCKET_EVENT_DISCONNECTED) {
         stats_increment(&s_stats.disconnect_events, 1);
+        portENTER_CRITICAL(&s_state_lock);
         s_connected = false;
+        cloud_ws_compression_on_disconnected(&s_compression_state);
+        portEXIT_CRITICAL(&s_state_lock);
         downlink_reset();
         ESP_LOGW(TAG, "binary uplink disconnected: event=%ld", (long)event_id);
     } else if (event_id == WEBSOCKET_EVENT_CLOSED) {
         stats_increment(&s_stats.closed_events, 1);
+        portENTER_CRITICAL(&s_state_lock);
         s_connected = false;
+        cloud_ws_compression_on_disconnected(&s_compression_state);
+        portEXIT_CRITICAL(&s_state_lock);
         downlink_reset();
         ESP_LOGW(TAG, "binary uplink closed: event=%ld", (long)event_id);
     } else if (event_id == WEBSOCKET_EVENT_ERROR) {
         stats_increment(&s_stats.error_events, 1);
+        portENTER_CRITICAL(&s_state_lock);
         s_connected = false;
+        cloud_ws_compression_on_disconnected(&s_compression_state);
+        portEXIT_CRITICAL(&s_state_lock);
         downlink_reset();
         ESP_LOGW(TAG, "binary uplink error: event=%ld data=%p", (long)event_id, event_data);
     } else if (event_id == WEBSOCKET_EVENT_DATA && event_data != NULL) {
@@ -284,17 +351,45 @@ esp_err_t cloud_ws_uplink_init(const cloud_ws_uplink_config_t *config)
         return ESP_ERR_NO_MEM;
     }
 
-    s_send_frame = heap_caps_calloc(
-        1, sizeof(cloud_ws_uplink_send_frame_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (s_send_frame == NULL) {
-        ESP_LOGW(TAG, "PSRAM aggregation allocation failed; using internal RAM");
-        s_send_frame = heap_caps_calloc(
-            1, sizeof(cloud_ws_uplink_send_frame_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    s_raw_aggregate = heap_caps_calloc(
+        1, CLOUD_WAVEFORM_MAX_RAW_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (s_raw_aggregate == NULL) {
+        ESP_LOGW(TAG, "PSRAM raw aggregation allocation failed; using internal RAM");
+        s_raw_aggregate = heap_caps_calloc(
+            1, CLOUD_WAVEFORM_MAX_RAW_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     }
-    if (s_send_frame == NULL) {
+    if (s_raw_aggregate == NULL) {
         vQueueDeleteWithCaps(s_queue);
         s_queue = NULL;
         return ESP_ERR_NO_MEM;
+    }
+
+    s_wire_aggregate = heap_caps_calloc(
+        1, CLOUD_WAVEFORM_MAX_WIRE_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (s_wire_aggregate == NULL) {
+        ESP_LOGW(TAG, "PSRAM wire aggregation allocation failed; using internal RAM");
+        s_wire_aggregate = heap_caps_calloc(
+            1, CLOUD_WAVEFORM_MAX_WIRE_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    if (s_wire_aggregate == NULL) {
+        ESP_LOGW(TAG, "wire aggregation allocation failed; compression disabled");
+    }
+
+    s_compressor_workspace_size = cloud_waveform_encoder_workspace_size();
+    s_compressor_workspace = heap_caps_calloc(
+        1, s_compressor_workspace_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (s_compressor_workspace == NULL) {
+        ESP_LOGW(TAG, "PSRAM compressor allocation failed; using internal RAM");
+        s_compressor_workspace = heap_caps_calloc(
+            1, s_compressor_workspace_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    s_compression_capable = s_wire_aggregate != NULL &&
+        cloud_waveform_encoder_init(
+            &s_waveform_encoder,
+            s_compressor_workspace,
+            s_compressor_workspace_size);
+    if (!s_compression_capable) {
+        ESP_LOGW(TAG, "compressor workspace unavailable; compression disabled");
     }
 
     esp_websocket_client_config_t websocket_cfg = {
@@ -303,7 +398,7 @@ esp_err_t cloud_ws_uplink_init(const cloud_ws_uplink_config_t *config)
         .enable_close_reconnect = true,
         .task_prio = 5,
         .task_stack = 4096,
-        .buffer_size = CLOUD_WS_UPLINK_SEND_FRAME_MAX,
+        .buffer_size = CLOUD_WS_UPLINK_WS_BUFFER_SIZE,
         .network_timeout_ms = CLOUD_WS_UPLINK_SEND_TIMEOUT_MS,
         .reconnect_timeout_ms = 2000,
         .ping_interval_sec = 10,
@@ -311,8 +406,12 @@ esp_err_t cloud_ws_uplink_init(const cloud_ws_uplink_config_t *config)
     };
     s_client = esp_websocket_client_init(&websocket_cfg);
     if (s_client == NULL) {
-        heap_caps_free(s_send_frame);
-        s_send_frame = NULL;
+        heap_caps_free(s_compressor_workspace);
+        s_compressor_workspace = NULL;
+        heap_caps_free(s_wire_aggregate);
+        s_wire_aggregate = NULL;
+        heap_caps_free(s_raw_aggregate);
+        s_raw_aggregate = NULL;
         vQueueDeleteWithCaps(s_queue);
         s_queue = NULL;
         return ESP_ERR_NO_MEM;
@@ -322,8 +421,12 @@ esp_err_t cloud_ws_uplink_init(const cloud_ws_uplink_config_t *config)
     if (err != ESP_OK) {
         esp_websocket_client_destroy(s_client);
         s_client = NULL;
-        heap_caps_free(s_send_frame);
-        s_send_frame = NULL;
+        heap_caps_free(s_compressor_workspace);
+        s_compressor_workspace = NULL;
+        heap_caps_free(s_wire_aggregate);
+        s_wire_aggregate = NULL;
+        heap_caps_free(s_raw_aggregate);
+        s_raw_aggregate = NULL;
         vQueueDeleteWithCaps(s_queue);
         s_queue = NULL;
         return err;
@@ -332,8 +435,12 @@ esp_err_t cloud_ws_uplink_init(const cloud_ws_uplink_config_t *config)
     if (xTaskCreate(sender_task, "cloud_ws_tx", 8192, NULL, 6, &s_sender_task) != pdPASS) {
         esp_websocket_client_destroy(s_client);
         s_client = NULL;
-        heap_caps_free(s_send_frame);
-        s_send_frame = NULL;
+        heap_caps_free(s_compressor_workspace);
+        s_compressor_workspace = NULL;
+        heap_caps_free(s_wire_aggregate);
+        s_wire_aggregate = NULL;
+        heap_caps_free(s_raw_aggregate);
+        s_raw_aggregate = NULL;
         vQueueDeleteWithCaps(s_queue);
         s_queue = NULL;
         return ESP_ERR_NO_MEM;

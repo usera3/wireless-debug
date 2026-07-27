@@ -24,7 +24,17 @@ typedef struct {
     size_t wire_len;
 } cloud_waveform_encode_result_t;
 
-bool cloud_waveform_encode(const uint8_t *raw, size_t raw_len,
+typedef struct {
+    void *workspace;
+    size_t workspace_size;
+} cloud_waveform_encoder_t;
+
+size_t cloud_waveform_encoder_workspace_size(void);
+bool cloud_waveform_encoder_init(cloud_waveform_encoder_t *encoder,
+                                 void *workspace,
+                                 size_t workspace_size);
+bool cloud_waveform_encode(cloud_waveform_encoder_t *encoder,
+                           const uint8_t *raw, size_t raw_len,
                            uint8_t *wire, size_t wire_capacity,
                            size_t *wire_len,
                            cloud_waveform_encode_result_t *result);
