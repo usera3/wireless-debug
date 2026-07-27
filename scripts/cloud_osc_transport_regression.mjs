@@ -14,6 +14,24 @@ const wifiTransport = readFileSync('main/wifi_transport.c', 'utf8');
 const webApi = readFileSync('main/web_api.c', 'utf8');
 const sdkconfig = readFileSync('sdkconfig', 'utf8');
 
+for (const token of [
+  'esp_transport_tcp_init',
+  'esp_transport_ws_init',
+  'esp_transport_ws_set_config',
+  '.ext_transport = s_ws_transport',
+]) {
+  assert.ok(uplink.includes(token), `cloud uplink external transport missing: ${token}`);
+}
+assert.match(
+  uplink,
+  /WEBSOCKET_EVENT_CONNECTED[\s\S]*esp_transport_get_socket\(s_tcp_transport\)[\s\S]*cloud_ws_socket_enable_nodelay/,
+  'connected cloud uplink must disable Nagle on its underlying TCP socket',
+);
+assert.ok(
+  cmake.includes('cloud_ws_socket.c'),
+  'tested TCP_NODELAY helper must be linked into the firmware component',
+);
+
 assert.match(
   sdkconfig,
   /CONFIG_LWIP_TCP_SND_BUF_DEFAULT=32768/,

@@ -2,6 +2,7 @@
 #include "cloud_ws_downlink_reassembly.h"
 #include "cloud_ws_compression_state.h"
 #include "cloud_ws_lease.h"
+#include "cloud_ws_socket.h"
 #include "cloud_waveform_codec.h"
 
 #include <stdio.h>
@@ -10,6 +11,9 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "esp_transport.h"
+#include "esp_transport_tcp.h"
+#include "esp_transport_ws.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
@@ -39,6 +43,8 @@ static void *s_compressor_workspace;
 static size_t s_compressor_workspace_size;
 static cloud_waveform_encoder_t s_waveform_encoder;
 static bool s_compression_capable;
+static esp_transport_handle_t s_tcp_transport;
+static esp_transport_handle_t s_ws_transport;
 static bool s_initialized;
 static bool s_started;
 static bool s_wifi_ready;
@@ -322,6 +328,10 @@ static void websocket_event_handler(void *handler_args,
     if (event_id == WEBSOCKET_EVENT_CONNECTED) {
         stats_increment(&s_stats.connect_events, 1);
         downlink_reset();
+        int socket_fd = esp_transport_get_socket(s_tcp_transport);
+        if (!cloud_ws_socket_enable_nodelay(socket_fd)) {
+            ESP_LOGW(TAG, "failed to enable TCP_NODELAY: socket=%d", socket_fd);
+        }
         portENTER_CRITICAL(&s_state_lock);
         cloud_ws_compression_on_connected(
             &s_compression_state, s_compression_capable);
@@ -434,6 +444,37 @@ esp_err_t cloud_ws_uplink_init(const cloud_ws_uplink_config_t *config)
         ESP_LOGW(TAG, "compressor workspace unavailable; compression disabled");
     }
 
+    s_tcp_transport = esp_transport_tcp_init();
+    s_ws_transport = s_tcp_transport == NULL
+                         ? NULL
+                         : esp_transport_ws_init(s_tcp_transport);
+    const char *path = strstr(s_uri, "/ws/uplink/");
+    const esp_transport_ws_config_t transport_cfg = {
+        .ws_path = path,
+        .propagate_control_frames = true,
+    };
+    if (s_ws_transport == NULL || path == NULL ||
+        esp_transport_ws_set_config(s_ws_transport, &transport_cfg) != ESP_OK) {
+        ESP_LOGE(TAG, "cloud WebSocket transport initialization failed");
+        if (s_ws_transport != NULL) {
+            esp_transport_destroy(s_ws_transport);
+            s_ws_transport = NULL;
+        }
+        if (s_tcp_transport != NULL) {
+            esp_transport_destroy(s_tcp_transport);
+            s_tcp_transport = NULL;
+        }
+        heap_caps_free(s_compressor_workspace);
+        s_compressor_workspace = NULL;
+        heap_caps_free(s_wire_aggregate);
+        s_wire_aggregate = NULL;
+        heap_caps_free(s_raw_aggregate);
+        s_raw_aggregate = NULL;
+        vQueueDeleteWithCaps(s_queue);
+        s_queue = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+
     esp_websocket_client_config_t websocket_cfg = {
         .uri = s_uri,
         .disable_auto_reconnect = false,
@@ -445,9 +486,14 @@ esp_err_t cloud_ws_uplink_init(const cloud_ws_uplink_config_t *config)
         .reconnect_timeout_ms = 2000,
         .ping_interval_sec = 10,
         .pingpong_timeout_sec = 20,
+        .ext_transport = s_ws_transport,
     };
     s_client = esp_websocket_client_init(&websocket_cfg);
     if (s_client == NULL) {
+        esp_transport_destroy(s_ws_transport);
+        s_ws_transport = NULL;
+        esp_transport_destroy(s_tcp_transport);
+        s_tcp_transport = NULL;
         heap_caps_free(s_compressor_workspace);
         s_compressor_workspace = NULL;
         heap_caps_free(s_wire_aggregate);
@@ -463,6 +509,10 @@ esp_err_t cloud_ws_uplink_init(const cloud_ws_uplink_config_t *config)
     if (err != ESP_OK) {
         esp_websocket_client_destroy(s_client);
         s_client = NULL;
+        esp_transport_destroy(s_ws_transport);
+        s_ws_transport = NULL;
+        esp_transport_destroy(s_tcp_transport);
+        s_tcp_transport = NULL;
         heap_caps_free(s_compressor_workspace);
         s_compressor_workspace = NULL;
         heap_caps_free(s_wire_aggregate);
@@ -477,6 +527,10 @@ esp_err_t cloud_ws_uplink_init(const cloud_ws_uplink_config_t *config)
     if (xTaskCreate(sender_task, "cloud_ws_tx", 8192, NULL, 6, &s_sender_task) != pdPASS) {
         esp_websocket_client_destroy(s_client);
         s_client = NULL;
+        esp_transport_destroy(s_ws_transport);
+        s_ws_transport = NULL;
+        esp_transport_destroy(s_tcp_transport);
+        s_tcp_transport = NULL;
         heap_caps_free(s_compressor_workspace);
         s_compressor_workspace = NULL;
         heap_caps_free(s_wire_aggregate);
