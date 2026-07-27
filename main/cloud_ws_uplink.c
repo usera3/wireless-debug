@@ -25,6 +25,7 @@
 #define CLOUD_WS_UPLINK_URI_MAX_LEN 192U
 #define CLOUD_WS_UPLINK_SEND_TIMEOUT_MS 5000
 #define CLOUD_WS_UPLINK_WS_BUFFER_SIZE 2048U
+#define CLOUD_WS_UPLINK_TASK_PRIORITY 11
 
 typedef struct {
     size_t len;
@@ -538,7 +539,8 @@ esp_err_t cloud_ws_uplink_init(const cloud_ws_uplink_config_t *config)
         return err;
     }
 
-    if (xTaskCreate(sender_task, "cloud_ws_tx", 8192, NULL, 6, &s_sender_task) != pdPASS) {
+    if (xTaskCreate(sender_task, "cloud_ws_tx", 8192, NULL,
+                    CLOUD_WS_UPLINK_TASK_PRIORITY, &s_sender_task) != pdPASS) {
         esp_websocket_client_destroy(s_client);
         s_client = NULL;
         esp_transport_destroy(s_ws_transport);

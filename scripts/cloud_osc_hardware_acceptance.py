@@ -76,6 +76,8 @@ def nested_int(payload: dict[str, Any], *path: str) -> int:
 
 def status_deltas(before: dict[str, Any], after: dict[str, Any]) -> dict[str, int]:
     fields = {
+        "uart_rx_frames": ("comm_stats", "uart", "rx_frames"),
+        "uart_rx_bytes": ("comm_stats", "uart", "rx_bytes"),
         "uart_overflows": ("comm_stats", "uart", "overflows"),
         "wifi_pool_exhausted": ("comm_stats", "wifi", "pool_exhausted"),
         "wifi_queue_full": ("comm_stats", "wifi", "queue_full"),

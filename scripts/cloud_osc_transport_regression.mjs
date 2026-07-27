@@ -133,6 +133,11 @@ assert.match(
   /#define CLOUD_WS_UPLINK_SEND_TIMEOUT_MS 5000/,
   'cloud websocket network operations must tolerate normal WAN latency',
 );
+assert.match(
+  uplink,
+  /#define CLOUD_WS_UPLINK_TASK_PRIORITY 11[\s\S]*xTaskCreate\(sender_task,[\s\S]*CLOUD_WS_UPLINK_TASK_PRIORITY/,
+  'cloud sender must outrank the UART callback that feeds its bounded queue',
+);
 
 assert.match(
   source,

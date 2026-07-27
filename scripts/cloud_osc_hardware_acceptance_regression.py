@@ -56,7 +56,7 @@ assert source.index("ensure_current_firmware(current)") < source.index(
 
 before = {
     "comm_stats": {
-        "uart": {"overflows": 4},
+        "uart": {"rx_frames": 10, "rx_bytes": 10000, "overflows": 4},
         "wifi": {"pool_exhausted": 7, "queue_full": 2},
         "route": {"partial_drops": 3},
     },
@@ -85,7 +85,7 @@ before = {
 }
 after = {
     "comm_stats": {
-        "uart": {"overflows": 5},
+        "uart": {"rx_frames": 14, "rx_bytes": 26000, "overflows": 5},
         "wifi": {"pool_exhausted": 9, "queue_full": 2},
         "route": {"partial_drops": 6},
     },
@@ -114,6 +114,8 @@ after = {
 }
 deltas = module.status_deltas(before, after)
 assert deltas == {
+    "uart_rx_frames": 4,
+    "uart_rx_bytes": 16000,
     "uart_overflows": 1,
     "wifi_pool_exhausted": 2,
     "wifi_queue_full": 0,
