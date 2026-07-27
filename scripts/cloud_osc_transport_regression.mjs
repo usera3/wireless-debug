@@ -14,6 +14,12 @@ const wifiTransport = readFileSync('main/wifi_transport.c', 'utf8');
 const webApi = readFileSync('main/web_api.c', 'utf8');
 const sdkconfig = readFileSync('sdkconfig', 'utf8');
 
+assert.match(
+  sdkconfig,
+  /CONFIG_ESP_WS_CLIENT_SEPARATE_TX_LOCK=y/,
+  'cloud full-duplex uplink requires independent WebSocket send and receive locks',
+);
+
 for (const token of [
   'esp_transport_tcp_init',
   'esp_transport_ws_init',
