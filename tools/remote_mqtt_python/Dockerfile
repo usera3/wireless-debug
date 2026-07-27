@@ -11,7 +11,7 @@ RUN if [ -n "$PIP_INDEX_URL" ]; then \
       pip install --no-cache-dir -r requirements.txt; \
     fi
 
-COPY app.py schema.sql ws_fanout.py ./
+COPY app.py schema.sql ws_fanout.py waveform_codec.py ./
 COPY static ./static
 
 ENV APP_HOST=0.0.0.0

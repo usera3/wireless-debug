@@ -148,3 +148,24 @@ class WaveformDecoder:
                 "decode_total_us": self._decode_total_us,
                 "decode_max_us": self._decode_max_us,
             }
+
+
+class UplinkWaveformSession:
+    """Connection-local negotiation state around the process-wide decoder."""
+
+    def __init__(self, decoder: WaveformDecoder) -> None:
+        self._decoder = decoder
+        self.compression_active = False
+
+    @staticmethod
+    def is_offer(data: bytes) -> bool:
+        return bytes(data) == CAPABILITY
+
+    def mark_reply_sent(self) -> None:
+        if self.compression_active:
+            return
+        self.compression_active = True
+        self._decoder.note_activation()
+
+    def decode(self, data: bytes) -> bytes:
+        return self._decoder.decode(data, self.compression_active)

@@ -19,6 +19,12 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.server import ServerConnection, serve
+from waveform_codec import (
+    CAPABILITY,
+    UplinkWaveformSession,
+    WaveformDecodeError,
+    WaveformDecoder,
+)
 from ws_fanout import BrowserSendPump, DeviceDownlinkRouter
 
 
@@ -55,7 +61,7 @@ REMOTE_WS_FRAME_MAX_BYTES = 512
 CLOUD_WS_BROWSER_QUEUE_FRAMES = int(os.environ.get('CLOUD_WS_BROWSER_QUEUE_FRAMES', '16'))
 CLOUD_WS_BROWSER_CHUNK_BYTES = int(os.environ.get('CLOUD_WS_BROWSER_CHUNK_BYTES', '4096'))
 CLOUD_WS_BROWSER_SEND_INTERVAL_MS = int(os.environ.get('CLOUD_WS_BROWSER_SEND_INTERVAL_MS', '40'))
-CLOUD_WS_MAX_MESSAGE_BYTES = int(os.environ.get('CLOUD_WS_MAX_MESSAGE_BYTES', '16384'))
+CLOUD_WS_MAX_MESSAGE_BYTES = int(os.environ.get('CLOUD_WS_MAX_MESSAGE_BYTES', '65536'))
 CLOUD_WS_HOST = os.environ.get('CLOUD_WS_HOST', '0.0.0.0')
 CLOUD_WS_PORT = int(os.environ.get('CLOUD_WS_PORT', '18089'))
 CLOUD_WS_PUBLIC_URL = os.environ.get('CLOUD_WS_PUBLIC_URL', '').rstrip('/')
@@ -78,6 +84,7 @@ remote_ws_lock = threading.Lock()
 remote_ws_seq = 0
 cloud_ws_clients = defaultdict(dict)
 cloud_ws_downlinks = DeviceDownlinkRouter(REMOTE_WS_FRAME_MAX_BYTES)
+waveform_decoder = WaveformDecoder()
 cloud_ws_lock = threading.RLock()
 cloud_ws_started = False
 cloud_ws_browser_dropped_frames_total = 0
@@ -1031,6 +1038,7 @@ def cloud_ws_uplink_handler(connection: ServerConnection, device_id):
         except Exception:
             pass
     app.logger.info('cloud websocket uplink connected: %s', device_id)
+    session = UplinkWaveformSession(waveform_decoder)
 
     try:
         while True:
@@ -1039,8 +1047,23 @@ def cloud_ws_uplink_handler(connection: ServerConnection, device_id):
                 app.logger.warning('ignoring text websocket uplink frame for %s', device_id)
                 continue
             data = bytes(message or b'')
-            if data:
-                broadcast_remote_ws_bytes(device_id, data)
+            if not data:
+                continue
+            if session.is_offer(data):
+                sent, reason = cloud_ws_downlinks.send(device_id, CAPABILITY)
+                if sent:
+                    session.mark_reply_sent()
+                else:
+                    app.logger.warning(
+                        'waveform capability reply failed for %s: %s', device_id, reason)
+                continue
+            try:
+                decoded = session.decode(data)
+            except WaveformDecodeError as exc:
+                app.logger.warning(
+                    'waveform envelope rejected for %s: %s', device_id, exc.reason)
+                continue
+            broadcast_remote_ws_bytes(device_id, decoded)
     except ConnectionClosed as exc:
         app.logger.warning(
             'cloud websocket uplink closed for %s: code=%s reason=%s',
@@ -1425,6 +1448,7 @@ def health():
         'ws_downlink_sent_bytes': ws_downlink['sent_bytes'],
         'ws_downlink_dropped_frames': ws_downlink['dropped_frames'],
         'ws_downlink_send_failures': ws_downlink['send_failures'],
+        'waveform_codec': waveform_decoder.snapshot(),
     })
 
 

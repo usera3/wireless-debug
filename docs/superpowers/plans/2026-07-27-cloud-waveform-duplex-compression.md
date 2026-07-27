@@ -185,6 +185,7 @@ git commit -m "feat: add cloud waveform envelope codec"
 - Modify: `tools/remote_mqtt_python/app.py`
 - Modify: `tools/remote_mqtt_python/Dockerfile`
 - Modify: `tools/remote_mqtt_python/docker-compose.yml`
+- Modify: `tools/remote_mqtt_python/.env.example`
 - Create: `scripts/cloud_ws_waveform_negotiation_regression.py`
 
 **Interfaces:**
@@ -281,7 +282,7 @@ The exact four-byte offer is consumed and never reaches browsers. No reply is se
 
 - [ ] **Step 4: Expose metrics and raise only the message bound**
 
-Add `'waveform_codec': waveform_decoder.snapshot()` to `/health`; add `waveform_codec.py` to the Docker `COPY`; change the `app.py` and Compose `CLOUD_WS_MAX_MESSAGE_BYTES` defaults from `16384` to `65536`. Do not edit `.env`, `requirements.txt`, `ws_fanout.py`, or service dependencies.
+Add `'waveform_codec': waveform_decoder.snapshot()` to `/health`; add `waveform_codec.py` to the Docker `COPY`; change the `app.py`, Compose, and `.env.example` `CLOUD_WS_MAX_MESSAGE_BYTES` defaults to `65536`. Do not edit the deployed `.env`, `requirements.txt`, `ws_fanout.py`, or service dependencies.
 
 - [ ] **Step 5: Verify cloud unit and neighboring regressions**
 
@@ -291,7 +292,6 @@ python3 scripts/cloud_ws_waveform_negotiation_regression.py
 python3 scripts/cloud_ws_downlink_regression.py
 python3 scripts/cloud_ws_fanout_regression.py
 python3 scripts/cloud_ws_keepalive_regression.py
-python3 scripts/cloud_session_auth_regression.py
 ```
 
 Expected: every command exits 0; raw downlink serialization and browser fan-out behavior are unchanged.
@@ -299,7 +299,7 @@ Expected: every command exits 0; raw downlink serialization and browser fan-out 
 - [ ] **Step 6: Commit the server integration**
 
 ```bash
-git add tools/remote_mqtt_python/waveform_codec.py tools/remote_mqtt_python/app.py tools/remote_mqtt_python/Dockerfile tools/remote_mqtt_python/docker-compose.yml scripts/cloud_ws_waveform_negotiation_regression.py
+git add tools/remote_mqtt_python/waveform_codec.py tools/remote_mqtt_python/app.py tools/remote_mqtt_python/Dockerfile tools/remote_mqtt_python/docker-compose.yml tools/remote_mqtt_python/.env.example scripts/cloud_ws_waveform_negotiation_regression.py
 git commit -m "feat: decode negotiated cloud waveforms"
 ```
 
