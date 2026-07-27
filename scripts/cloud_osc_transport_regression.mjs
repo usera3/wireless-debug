@@ -135,8 +135,8 @@ assert.match(
 );
 assert.match(
   uplink,
-  /#define CLOUD_WS_UPLINK_TASK_PRIORITY 11[\s\S]*xTaskCreate\(sender_task,[\s\S]*CLOUD_WS_UPLINK_TASK_PRIORITY/,
-  'cloud sender must outrank the UART callback that feeds its bounded queue',
+  /#define CLOUD_WS_UPLINK_TASK_PRIORITY 9[\s\S]*xTaskCreate\(sender_task,[\s\S]*CLOUD_WS_UPLINK_TASK_PRIORITY/,
+  'cloud sender priority must stay between local WiFi send (7) and UART receive (10)',
 );
 
 assert.match(
