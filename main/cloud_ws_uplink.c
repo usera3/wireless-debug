@@ -9,6 +9,7 @@
 
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
@@ -56,6 +57,38 @@ static void stats_increment(uint32_t *counter, uint32_t amount)
 {
     portENTER_CRITICAL(&s_stats_lock);
     *counter += amount;
+    portEXIT_CRITICAL(&s_stats_lock);
+}
+
+static void stats_note_compression(const cloud_waveform_encode_result_t *result,
+                                   uint32_t elapsed_us)
+{
+    portENTER_CRITICAL(&s_stats_lock);
+    s_stats.compression_calls++;
+    s_stats.compression_total_us += elapsed_us;
+    if (elapsed_us > s_stats.compression_max_us) {
+        s_stats.compression_max_us = elapsed_us;
+    }
+    if (result == NULL) {
+        s_stats.compression_failures++;
+    } else {
+        if (result->codec == CLOUD_WAVEFORM_CODEC_ZLIB) {
+            s_stats.compressed_frames++;
+        } else {
+            s_stats.raw_envelope_frames++;
+        }
+        if (result->compression_failed) {
+            s_stats.compression_failures++;
+        }
+    }
+    portEXIT_CRITICAL(&s_stats_lock);
+}
+
+static void stats_note_sent_bytes(size_t raw_len, size_t wire_len)
+{
+    portENTER_CRITICAL(&s_stats_lock);
+    s_stats.raw_bytes += raw_len;
+    s_stats.wire_bytes += wire_len;
     portEXIT_CRITICAL(&s_stats_lock);
 }
 
@@ -232,14 +265,22 @@ static void sender_task(void *arg)
             size_t send_len = raw_len;
             if (compression_active && s_wire_aggregate != NULL) {
                 cloud_waveform_encode_result_t encode_result = {0};
-                if (!cloud_waveform_encode(
+                int64_t compression_started_us = esp_timer_get_time();
+                bool encoded = cloud_waveform_encode(
                         &s_waveform_encoder,
                         s_raw_aggregate,
                         raw_len,
                         s_wire_aggregate,
                         CLOUD_WAVEFORM_MAX_WIRE_SIZE,
                         &send_len,
-                        &encode_result)) {
+                        &encode_result);
+                int64_t compression_elapsed_us =
+                    esp_timer_get_time() - compression_started_us;
+                uint32_t elapsed_us = compression_elapsed_us <= 0
+                                          ? 0
+                                          : (uint32_t)compression_elapsed_us;
+                stats_note_compression(encoded ? &encode_result : NULL, elapsed_us);
+                if (!encoded) {
                     stats_increment(&s_stats.send_failures, 1);
                     if (!fallback_frame(s_raw_aggregate, raw_len, source_frames)) {
                         stats_increment(&s_stats.overload_dropped_frames, source_frames);
@@ -262,6 +303,7 @@ static void sender_task(void *arg)
             } else {
                 stats_increment(&s_stats.sent_frames, source_frames);
                 stats_increment(&s_stats.sent_bytes, (uint32_t)raw_len);
+                stats_note_sent_bytes(raw_len, send_len);
             }
         }
     }
@@ -535,4 +577,8 @@ void cloud_ws_uplink_get_stats(cloud_ws_uplink_stats_t *out)
     out->sender_stack_min_free = sender_stack_min_free;
     out->queue_pending_frames = s_queue == NULL ? 0 : (uint32_t)uxQueueMessagesWaiting(s_queue);
     portEXIT_CRITICAL(&s_stats_lock);
+    portENTER_CRITICAL(&s_state_lock);
+    out->compression_capable = s_compression_capable;
+    out->compression_active = s_compression_state.active;
+    portEXIT_CRITICAL(&s_state_lock);
 }

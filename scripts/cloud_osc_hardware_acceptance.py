@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+from collections import deque
 import json
 import math
 import os
@@ -90,6 +91,13 @@ def status_deltas(before: dict[str, Any], after: dict[str, Any]) -> dict[str, in
         "uplink_queued_fallback_frames": ("cloud_ws_uplink", "queued_fallback_frames"),
         "uplink_fallback_failures": ("cloud_ws_uplink", "fallback_failures"),
         "uplink_stop_dropped_frames": ("cloud_ws_uplink", "stop_dropped_frames"),
+        "uplink_compression_calls": ("cloud_ws_uplink", "compression_calls"),
+        "uplink_compressed_frames": ("cloud_ws_uplink", "compressed_frames"),
+        "uplink_raw_envelope_frames": ("cloud_ws_uplink", "raw_envelope_frames"),
+        "uplink_compression_failures": ("cloud_ws_uplink", "compression_failures"),
+        "uplink_raw_bytes": ("cloud_ws_uplink", "raw_bytes"),
+        "uplink_wire_bytes": ("cloud_ws_uplink", "wire_bytes"),
+        "uplink_compression_total_us": ("cloud_ws_uplink", "compression_total_us"),
     }
     return {
         name: max(0, nested_int(after, *path) - nested_int(before, *path))
@@ -98,8 +106,8 @@ def status_deltas(before: dict[str, Any], after: dict[str, Any]) -> dict[str, in
 
 
 def ensure_current_firmware(status: dict[str, Any]) -> None:
-    if nested_int(status, "cloud_ws_uplink", "schema_version") < 5:
-        raise RuntimeError("latest firmware with cloud WebSocket uplink schema 5 is required")
+    if nested_int(status, "cloud_ws_uplink", "schema_version") < 6:
+        raise RuntimeError("latest firmware with cloud WebSocket uplink schema 6 is required")
 
 
 def percentile(values: list[float], ratio: float) -> float:
@@ -132,6 +140,93 @@ def frame_metrics(frames: list[tuple[float, int]], duration: float) -> dict[str,
     }
 
 
+def heartbeat_metrics(latencies_ms: list[float]) -> dict[str, Any]:
+    return {
+        "count": len(latencies_ms),
+        "p95_ms": round(percentile(latencies_ms, 0.95), 2),
+        "max_ms": round(max(latencies_ms), 2) if latencies_ms else 0.0,
+    }
+
+
+def cloud_health_deltas(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    before_codec = before.get("waveform_codec") or {}
+    after_codec = after.get("waveform_codec") or {}
+    fields = (
+        "wire_bytes",
+        "decoded_raw_bytes",
+        "activations",
+        "compressed_messages",
+        "raw_envelope_messages",
+        "legacy_raw_messages",
+        "decode_total_us",
+    )
+    codec = {
+        field: max(0, nested_int(after_codec, field) - nested_int(before_codec, field))
+        for field in fields
+    }
+    before_failures = before_codec.get("decode_failures") or {}
+    after_failures = after_codec.get("decode_failures") or {}
+    codec["decode_failures"] = max(
+        0,
+        sum(int(value or 0) for value in after_failures.values()) -
+        sum(int(value or 0) for value in before_failures.values()),
+    )
+    codec["decode_max_us"] = nested_int(after_codec, "decode_max_us")
+    return {
+        "browser_drop_delta": max(
+            0,
+            nested_int(after, "ws_browser_dropped_frames") -
+            nested_int(before, "ws_browser_dropped_frames"),
+        ),
+        "codec": codec,
+    }
+
+
+def compression_checks(
+    deltas: dict[str, int],
+    uplink_after: dict[str, Any],
+    cloud_codec: dict[str, Any],
+    heartbeat: dict[str, Any],
+    *,
+    browser_drop_delta: int,
+    internal_min_free_heap: int,
+) -> dict[str, bool]:
+    raw_bytes = deltas.get("uplink_raw_bytes", 0)
+    wire_bytes = deltas.get("uplink_wire_bytes", 0)
+    calls = deltas.get("uplink_compression_calls", 0)
+    compression_total_us = deltas.get("uplink_compression_total_us", 0)
+    decoded_messages = (
+        int(cloud_codec.get("compressed_messages") or 0) +
+        int(cloud_codec.get("raw_envelope_messages") or 0)
+    )
+    decode_total_us = int(cloud_codec.get("decode_total_us") or 0)
+    return {
+        "compression_negotiated": (
+            bool(uplink_after.get("compression_capable")) and
+            bool(uplink_after.get("compression_active"))
+        ),
+        "compression_calls_observed": calls > 0,
+        "compression_frames_accounted": (
+            deltas.get("uplink_compressed_frames", 0) +
+            deltas.get("uplink_raw_envelope_frames", 0) == calls
+        ),
+        "compression_no_failures": deltas.get("uplink_compression_failures", 0) == 0,
+        "wire_ratio_below_20_percent": raw_bytes > 0 and wire_bytes / raw_bytes < 0.20,
+        "compression_average_us": calls > 0 and compression_total_us / calls <= 5000,
+        "compression_max_us": int(uplink_after.get("compression_max_us") or 0) <= 10000,
+        "cloud_decode_messages": decoded_messages > 0,
+        "cloud_decode_average_us": (
+            decoded_messages > 0 and decode_total_us / decoded_messages <= 1000
+        ),
+        "cloud_decode_no_failure": int(cloud_codec.get("decode_failures") or 0) == 0,
+        "browser_pump_no_drop": browser_drop_delta == 0,
+        "heartbeat_observed": int(heartbeat.get("count") or 0) > 0,
+        "heartbeat_p95_ms": float(heartbeat.get("p95_ms") or 0) <= 500,
+        "heartbeat_max_ms": float(heartbeat.get("max_ms") or 0) < 2000,
+        "internal_min_free_heap": internal_min_free_heap >= 8192,
+    }
+
+
 def latest_remote_ws_seq(payload: dict[str, Any]) -> int:
     return max((nested_int(frame, "seq") for frame in payload.get("frames") or []), default=0)
 
@@ -151,7 +246,12 @@ def evaluate_result(mode: str, metrics: dict[str, Any], deltas: dict[str, int],
                     fallback_window_frames: int = 0,
                     mqtt_poll_frames: int = 0,
                     fallback_injection_completed: bool = False,
-                    uplink_schema_version: int = 0) -> dict[str, Any]:
+                    uplink_schema_version: int = 0,
+                    uplink_after: dict[str, Any] | None = None,
+                    cloud_codec: dict[str, Any] | None = None,
+                    heartbeat: dict[str, Any] | None = None,
+                    browser_drop_delta: int = 0,
+                    internal_min_free_heap: int = 0) -> dict[str, Any]:
     intervals = metrics.get("interval_ms") or {}
     checks = {
         "received_waveform": metrics.get("frames", 0) > 0 and metrics.get("bytes", 0) > 0,
@@ -168,7 +268,7 @@ def evaluate_result(mode: str, metrics: dict[str, Any], deltas: dict[str, int],
         })
     else:
         checks.update({
-            "uplink_schema_current": uplink_schema_version >= 5,
+            "uplink_schema_current": uplink_schema_version >= 6,
             "binary_uplink_queued": deltas.get("uplink_queued_frames", 0) > 0,
             "binary_uplink_sent": deltas.get("uplink_sent_frames", 0) > 0,
             "binary_uplink_bytes": deltas.get("uplink_sent_bytes", 0) > 0,
@@ -184,6 +284,21 @@ def evaluate_result(mode: str, metrics: dict[str, Any], deltas: dict[str, int],
                 deltas.get("uplink_queued_frames", 0)),
             "mqtt_fallback_no_failures": deltas.get("uplink_fallback_failures", 0) == 0,
         })
+        checks.update(compression_checks(
+            deltas,
+            uplink_after or {},
+            cloud_codec or {},
+            heartbeat or {},
+            browser_drop_delta=browser_drop_delta,
+            internal_min_free_heap=internal_min_free_heap,
+        ))
+        if not fallback_requested:
+            checks.update({
+                "uplink_queue_not_full": deltas.get("uplink_queue_full", 0) == 0,
+                "uplink_no_overload_eviction": (
+                    deltas.get("uplink_overload_dropped_frames", 0) == 0),
+                "uplink_no_send_failure": deltas.get("uplink_send_failures", 0) == 0,
+            })
         if fallback_requested:
             checks["fallback_injection_completed"] = fallback_injection_completed
             checks["mqtt_fallback_observed"] = deltas.get("uplink_fallback_frames", 0) > 0
@@ -250,13 +365,16 @@ async def run_stream(ws: Any, duration: float, inject_fallback: bool,
                      capture_fallback_window: Any = None,
                      use_proxy: bool = False) -> tuple[list[tuple[float, int]], dict[str, Any]]:
     frames: list[tuple[float, int]] = []
+    heartbeat_sent_at: deque[float] = deque()
+    heartbeat_latencies_ms: list[float] = []
+    heartbeat_carry = b""
     capture = False
     stop_receiver = asyncio.Event()
     injection = {"requested": inject_fallback, "completed": False, "at_seconds": None}
     fallback_window_start: float | None = None
 
     async def receiver() -> None:
-        nonlocal capture
+        nonlocal capture, heartbeat_carry
         while not stop_receiver.is_set():
             try:
                 message = await asyncio.wait_for(ws.recv(), timeout=0.5)
@@ -268,6 +386,17 @@ async def run_stream(ws: Any, duration: float, inject_fallback: bool,
                 continue
             data = message.encode("latin1") if isinstance(message, str) else bytes(message)
             if data:
+                scan = heartbeat_carry + data
+                offset = 0
+                while True:
+                    match = scan.find(HEARTBEAT_FRAME, offset)
+                    if match < 0:
+                        break
+                    if heartbeat_sent_at:
+                        heartbeat_latencies_ms.append(
+                            (time.monotonic() - heartbeat_sent_at.popleft()) * 1000)
+                    offset = match + len(HEARTBEAT_FRAME)
+                heartbeat_carry = scan[-(len(HEARTBEAT_FRAME) - 1):]
                 frames.append((time.monotonic(), len(data)))
 
     receiver_task = asyncio.create_task(receiver())
@@ -287,6 +416,7 @@ async def run_stream(ws: Any, duration: float, inject_fallback: bool,
         while time.monotonic() - started < duration:
             now = time.monotonic()
             if now >= next_heartbeat:
+                heartbeat_sent_at.append(now)
                 await ws.send(HEARTBEAT_FRAME)
                 next_heartbeat = now + 1.0
             if inject_fallback and not injected and now >= inject_at and uplink_url:
@@ -325,6 +455,7 @@ async def run_stream(ws: Any, duration: float, inject_fallback: bool,
         injection["browser_frames"] = 0
         injection["browser_waveform_frames"] = 0
         injection["browser_bytes"] = 0
+    injection["heartbeat"] = heartbeat_metrics(heartbeat_latencies_ms)
     return frames, injection
 
 
@@ -346,6 +477,8 @@ async def async_main(args: argparse.Namespace) -> dict[str, Any]:
     use_proxy = mode == "cloud"
     http = HttpClient(username, password, use_proxy=use_proxy)
     fallback_requested = mode == "cloud" and args.inject_fallback
+    cloud_health_before: dict[str, Any] = {}
+    cloud_health_after: dict[str, Any] = {}
 
     if mode == "local":
         api_base = args.local_http.rstrip("/")
@@ -374,6 +507,7 @@ async def async_main(args: argparse.Namespace) -> dict[str, Any]:
             f"/remote/{urllib.parse.quote(args.device_id)}/ws/poll")
         initial_poll = http.json(remote_poll_url)
         initial_poll_seq = latest_remote_ws_seq(initial_poll)
+        cloud_health_before = http.json(f"{args.cloud_http.rstrip('/')}/health")
 
     started = time.monotonic()
     async def mark_fallback_window() -> int:
@@ -414,9 +548,11 @@ async def async_main(args: argparse.Namespace) -> dict[str, Any]:
         after = refresh_cloud_status(
             http, args.cloud_http, args.device_id,
             previous_uptime=nested_int(before, "uptime_ms"), timeout=15.0)
+        cloud_health_after = http.json(f"{args.cloud_http.rstrip('/')}/health")
 
     metrics = frame_metrics(frames, args.duration)
     deltas = status_deltas(before, after)
+    health_deltas = cloud_health_deltas(cloud_health_before, cloud_health_after)
     verdict = evaluate_result(
         mode, metrics, deltas, fallback_requested,
         args.min_bytes_per_second,
@@ -428,6 +564,11 @@ async def async_main(args: argparse.Namespace) -> dict[str, Any]:
          else count_remote_waveform_frames(fallback_poll) if mode == "cloud" else 0),
         bool(injection.get("completed")),
         nested_int(after, "cloud_ws_uplink", "schema_version") if mode == "cloud" else 0,
+        uplink_after=after.get("cloud_ws_uplink") or {},
+        cloud_codec=health_deltas.get("codec") or {},
+        heartbeat=injection.get("heartbeat") or {},
+        browser_drop_delta=int(health_deltas.get("browser_drop_delta") or 0),
+        internal_min_free_heap=nested_int(after, "heap", "internal_min_free"),
     )
     if mode == "cloud":
         verdict["checks"]["queue_in_psram"] = bool((after.get("cloud_ws_uplink") or {}).get("queue_in_psram"))
@@ -442,6 +583,8 @@ async def async_main(args: argparse.Namespace) -> dict[str, Any]:
         "metrics": metrics,
         "counter_deltas": deltas,
         "fallback_injection": injection,
+        "heartbeat": injection.get("heartbeat"),
+        "cloud_health_deltas": health_deltas if mode == "cloud" else None,
         "mqtt_fallback_cloud_frames": (
             int(injection.get("cloud_poll_frames") or 0)
             if mode == "cloud" and fallback_requested

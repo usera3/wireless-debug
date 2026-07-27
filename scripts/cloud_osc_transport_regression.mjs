@@ -21,8 +21,8 @@ assert.match(
 );
 
 assert.ok(
-  uplinkHeader.includes('#define CLOUD_WS_UPLINK_SCHEMA_VERSION 5U'),
-  'raw duplex downlink telemetry must use schema version 5',
+  uplinkHeader.includes('#define CLOUD_WS_UPLINK_SCHEMA_VERSION 6U'),
+  'negotiated waveform telemetry must use schema version 6',
 );
 for (const token of [
   'cloud_ws_uplink_downlink_fn_t',
@@ -34,6 +34,27 @@ for (const token of [
 ]) {
   assert.ok(uplinkHeader.includes(token), `firmware downlink API missing token: ${token}`);
 }
+for (const token of [
+  'compression_capable',
+  'compression_active',
+  'compression_calls',
+  'compressed_frames',
+  'raw_envelope_frames',
+  'compression_failures',
+  'raw_bytes',
+  'wire_bytes',
+  'compression_total_us',
+  'compression_max_us',
+]) {
+  assert.ok(uplinkHeader.includes(token), `schema-6 uplink stats missing: ${token}`);
+  assert.ok(source.includes(token), `cloud status missing schema-6 field: ${token}`);
+  assert.ok(webApi.includes(token), `local status missing schema-6 field: ${token}`);
+}
+assert.match(
+  uplink,
+  /esp_timer_get_time\(\)[\s\S]*cloud_waveform_encode[\s\S]*esp_timer_get_time\(\)/,
+  'firmware must time every negotiated compression call',
+);
 for (const token of [
   'CLOUD_WS_DOWNLINK_MAX_BYTES 512U',
   'cloud_ws_downlink_reassembly_t',

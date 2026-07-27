@@ -1081,7 +1081,7 @@ static esp_err_t device_status_handler(httpd_req_t *req)
     cloud_ws_uplink_get_stats(&uplink);
     http_prepare_json(req);
 
-    char resp[2432];
+    char resp[3072];
     int written = snprintf(resp, sizeof(resp),
              "{\"ok\":true,\"net\":\"%s\",\"comm\":\"%s\",\"uart_baud\":%lu,"
              "\"ble_ready\":%s,\"wifi_ws_client\":%s,"
@@ -1102,6 +1102,7 @@ static esp_err_t device_status_handler(httpd_req_t *req)
              "\"partial_drops\":%llu,\"dropped_bytes\":%llu}},"
              "\"cloud_ws_uplink\":{\"schema_version\":%u,"
              "\"connected\":%s,\"queue_in_psram\":%s,"
+             "\"compression_capable\":%s,\"compression_active\":%s,"
              "\"sender_stack_min_free\":%lu,\"queue_pending_frames\":%lu,"
              "\"queued_frames\":%lu,"
              "\"sent_frames\":%lu,\"sent_bytes\":%lu,\"queue_full\":%lu,"
@@ -1112,6 +1113,10 @@ static esp_err_t device_status_handler(httpd_req_t *req)
              "\"disconnect_events\":%lu,\"error_events\":%lu,"
              "\"closed_events\":%lu,\"downlink_frames\":%lu,"
              "\"downlink_bytes\":%lu,\"downlink_failures\":%lu,"
+             "\"compression_calls\":%lu,\"compressed_frames\":%lu,"
+             "\"raw_envelope_frames\":%lu,\"compression_failures\":%lu,"
+             "\"raw_bytes\":%llu,\"wire_bytes\":%llu,"
+             "\"compression_total_us\":%llu,\"compression_max_us\":%lu,"
              "\"last_event_id\":%ld},"
              "\"motor_params\":{\"count\":%u,\"capacity\":%u}}",
              system_menu_net_name(menu.net_mode),
@@ -1153,6 +1158,8 @@ static esp_err_t device_status_handler(httpd_req_t *req)
              (unsigned)CLOUD_WS_UPLINK_SCHEMA_VERSION,
              uplink.connected ? "true" : "false",
              uplink.queue_in_psram ? "true" : "false",
+             uplink.compression_capable ? "true" : "false",
+             uplink.compression_active ? "true" : "false",
              (unsigned long)uplink.sender_stack_min_free,
              (unsigned long)uplink.queue_pending_frames,
              (unsigned long)uplink.queued_frames,
@@ -1172,6 +1179,14 @@ static esp_err_t device_status_handler(httpd_req_t *req)
              (unsigned long)uplink.downlink_frames,
              (unsigned long)uplink.downlink_bytes,
              (unsigned long)uplink.downlink_failures,
+             (unsigned long)uplink.compression_calls,
+             (unsigned long)uplink.compressed_frames,
+             (unsigned long)uplink.raw_envelope_frames,
+             (unsigned long)uplink.compression_failures,
+             (unsigned long long)uplink.raw_bytes,
+             (unsigned long long)uplink.wire_bytes,
+             (unsigned long long)uplink.compression_total_us,
+             (unsigned long)uplink.compression_max_us,
              (long)uplink.last_event_id,
              (unsigned)motor_diag_param_count(),
              (unsigned)motor_diag_param_capacity());

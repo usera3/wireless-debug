@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import importlib.util
 import asyncio
+from copy import deepcopy
 from pathlib import Path
 
 
@@ -31,14 +32,19 @@ assert 'capture_fallback_window=capture_fallback_window' in source
 assert source.index('injection["cloud_poll_frames"] = await capture_fallback_window(') < source.index(
     'fallback_window_start = time.monotonic()')
 assert 'deadline = time.monotonic() + 2.0' in source
+assert 'heartbeat_sent_at' in source
+assert 'injection["heartbeat"]' in source
+assert 'cloud_health_before = http.json' in source
+assert 'cloud_health_after = http.json' in source
+assert 'cloud_health_deltas(cloud_health_before, cloud_health_after)' in source
 
-module.ensure_current_firmware({"cloud_ws_uplink": {"schema_version": 5}})
+module.ensure_current_firmware({"cloud_ws_uplink": {"schema_version": 6}})
 try:
-    module.ensure_current_firmware({"cloud_ws_uplink": {"schema_version": 4}})
+    module.ensure_current_firmware({"cloud_ws_uplink": {"schema_version": 5}})
 except RuntimeError as exc:
-    assert "schema 5" in str(exc)
+    assert "schema 6" in str(exc)
 else:
-    raise AssertionError("one-way schema 4 firmware must be rejected")
+    raise AssertionError("uncompressed schema 5 firmware must be rejected")
 try:
     module.ensure_current_firmware({})
 except RuntimeError as exc:
@@ -66,6 +72,13 @@ before = {
         "queued_fallback_frames": 2,
         "fallback_failures": 1,
         "stop_dropped_frames": 2,
+        "compression_calls": 10,
+        "compressed_frames": 8,
+        "raw_envelope_frames": 2,
+        "compression_failures": 1,
+        "raw_bytes": 10000,
+        "wire_bytes": 1000,
+        "compression_total_us": 100,
     },
 }
 after = {
@@ -86,6 +99,13 @@ after = {
         "queued_fallback_frames": 5,
         "fallback_failures": 1,
         "stop_dropped_frames": 3,
+        "compression_calls": 30,
+        "compressed_frames": 26,
+        "raw_envelope_frames": 4,
+        "compression_failures": 1,
+        "raw_bytes": 250000,
+        "wire_bytes": 13000,
+        "compression_total_us": 5100,
     },
 }
 deltas = module.status_deltas(before, after)
@@ -105,7 +125,85 @@ assert deltas == {
     "uplink_queued_fallback_frames": 3,
     "uplink_fallback_failures": 0,
     "uplink_stop_dropped_frames": 1,
+    "uplink_compression_calls": 20,
+    "uplink_compressed_frames": 18,
+    "uplink_raw_envelope_frames": 2,
+    "uplink_compression_failures": 0,
+    "uplink_raw_bytes": 240000,
+    "uplink_wire_bytes": 12000,
+    "uplink_compression_total_us": 5000,
 }
+
+good_compression_deltas = {
+    "uplink_compression_calls": 20,
+    "uplink_compressed_frames": 18,
+    "uplink_raw_envelope_frames": 2,
+    "uplink_compression_failures": 0,
+    "uplink_raw_bytes": 240000,
+    "uplink_wire_bytes": 12000,
+    "uplink_compression_total_us": 40000,
+}
+good_uplink_after = {
+    "compression_capable": True,
+    "compression_active": True,
+    "compression_max_us": 8000,
+}
+good_cloud_codec = {
+    "compressed_messages": 20,
+    "raw_envelope_messages": 0,
+    "decode_failures": 0,
+    "decode_total_us": 10000,
+    "decode_max_us": 900,
+}
+good_heartbeat = {"count": 20, "p95_ms": 100.0, "max_ms": 200.0}
+
+checks = module.compression_checks(
+    good_compression_deltas,
+    good_uplink_after,
+    good_cloud_codec,
+    good_heartbeat,
+    browser_drop_delta=0,
+    internal_min_free_heap=10000,
+)
+assert all(checks.values()), checks
+
+boundary_cases = [
+    ("wire_ratio_below_20_percent", "deltas", "uplink_wire_bytes", 48000),
+    ("compression_average_us", "deltas", "uplink_compression_total_us", 100001),
+    ("compression_max_us", "uplink", "compression_max_us", 10001),
+    ("cloud_decode_average_us", "cloud", "decode_total_us", 20001),
+    ("heartbeat_p95_ms", "heartbeat", "p95_ms", 500.01),
+    ("heartbeat_max_ms", "heartbeat", "max_ms", 2000.0),
+    ("internal_min_free_heap", "heap", "value", 8191),
+    ("compression_no_failures", "deltas", "uplink_compression_failures", 1),
+    ("cloud_decode_no_failure", "cloud", "decode_failures", 1),
+    ("browser_pump_no_drop", "browser", "value", 1),
+]
+for check_name, target, key, value in boundary_cases:
+    deltas_case = deepcopy(good_compression_deltas)
+    uplink_case = deepcopy(good_uplink_after)
+    cloud_case = deepcopy(good_cloud_codec)
+    heartbeat_case = deepcopy(good_heartbeat)
+    browser_drop = 0
+    heap = 10000
+    if target == "deltas":
+        deltas_case[key] = value
+    elif target == "uplink":
+        uplink_case[key] = value
+    elif target == "cloud":
+        cloud_case[key] = value
+    elif target == "heartbeat":
+        heartbeat_case[key] = value
+    elif target == "browser":
+        browser_drop = value
+    else:
+        heap = value
+    failed = module.compression_checks(
+        deltas_case, uplink_case, cloud_case, heartbeat_case,
+        browser_drop_delta=browser_drop,
+        internal_min_free_heap=heap,
+    )
+    assert failed[check_name] is False, check_name
 
 metrics = module.frame_metrics(
     [(0.000, 250), (0.010, 250), (0.020, 500), (0.060, 250)],
@@ -148,6 +246,7 @@ local = module.evaluate_result(
         "uplink_queued_fallback_frames": 0,
         "uplink_fallback_failures": 0,
         "uplink_stop_dropped_frames": 0,
+        **good_compression_deltas,
     },
     fallback_requested=False,
     min_bytes_per_second=15000,
@@ -176,6 +275,7 @@ cloud = module.evaluate_result(
         "uplink_queued_fallback_frames": 5,
         "uplink_fallback_failures": 0,
         "uplink_stop_dropped_frames": 0,
+        **good_compression_deltas,
     },
     fallback_requested=True,
     min_bytes_per_second=15000,
@@ -184,7 +284,12 @@ cloud = module.evaluate_result(
     fallback_window_frames=3,
     mqtt_poll_frames=2,
     fallback_injection_completed=True,
-    uplink_schema_version=5,
+    uplink_schema_version=6,
+    uplink_after=good_uplink_after,
+    cloud_codec=good_cloud_codec,
+    heartbeat=good_heartbeat,
+    browser_drop_delta=0,
+    internal_min_free_heap=10000,
 )
 assert cloud["passed"] is True
 
@@ -237,6 +342,7 @@ unaccounted = module.evaluate_result(
         "uplink_queued_fallback_frames": 4,
         "uplink_fallback_failures": 1,
         "uplink_stop_dropped_frames": 0,
+        **good_compression_deltas,
     },
     fallback_requested=True,
     min_bytes_per_second=15000,
@@ -245,7 +351,12 @@ unaccounted = module.evaluate_result(
     fallback_window_frames=3,
     mqtt_poll_frames=2,
     fallback_injection_completed=True,
-    uplink_schema_version=5,
+    uplink_schema_version=6,
+    uplink_after=good_uplink_after,
+    cloud_codec=good_cloud_codec,
+    heartbeat=good_heartbeat,
+    browser_drop_delta=0,
+    internal_min_free_heap=10000,
 )
 assert unaccounted["passed"] is False
 assert unaccounted["checks"]["uplink_frames_accounted"] is False
@@ -296,8 +407,14 @@ class FakeSocket:
 
     async def send(self, payload):
         self.sent.append(bytes(payload))
-        if bytes(payload) in (module.START_FRAME, module.HEARTBEAT_FRAME):
+        if bytes(payload) == module.START_FRAME:
             await self.messages.put(module.OSC_HEADER + bytes(246))
+        elif bytes(payload) == module.HEARTBEAT_FRAME:
+            midpoint = len(module.HEARTBEAT_FRAME) // 2
+            await self.messages.put(module.HEARTBEAT_FRAME[:midpoint])
+            await self.messages.put(
+                module.HEARTBEAT_FRAME[midpoint:] + module.OSC_HEADER + bytes(246)
+            )
 
     async def recv(self):
         return await self.messages.get()
@@ -340,6 +457,8 @@ async def verify_stream_control():
     assert fallback_marks == ["marked"]
     assert injection["browser_frames"] >= 1
     assert injection["browser_waveform_frames"] >= 1
+    assert injection["heartbeat"]["count"] >= 1
+    assert injection["heartbeat"]["max_ms"] < 2000
     assert len(frames) >= 1
 
 

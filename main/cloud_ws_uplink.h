@@ -8,7 +8,7 @@
 #include "esp_err.h"
 #include "wifi_manager.h"
 
-#define CLOUD_WS_UPLINK_SCHEMA_VERSION 5U
+#define CLOUD_WS_UPLINK_SCHEMA_VERSION 6U
 
 typedef bool (*cloud_ws_uplink_fallback_fn_t)(const uint8_t *data, size_t len, void *ctx);
 typedef esp_err_t (*cloud_ws_uplink_downlink_fn_t)(const uint8_t *data, size_t len, void *ctx);
@@ -26,6 +26,8 @@ typedef struct {
 typedef struct {
     bool connected;
     bool queue_in_psram;
+    bool compression_capable;
+    bool compression_active;
     uint32_t sender_stack_min_free;
     uint32_t queue_pending_frames;
     uint32_t queued_frames;
@@ -45,6 +47,14 @@ typedef struct {
     uint32_t downlink_frames;
     uint32_t downlink_bytes;
     uint32_t downlink_failures;
+    uint32_t compression_calls;
+    uint32_t compressed_frames;
+    uint32_t raw_envelope_frames;
+    uint32_t compression_failures;
+    uint64_t raw_bytes;
+    uint64_t wire_bytes;
+    uint64_t compression_total_us;
+    uint32_t compression_max_us;
     int32_t last_event_id;
 } cloud_ws_uplink_stats_t;
 

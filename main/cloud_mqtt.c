@@ -300,6 +300,8 @@ static void add_cloud_ws_uplink_status(cJSON *root)
     cJSON_AddNumberToObject(obj, "schema_version", CLOUD_WS_UPLINK_SCHEMA_VERSION);
     cJSON_AddBoolToObject(obj, "connected", stats.connected);
     cJSON_AddBoolToObject(obj, "queue_in_psram", stats.queue_in_psram);
+    cJSON_AddBoolToObject(obj, "compression_capable", stats.compression_capable);
+    cJSON_AddBoolToObject(obj, "compression_active", stats.compression_active);
     cJSON_AddNumberToObject(obj, "sender_stack_min_free", (double)stats.sender_stack_min_free);
     cJSON_AddNumberToObject(obj, "queue_pending_frames", (double)stats.queue_pending_frames);
     cJSON_AddNumberToObject(obj, "queued_frames", (double)stats.queued_frames);
@@ -320,6 +322,14 @@ static void add_cloud_ws_uplink_status(cJSON *root)
     cJSON_AddNumberToObject(obj, "downlink_frames", (double)stats.downlink_frames);
     cJSON_AddNumberToObject(obj, "downlink_bytes", (double)stats.downlink_bytes);
     cJSON_AddNumberToObject(obj, "downlink_failures", (double)stats.downlink_failures);
+    cJSON_AddNumberToObject(obj, "compression_calls", (double)stats.compression_calls);
+    cJSON_AddNumberToObject(obj, "compressed_frames", (double)stats.compressed_frames);
+    cJSON_AddNumberToObject(obj, "raw_envelope_frames", (double)stats.raw_envelope_frames);
+    cJSON_AddNumberToObject(obj, "compression_failures", (double)stats.compression_failures);
+    cJSON_AddNumberToObject(obj, "raw_bytes", (double)stats.raw_bytes);
+    cJSON_AddNumberToObject(obj, "wire_bytes", (double)stats.wire_bytes);
+    cJSON_AddNumberToObject(obj, "compression_total_us", (double)stats.compression_total_us);
+    cJSON_AddNumberToObject(obj, "compression_max_us", (double)stats.compression_max_us);
     cJSON_AddNumberToObject(obj, "last_event_id", (double)stats.last_event_id);
     cJSON_AddItemToObject(root, "cloud_ws_uplink", obj);
 }
