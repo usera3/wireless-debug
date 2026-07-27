@@ -330,6 +330,9 @@ static void add_cloud_ws_uplink_status(cJSON *root)
     cJSON_AddNumberToObject(obj, "wire_bytes", (double)stats.wire_bytes);
     cJSON_AddNumberToObject(obj, "compression_total_us", (double)stats.compression_total_us);
     cJSON_AddNumberToObject(obj, "compression_max_us", (double)stats.compression_max_us);
+    cJSON_AddNumberToObject(obj, "send_calls", (double)stats.send_calls);
+    cJSON_AddNumberToObject(obj, "send_total_us", (double)stats.send_total_us);
+    cJSON_AddNumberToObject(obj, "send_max_us", (double)stats.send_max_us);
     cJSON_AddNumberToObject(obj, "last_event_id", (double)stats.last_event_id);
     cJSON_AddItemToObject(root, "cloud_ws_uplink", obj);
 }

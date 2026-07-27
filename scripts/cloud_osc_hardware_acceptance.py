@@ -98,6 +98,8 @@ def status_deltas(before: dict[str, Any], after: dict[str, Any]) -> dict[str, in
         "uplink_raw_bytes": ("cloud_ws_uplink", "raw_bytes"),
         "uplink_wire_bytes": ("cloud_ws_uplink", "wire_bytes"),
         "uplink_compression_total_us": ("cloud_ws_uplink", "compression_total_us"),
+        "uplink_send_calls": ("cloud_ws_uplink", "send_calls"),
+        "uplink_send_total_us": ("cloud_ws_uplink", "send_total_us"),
     }
     return {
         name: max(0, nested_int(after, *path) - nested_int(before, *path))

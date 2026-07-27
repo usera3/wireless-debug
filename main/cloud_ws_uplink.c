@@ -98,6 +98,17 @@ static void stats_note_sent_bytes(size_t raw_len, size_t wire_len)
     portEXIT_CRITICAL(&s_stats_lock);
 }
 
+static void stats_note_send(uint32_t elapsed_us)
+{
+    portENTER_CRITICAL(&s_stats_lock);
+    s_stats.send_calls++;
+    s_stats.send_total_us += elapsed_us;
+    if (elapsed_us > s_stats.send_max_us) {
+        s_stats.send_max_us = elapsed_us;
+    }
+    portEXIT_CRITICAL(&s_stats_lock);
+}
+
 static void downlink_reset(void)
 {
     cloud_ws_downlink_reassembly_reset(&s_downlink_reassembly);
@@ -295,11 +306,14 @@ static void sender_task(void *arg)
                 }
                 send_data = s_wire_aggregate;
             }
+            int64_t send_started_us = esp_timer_get_time();
             int sent = esp_websocket_client_send_bin(
                 s_client,
                 (const char *)send_data,
                 (int)send_len,
                 pdMS_TO_TICKS(CLOUD_WS_UPLINK_SEND_TIMEOUT_MS));
+            int64_t send_elapsed_us = esp_timer_get_time() - send_started_us;
+            stats_note_send(send_elapsed_us <= 0 ? 0 : (uint32_t)send_elapsed_us);
             if (sent != (int)send_len) {
                 stats_increment(&s_stats.send_failures, 1);
                 if (!fallback_frame(s_raw_aggregate, raw_len, source_frames)) {

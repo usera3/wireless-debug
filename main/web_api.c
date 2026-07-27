@@ -1117,6 +1117,7 @@ static esp_err_t device_status_handler(httpd_req_t *req)
              "\"raw_envelope_frames\":%lu,\"compression_failures\":%lu,"
              "\"raw_bytes\":%llu,\"wire_bytes\":%llu,"
              "\"compression_total_us\":%llu,\"compression_max_us\":%lu,"
+             "\"send_calls\":%lu,\"send_total_us\":%llu,\"send_max_us\":%lu,"
              "\"last_event_id\":%ld},"
              "\"motor_params\":{\"count\":%u,\"capacity\":%u}}",
              system_menu_net_name(menu.net_mode),
@@ -1187,6 +1188,9 @@ static esp_err_t device_status_handler(httpd_req_t *req)
              (unsigned long long)uplink.wire_bytes,
              (unsigned long long)uplink.compression_total_us,
              (unsigned long)uplink.compression_max_us,
+             (unsigned long)uplink.send_calls,
+             (unsigned long long)uplink.send_total_us,
+             (unsigned long)uplink.send_max_us,
              (long)uplink.last_event_id,
              (unsigned)motor_diag_param_count(),
              (unsigned)motor_diag_param_capacity());

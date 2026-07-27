@@ -79,6 +79,8 @@ before = {
         "raw_bytes": 10000,
         "wire_bytes": 1000,
         "compression_total_us": 100,
+        "send_calls": 10,
+        "send_total_us": 100,
     },
 }
 after = {
@@ -106,6 +108,8 @@ after = {
         "raw_bytes": 250000,
         "wire_bytes": 13000,
         "compression_total_us": 5100,
+        "send_calls": 30,
+        "send_total_us": 5100,
     },
 }
 deltas = module.status_deltas(before, after)
@@ -132,6 +136,8 @@ assert deltas == {
     "uplink_raw_bytes": 240000,
     "uplink_wire_bytes": 12000,
     "uplink_compression_total_us": 5000,
+    "uplink_send_calls": 20,
+    "uplink_send_total_us": 5000,
 }
 
 good_compression_deltas = {

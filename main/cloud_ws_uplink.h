@@ -55,6 +55,9 @@ typedef struct {
     uint64_t wire_bytes;
     uint64_t compression_total_us;
     uint32_t compression_max_us;
+    uint32_t send_calls;
+    uint64_t send_total_us;
+    uint32_t send_max_us;
     int32_t last_event_id;
 } cloud_ws_uplink_stats_t;
 

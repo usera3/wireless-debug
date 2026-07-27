@@ -69,6 +69,9 @@ for (const token of [
   'wire_bytes',
   'compression_total_us',
   'compression_max_us',
+  'send_calls',
+  'send_total_us',
+  'send_max_us',
 ]) {
   assert.ok(uplinkHeader.includes(token), `schema-6 uplink stats missing: ${token}`);
   assert.ok(source.includes(token), `cloud status missing schema-6 field: ${token}`);
