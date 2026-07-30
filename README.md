@@ -4,6 +4,9 @@ ESP32-S3 UART / BLE / WiFi wireless debug firmware.
 
 The firmware provides UART transparent transmission over BLE SPP and WiFi WebSocket, an embedded Web UI, motor parameter tools, address oscilloscope, WiFi provisioning, and a 128x64 SSD1315 OLED menu controlled by two buttons.
 
+The `oled-smooth-ui-20260730` branch is the hardware-verified checkpoint for
+continuous local/cloud oscilloscope transport and smooth LVGL OLED menu motion.
+
 ## Current Hardware
 
 | Item | Value |
@@ -68,9 +71,10 @@ reconnect is acceptable.
 - Runtime UART baud-rate switching.
 - Embedded Web UI stored in SPIFFS.
 - Address oscilloscope with history cache, channel visibility, wheel zoom, left-button drag, pause/review, CSV import/export, and mock waveform test entry.
+- Lossless compressed cloud oscilloscope uplink with pacing and reconnect buffering for continuous waveform delivery.
 - Motor diagnostic read/write APIs and parameter tools.
 - OLED home screen showing WiFi, BLE, and UART status.
-- OLED menu operated by S4/S5.
+- OLED menu operated by S4/S5, with an animated selection cursor and directional page transitions.
 - Web/OLED state synchronization through the same action layer.
 - Excel file upload/list/delete APIs.
 
@@ -149,7 +153,7 @@ Current defaults are defined in `main/display_port.h`:
 #define DISPLAY_SSD1315_SCL_GPIO 19
 #define DISPLAY_SSD1315_SDA_GPIO 20
 #define DISPLAY_SSD1315_I2C_ADDR 0x3C
-#define DISPLAY_SSD1315_I2C_HZ 100000
+#define DISPLAY_SSD1315_I2C_HZ 400000
 #define DISPLAY_SSD1315_COLUMN_OFFSET 2
 ```
 
@@ -161,6 +165,65 @@ OLED behavior:
 - S5 long press returns.
 - Operation results are shown as success/failure feedback.
 - Long text is handled as a single-line clipped view with scrolling where needed.
+- The selection cursor moves with a 200ms ease-out animation and inverts the
+  underlying monochrome pixels using LVGL difference blending.
+- Home, menu, submenu, and overlay transitions slide 24 pixels in the navigation
+  direction over 200ms.
+- The LVGL task follows the timer handler with a bounded 5-20ms wake interval.
+- SSD1315 transfers use 400kHz I2C and batch one 128-byte display page per write.
+
+## 2026-07-30 Stable Checkpoint
+
+| Item | Value |
+|------|-------|
+| Branch | `oled-smooth-ui-20260730` |
+| Hardware-verified firmware tag | `stable-oled-smooth-ui-20260730` |
+| Firmware commit | `80ad0d4f58fe3cf27d97cf59076777251f17a187` |
+| Target | ESP32-S3, 8MB flash, SSD1315 128x64 OLED |
+| Application image | `0x199aa0` bytes, 36% of the app partition free |
+
+This checkpoint was built with ESP-IDF 6.0 and verified on the physical device.
+The selection cursor, forward/back page transitions, normal boot, local Web UI,
+and cloud oscilloscope path were exercised on hardware. The OLED motion, I2C
+speed, layout, and WiFi status regression scripts also passed.
+
+The complete recovery package is stored in the branch:
+
+- [Complete recovery ZIP](artifacts/oled-smooth-ui-20260730-complete.zip)
+- [ZIP SHA-256](artifacts/oled-smooth-ui-20260730-complete.zip.sha256)
+
+The package contains the application, SPIFFS storage, bootloader, partition
+table, flash argument files, a source snapshot, a complete Git bundle, and
+per-file SHA-256 hashes. Verify the downloaded package from its directory with:
+
+```bash
+sha256sum -c oled-smooth-ui-20260730-complete.zip.sha256
+```
+
+After extracting it, verify every recovery artifact with:
+
+```bash
+cd artifacts/oled-smooth-ui-20260730
+sha256sum -c SHA256SUMS
+git bundle verify source/wireless-debug-fw.bundle
+```
+
+For a complete restore, enter download mode and run the following command from
+the extracted `flash` directory after replacing `PORT` with the actual serial
+port:
+
+```bash
+python -m esptool --chip esp32s3 -p PORT -b 460800 \
+  --before default-reset --after hard-reset \
+  write-flash "@flash_args"
+```
+
+The stable tag remains attached to the exact firmware source used for the
+archived binaries. The branch adds this documentation commit on top of that tag.
+
+Known cosmetic edge: immediately reversing a forward page transition during its
+200ms animation can let the returning content finish in the original direction.
+Normal physical-button operation did not expose a jump or crash.
 
 ## Partition Table
 
@@ -224,10 +287,11 @@ Common endpoints:
 | `/api/excel/upload` | POST | upload Excel file |
 | `/api/excel/delete?name=...` | DELETE | delete Excel file |
 
-## Version Anchor
+## Version Anchors
 
-Stable branch/tag used for the verified OLED and oscilloscope UI build:
-
-```text
-stable-osc-ui-20260707
-```
+| Purpose | Ref |
+|---------|-----|
+| Current recovery branch | `oled-smooth-ui-20260730` |
+| Hardware-verified OLED firmware | `stable-oled-smooth-ui-20260730` |
+| Verified oscilloscope pacing baseline | `stable-osc-pacing-20260730` |
+| Previous OLED/oscilloscope baseline | `stable-osc-ui-20260707` |
