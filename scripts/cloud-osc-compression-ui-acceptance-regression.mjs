@@ -8,6 +8,7 @@ for (const token of [
   "process.env.TARGET_MODE || 'cloud'",
   'PARAM_DURATION_MS',
   'ADDRESS_DURATION_MS',
+  'PLAYWRIGHT_PROXY_SERVER',
   'async function sampleFor',
   'function parseCache',
   "locator('input[type=file]').first().setInputFiles(paramTable)",
@@ -39,5 +40,10 @@ assert.match(
 );
 assert.ok(source.includes('process.env.CLOUD_HTTP_USER'));
 assert.ok(source.includes('process.env.CLOUD_HTTP_PASSWORD'));
+assert.match(
+  source,
+  /proxyServer[\s\S]*proxy:\s*proxyServer\s*\?\s*\{\s*server:\s*proxyServer\s*\}/,
+  'cloud UI acceptance must allow an explicit Chromium proxy without changing local defaults',
+);
 
 console.log('cloud compression UI acceptance contract passed');

@@ -10,6 +10,16 @@ function hex(bytes: Uint8Array): string {
     .join(' ');
 }
 
+function concatBytes(...chunks: Uint8Array[]): Uint8Array {
+  const result = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return result;
+}
+
 function makeReadResponseWithOscMagicInPayload(): Uint8Array {
   return appendCrc(
     new Uint8Array([
@@ -100,6 +110,117 @@ for (const splitOffset of [1, 2, 3]) {
 }
 
 {
+  const oscFrame = makeOscFrame(12);
+  oscFrame[4] = 0xff;
+  oscFrame[5] = 0xfe;
+  const payloadCrc = crc16(oscFrame.slice(4, 6));
+  oscFrame[6] = payloadCrc & 0xff;
+  oscFrame[7] = (payloadCrc >> 8) & 0xff;
+
+  const parsed = parseOscDataFrame(
+    oscFrame,
+    [{ byteWidth: 2, paramType: 0x01 }],
+    { requireCrc: true },
+  );
+
+  assert.deepEqual(
+    parsed?.channels,
+    [[0xfffe]],
+    'unsigned 16-bit osc channels must retain values above Int16.MAX_VALUE',
+  );
+}
+
+{
+  const router = new FrameRouter();
+  const oscFrames: Uint8Array[] = [];
+  const modbusFrames: Uint8Array[] = [];
+  const original = makeOscFrame(250);
+  original.fill(0, 246, 250);
+  const heartbeat = appendCrc(new Uint8Array([0xff, 0x08, 0x00, 0x00, 0x00, 0x00]));
+  const interleaved = concatBytes(original.slice(0, 137), heartbeat, original.slice(137));
+
+  router.setFrameLen(250);
+  router.onOscFrame((frame) => oscFrames.push(frame));
+  router.onModbusFrame((frame) => modbusFrames.push(frame));
+  router.feed(interleaved.slice(0, 250));
+  assert.equal(oscFrames.length, 0, 'an interleaved osc block must wait for its missing suffix');
+  router.feed(interleaved.slice(250));
+
+  assert.equal(oscFrames.length, 1, 'an in-band heartbeat must not discard a complete osc block');
+  assert.equal(hex(oscFrames[0]), hex(original));
+  assert.deepEqual(modbusFrames.map(hex), [hex(heartbeat)]);
+}
+
+{
+  const router = new FrameRouter();
+  const oscFrames: Uint8Array[] = [];
+  const modbusFrames: Uint8Array[] = [];
+  const original = makeFooterAnchoredOscFrame(250);
+  const heartbeat = appendCrc(new Uint8Array([0xff, 0x08, 0x00, 0x00, 0x00, 0x00]));
+  const interleaved = concatBytes(
+    original.slice(0, 86),
+    heartbeat,
+    heartbeat,
+    original.slice(86),
+  );
+
+  router.setFrameLen(250);
+  router.onOscFrame((frame) => oscFrames.push(frame));
+  router.onModbusFrame((frame) => modbusFrames.push(frame));
+  router.feed(interleaved.slice(0, 250));
+  assert.equal(oscFrames.length, 0, 'a footer-anchored block must wait for two inserted responses');
+  router.feed(interleaved.slice(250));
+
+  assert.equal(oscFrames.length, 1, 'two in-band heartbeats must preserve a footer-anchored block');
+  assert.equal(hex(oscFrames[0]), hex(original));
+  assert.deepEqual(modbusFrames.map(hex), [hex(heartbeat), hex(heartbeat)]);
+}
+
+{
+  const router = new FrameRouter();
+  const oscFrames: Uint8Array[] = [];
+  const original = makeFooterAnchoredOscFrame(250);
+  const heartbeat = appendCrc(new Uint8Array([0xff, 0x08, 0x00, 0x00, 0x00, 0x00]));
+  const truncatedControl = concatBytes(
+    new Uint8Array([0x5f, 0x05]),
+    heartbeat,
+    heartbeat.slice(0, 6),
+  );
+
+  router.setFrameLen(250);
+  router.onOscFrame((frame) => oscFrames.push(frame));
+  router.feed(concatBytes(truncatedControl, original));
+
+  assert.equal(oscFrames.length, 1, 'truncated control debris must not hide the next footer block');
+  assert.equal(hex(oscFrames[0]), hex(original));
+}
+
+{
+  const router = new FrameRouter();
+  const oscFrames: Uint8Array[] = [];
+  const modbusFrames: Uint8Array[] = [];
+  const original = makeFooterAnchoredOscFrame(250);
+  const heartbeat = appendCrc(new Uint8Array([0xff, 0x08, 0x00, 0x00, 0x00, 0x00]));
+  const interleaved = concatBytes(
+    original.slice(0, 2),
+    heartbeat,
+    heartbeat,
+    original.slice(2),
+  );
+
+  router.setFrameLen(250);
+  router.onOscFrame((frame) => oscFrames.push(frame));
+  router.onModbusFrame((frame) => modbusFrames.push(frame));
+  router.feed(interleaved.slice(0, 180));
+  assert.equal(oscFrames.length, 0, 'a split footer prefix must remain buffered');
+  router.feed(interleaved.slice(180));
+
+  assert.equal(oscFrames.length, 1, 'heartbeats inside the footer prefix must preserve the osc block');
+  assert.equal(hex(oscFrames[0]), hex(original));
+  assert.deepEqual(modbusFrames.map(hex), [hex(heartbeat), hex(heartbeat)]);
+}
+
+{
   const router = new FrameRouter();
   const frames: Uint8Array[] = [];
   const oscFrame = corruptOscCrc(makeOscFrame(250));
@@ -134,6 +255,93 @@ for (const splitOffset of [1, 2, 3]) {
     parseOscDataFrame(footerAnchored, [{ byteWidth: 2, paramType: 0x00 }], { requireCrc: true }),
     null,
     'parser must accept a CRC-valid footer-anchored block',
+  );
+}
+
+{
+  const router = new FrameRouter();
+  const frames: Uint8Array[] = [];
+  const headerAnchored = makeOscFrame(250);
+  headerAnchored.fill(0, 246, 250);
+  const footerAnchored = makeFooterAnchoredOscFrame(250);
+
+  router.setFrameLen(250);
+  router.onOscFrame((frame) => frames.push(frame));
+  router.feed(concatBytes(headerAnchored, footerAnchored));
+
+  assert.equal(
+    frames.length,
+    2,
+    'two valid 250-byte osc blocks in one WebSocket message must both be routed',
+  );
+}
+
+{
+  const router = new FrameRouter();
+  const frames: Uint8Array[] = [];
+  const headerAnchored = makeOscFrame(250);
+  headerAnchored.fill(0, 246, 250);
+  const footerAnchored = makeFooterAnchoredOscFrame(250);
+
+  router.setFrameLen(250);
+  router.onOscFrame((frame) => frames.push(frame));
+  router.feed(concatBytes(headerAnchored, footerAnchored.slice(0, 100)));
+  assert.equal(frames.length, 1, 'a partial footer-anchored block must remain buffered');
+  router.feed(footerAnchored.slice(100));
+
+  assert.equal(
+    frames.length,
+    2,
+    'a footer-anchored block split across WebSocket messages must be recovered',
+  );
+}
+
+{
+  const router = new FrameRouter();
+  const frames: Uint8Array[] = [];
+  const headerAnchored = makeOscFrame(250);
+  headerAnchored.fill(0, 246, 250);
+  const footerAnchored = makeFooterAnchoredOscFrame(250);
+  const embeddedModbus = appendCrc(new Uint8Array([0xff, 0x03, 0x02, 0x00, 0x01]));
+  footerAnchored.set(embeddedModbus, 20);
+  const payloadCrc = crc16(footerAnchored.slice(4, 244));
+  footerAnchored[244] = payloadCrc & 0xff;
+  footerAnchored[245] = (payloadCrc >> 8) & 0xff;
+
+  router.setFrameLen(250);
+  router.onOscFrame((frame) => frames.push(frame));
+  router.feed(concatBytes(headerAnchored, footerAnchored.slice(0, 241)));
+  assert.equal(frames.length, 1, 'a partial footer-anchored block must not expose payload bytes');
+  router.feed(footerAnchored.slice(241));
+
+  assert.equal(
+    frames.length,
+    2,
+    'Modbus-like bytes inside a split footer-anchored block must not trigger resynchronization',
+  );
+}
+
+{
+  const router = new FrameRouter();
+  const frames: Uint8Array[] = [];
+  const headerAnchored = makeOscFrame(250);
+  headerAnchored.fill(0, 246, 250);
+  const embeddedModbus = appendCrc(new Uint8Array([0xff, 0x03, 0x02, 0x00, 0x01]));
+  headerAnchored.set(embeddedModbus, 65);
+  const payloadCrc = crc16(headerAnchored.slice(4, 244));
+  headerAnchored[244] = payloadCrc & 0xff;
+  headerAnchored[245] = (payloadCrc >> 8) & 0xff;
+
+  router.setFrameLen(250);
+  router.onOscFrame((frame) => frames.push(frame));
+  router.feed(headerAnchored.slice(0, 187));
+  assert.equal(frames.length, 0, 'a partial header-anchored block must remain buffered');
+  router.feed(headerAnchored.slice(187));
+
+  assert.equal(
+    frames.length,
+    1,
+    'Modbus-like bytes inside a split header-anchored block must not trigger resynchronization',
   );
 }
 

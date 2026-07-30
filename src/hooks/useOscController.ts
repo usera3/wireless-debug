@@ -14,7 +14,6 @@ import {
 import { useOscStore, ChannelConfig } from '../store/oscStore';
 import { frameRouter } from '../lib/frameRouter';
 import { waitForOscResponseWithRetry } from '../lib/oscRequest';
-import { OscRealtimeBuffer } from '../lib/oscRealtimeBuffer';
 import { OscJitterBuffer } from '../lib/oscJitterBuffer';
 import {
   OscStopBarrierSequence,
@@ -38,9 +37,10 @@ let stopBarrierTargetKey: string | null = null;
 let stopBarrierConnectionGeneration: number | null = null;
 
 // 接收回调只写缓冲，固定节奏统一触发 store 和图表更新。
-const oscBuffer = new OscRealtimeBuffer();
-const cloudJitterBuffer = new OscJitterBuffer();
+const oscPlaybackBuffer = new OscJitterBuffer();
 const STORE_FLUSH_INTERVAL_MS = 50;
+const LOCAL_OSC_TARGET_LATENCY_MS = 200;
+const CLOUD_OSC_TARGET_LATENCY_MS = 300;
 const OSC_HANDSHAKE_TIMEOUT_MS = 8000;
 const OSC_STOP_DRAIN_TIMEOUT_MS = 2500;
 const OSC_QUERY_RETRY_DELAY_MS = 250;
@@ -67,13 +67,10 @@ function stopStoreFlushTimer() {
 
 function startStoreFlushTimer(
   appendSamples: (batch: Map<number, number[]>) => void,
-  useCloudJitter: boolean,
 ) {
   stopStoreFlushTimer();
   storeFlushTimer = setInterval(() => {
-    const drained = useCloudJitter
-      ? cloudJitterBuffer.drainDue(performance.now())
-      : oscBuffer.drain(performance.now());
+    const drained = oscPlaybackBuffer.drainDue(performance.now());
     if (drained) appendSamples(drained.batch);
   }, STORE_FLUSH_INTERVAL_MS);
 }
@@ -150,27 +147,18 @@ export function useOscController() {
       frameRouter.reset();
     }
 
-    function registerOscHandler(useCloudJitter: boolean) {
+    function registerOscHandler() {
       const channelDescs = channels.map((c) => ({ byteWidth: c.byteWidth, paramType: c.paramType }));
       frameRouter.onOscFrame((frame) => {
         const osc = parseOscDataFrame(frame, channelDescs);
         if (!osc) return;
 
-        if (useCloudJitter) {
-          const batch = new Map<number, number[]>();
-          osc.channels.forEach((samples, idx) => {
-            const channel = channels[idx];
-            if (channel) batch.set(channel.channelNo, samples);
-          });
-          cloudJitterBuffer.appendBatch(batch);
-          return;
-        }
-
-        const receivedAt = performance.now();
+        const batch = new Map<number, number[]>();
         osc.channels.forEach((samples, idx) => {
-          if (!channels[idx]) return;
-          oscBuffer.append(channels[idx].channelNo, samples, receivedAt);
+          const channel = channels[idx];
+          if (channel) batch.set(channel.channelNo, samples);
         });
+        oscPlaybackBuffer.appendBatch(batch);
       });
     }
 
@@ -218,23 +206,18 @@ export function useOscController() {
         catch { console.warn('[osc] 0x73 not supported by device, ignored'); }
       }
 
-      const useCloudJitter = target.kind === 'cloud';
-      if (useCloudJitter) {
-        oscBuffer.clear();
-        cloudJitterBuffer.reset({
-          channelNos: channels.map((channel) => channel.channelNo),
-          sampleRate: capabilities.sampleRate,
-          targetLatencyMs: 300,
-          resumeLatencyMs: 100,
-          tickMs: STORE_FLUSH_INTERVAL_MS,
-          nowMs: performance.now(),
-        });
-      } else {
-        cloudJitterBuffer.clear();
-        oscBuffer.reset(performance.now());
-      }
-      registerOscHandler(useCloudJitter);
-      startStoreFlushTimer(appendSamples, useCloudJitter);
+      oscPlaybackBuffer.reset({
+        channelNos: channels.map((channel) => channel.channelNo),
+        sampleRate: capabilities.sampleRate,
+        targetLatencyMs: target.kind === 'cloud'
+          ? CLOUD_OSC_TARGET_LATENCY_MS
+          : LOCAL_OSC_TARGET_LATENCY_MS,
+        resumeLatencyMs: 100,
+        tickMs: STORE_FLUSH_INTERVAL_MS,
+        nowMs: performance.now(),
+      });
+      registerOscHandler();
+      startStoreFlushTimer(appendSamples);
       wsClient.send(buildStartOsc());
       setRunning(true);
 
@@ -247,8 +230,7 @@ export function useOscController() {
       console.error('[osc] start failed', err);
       queueOscStopBarrier();
       stopStoreFlushTimer();
-      oscBuffer.clear();
-      cloudJitterBuffer.clear();
+      oscPlaybackBuffer.clear();
       frameRouter.reset();
       setStartError(err instanceof Error ? err.message : '地址示波器启动失败');
       setRunning(false);
@@ -266,12 +248,9 @@ export function useOscController() {
     stopPromise = queueOscStopBarrier().then(() => {
       setRunning(false);
       stopStoreFlushTimer();
-      const drained = oscBuffer.drain(performance.now());
-      if (drained) appendSamples(drained.batch);
-      const cloudTail = cloudJitterBuffer.drainAll();
-      if (cloudTail) appendSamples(cloudTail.batch);
-      oscBuffer.clear();
-      cloudJitterBuffer.clear();
+      const playbackTail = oscPlaybackBuffer.drainAll();
+      if (playbackTail) appendSamples(playbackTail.batch);
+      oscPlaybackBuffer.clear();
       frameRouter.onOscFrame(() => {}); // 清除示波 handler
       frameRouter.reset();
     }).finally(() => {

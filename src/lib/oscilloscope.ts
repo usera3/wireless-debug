@@ -102,7 +102,9 @@ export function parseOscDataFrame(
     channels.forEach(({ byteWidth: w, paramType }, ci) => {
       let val: number;
       if (w === 2) {
-        val = view.getInt16(offset, false);
+        val = paramType === 0x01
+          ? view.getUint16(offset, false)
+          : view.getInt16(offset, false);
       } else if (w === 4) {
         val = FLOAT32_TYPES.has(paramType)
           ? view.getFloat32(offset, false)

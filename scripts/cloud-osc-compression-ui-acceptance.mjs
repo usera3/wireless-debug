@@ -17,6 +17,7 @@ const outputPath = process.env.UI_ACCEPTANCE_OUTPUT ||
   '/tmp/cloud-waveform-compression-ui.json';
 const screenshotPath = process.env.UI_ACCEPTANCE_SCREENSHOT ||
   '/tmp/cloud-waveform-compression-ui.png';
+const proxyServer = process.env.PLAYWRIGHT_PROXY_SERVER || '';
 const username = process.env.CLOUD_HTTP_USER || '';
 const password = process.env.CLOUD_HTTP_PASSWORD || '';
 
@@ -108,7 +109,10 @@ async function configureAddressChannels(page, addresses) {
 
 const browser = await chromium.launch({
   headless: true,
-  args: ['--no-proxy-server', '--proxy-server=direct://', '--proxy-bypass-list=*'],
+  args: proxyServer
+    ? []
+    : ['--no-proxy-server', '--proxy-server=direct://', '--proxy-bypass-list=*'],
+  proxy: proxyServer ? { server: proxyServer } : undefined,
 });
 const authorization = username && password
   ? Buffer.from(`${username}:${password}`).toString('base64')

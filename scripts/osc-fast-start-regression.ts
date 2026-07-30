@@ -14,8 +14,8 @@ assert.match(source, /cloud-cached[\s\S]{0,3200}const request = buildSetChannel[
   'warm cloud startup must still send every channel configuration');
 assert.match(
   source,
-  /const stop = useCallback\(\(\) => \{[\s\S]*?oscBuffer\.drain\(performance\.now\(\)\)[\s\S]*?appendSamples\(drained\.batch\)[\s\S]*?oscBuffer\.clear\(\)/,
-  'stop must append the final realtime batch before clearing it',
+  /const stop = useCallback\(\(\) => \{[\s\S]*?oscPlaybackBuffer\.drainAll\(\)[\s\S]*?appendSamples\(playbackTail\.batch\)[\s\S]*?oscPlaybackBuffer\.clear\(\)/,
+  'stop must append the final paced batch before clearing it',
 );
 
 const handlerStart = source.indexOf('frameRouter.onOscFrame((frame) => {');
@@ -29,23 +29,30 @@ assert.doesNotMatch(
 );
 assert.match(
   source,
-  /storeFlushTimer = setInterval\([\s\S]*?oscBuffer\.drain\(performance\.now\(\)\)[\s\S]*?STORE_FLUSH_INTERVAL_MS/,
-  'a fixed-cadence timer must drain the realtime buffer',
+  /storeFlushTimer = setInterval\([\s\S]*?oscPlaybackBuffer\.drainDue\(performance\.now\(\)\)[\s\S]*?STORE_FLUSH_INTERVAL_MS/,
+  'a fixed-cadence timer must drain the paced playback buffer',
 );
-assert.match(source, /new OscJitterBuffer\(\)/, 'cloud address samples need a bounded jitter reserve');
+assert.doesNotMatch(
+  source,
+  /OscRealtimeBuffer/,
+  'local address samples must not be flushed in receive-sized bursts',
+);
+assert.match(source, /const oscPlaybackBuffer = new OscJitterBuffer\(\)/);
+assert.match(source, /const LOCAL_OSC_TARGET_LATENCY_MS = 200/);
+assert.match(source, /const CLOUD_OSC_TARGET_LATENCY_MS = 300/);
 assert.match(
   source,
-  /target\.kind === 'cloud'[\s\S]*?targetLatencyMs: 300[\s\S]*?resumeLatencyMs: 100/,
-  'only cloud address playback should use the measured 300 ms reserve',
+  /targetLatencyMs:\s*target\.kind === 'cloud'\s*\?\s*CLOUD_OSC_TARGET_LATENCY_MS\s*:\s*LOCAL_OSC_TARGET_LATENCY_MS[\s\S]*?resumeLatencyMs: 100/,
+  'cloud playback should retain 300 ms while local playback uses the measured 200 ms reserve',
 );
 assert.match(
   source,
-  /const cloudTail = cloudJitterBuffer\.drainAll\(\)[\s\S]*?appendSamples\(cloudTail\.batch\)/,
-  'stop must append every sample still held by the cloud jitter reserve',
+  /oscPlaybackBuffer\.appendBatch\(batch\)/,
+  'all address samples must enter the ordered playback reserve',
 );
 assert.match(
   source,
-  /const stop = useCallback[\s\S]*?queueOscStopBarrier\(\)[\s\S]*?\.then\(\(\) => \{[\s\S]*?stopStoreFlushTimer\(\)[\s\S]*?cloudJitterBuffer\.drainAll\(\)/,
+  /const stop = useCallback[\s\S]*?queueOscStopBarrier\(\)[\s\S]*?\.then\(\(\) => \{[\s\S]*?stopStoreFlushTimer\(\)[\s\S]*?oscPlaybackBuffer\.drainAll\(\)/,
   'runtime cleanup must wait for the ordered stop ACK barrier',
 );
 assert.match(
