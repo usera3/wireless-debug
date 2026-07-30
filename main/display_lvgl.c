@@ -25,6 +25,8 @@ static const char *TAG = "display_lvgl";
 #define LVGL_TASK_PRIORITY   2
 #define LVGL_TICK_MS         5
 #define LVGL_BUFFER_ROWS     16
+#define LVGL_TASK_MIN_WAIT_MS 5
+#define LVGL_TASK_MAX_WAIT_MS 20
 #define DISPLAY_STATS_REFRESH_MS 1000
 #define DISPLAY_OVERLAY_SCROLL_MS 2500
 
@@ -526,12 +528,19 @@ static void display_lvgl_task(void *arg)
 {
     (void)arg;
     while (1) {
+        uint32_t wait_ms = LVGL_TASK_MAX_WAIT_MS;
+
         if (lvgl_lock(pdMS_TO_TICKS(50))) {
             refresh_ui_from_state();
-            lv_timer_handler();
+            wait_ms = lv_timer_handler();
             lvgl_unlock();
         }
-        vTaskDelay(pdMS_TO_TICKS(20));
+        if (wait_ms < LVGL_TASK_MIN_WAIT_MS) {
+            wait_ms = LVGL_TASK_MIN_WAIT_MS;
+        } else if (wait_ms > LVGL_TASK_MAX_WAIT_MS) {
+            wait_ms = LVGL_TASK_MAX_WAIT_MS;
+        }
+        vTaskDelay(pdMS_TO_TICKS(wait_ms));
     }
 }
 

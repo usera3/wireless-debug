@@ -1,4 +1,5 @@
 #include "display_ui.h"
+#include "display_ui_motion.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -14,6 +15,7 @@ static lv_obj_t *s_title;
 static lv_obj_t *s_rows[SYSTEM_MENU_ROWS];
 static lv_obj_t *s_home_extra_rows[2];
 static lv_obj_t *s_footer;
+static lv_obj_t *s_menu_cursor;
 
 #define UI_W            DISPLAY_WIDTH
 #define UI_H            DISPLAY_HEIGHT
@@ -26,6 +28,9 @@ static lv_obj_t *s_footer;
 #define HOME_ROW_Y      0
 #define HOME_ROW_COUNT  6
 #define HOME_ROW_STEP   9
+#define UI_CURSOR_ANIM_MS 200
+#define UI_PAGE_ANIM_MS   200
+#define UI_PAGE_SLIDE_X   24
 #define OVERLAY_CJK_COL_UNITS 20
 #define OVERLAY_CJK_ROW_H 12
 #define OVERLAY_ROW_BYTES 80
@@ -42,6 +47,40 @@ static lv_obj_t *s_footer;
 
 static bool s_overlay_text_layout;
 static char s_overlay_rows[OVERLAY_MAX_ROWS][OVERLAY_ROW_BYTES];
+static display_ui_motion_state_t s_motion_state;
+
+static void cursor_y_anim_cb(void *obj, int32_t value)
+{
+    lv_obj_set_y((lv_obj_t *)obj, value);
+}
+
+static void page_x_anim_cb(void *obj, int32_t value)
+{
+    lv_obj_set_x((lv_obj_t *)obj, value);
+}
+
+static void start_position_animation(lv_obj_t *obj,
+                                     lv_anim_exec_xcb_t exec_cb,
+                                     int32_t from,
+                                     int32_t to,
+                                     uint32_t duration_ms)
+{
+    lv_anim_t anim;
+
+    lv_anim_delete(obj, exec_cb);
+    if (from == to) {
+        exec_cb(obj, to);
+        return;
+    }
+
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, obj);
+    lv_anim_set_exec_cb(&anim, exec_cb);
+    lv_anim_set_values(&anim, from, to);
+    lv_anim_set_duration(&anim, duration_ms);
+    lv_anim_set_path_cb(&anim, lv_anim_path_ease_out);
+    lv_anim_start(&anim);
+}
 
 static void make_plain_box(lv_obj_t *obj)
 {
@@ -174,6 +213,67 @@ static void set_row_selected(lv_obj_t *row, bool selected)
     }
 }
 
+static int8_t selected_menu_row(const system_menu_snapshot_t *menu)
+{
+    if (menu == NULL) {
+        return -1;
+    }
+
+    for (uint8_t i = 0; i < SYSTEM_MENU_ROWS; i++) {
+        if (menu->rows[i][0] == '>') {
+            return (int8_t)i;
+        }
+    }
+    return -1;
+}
+
+static void apply_cursor_motion(const display_ui_motion_result_t *motion)
+{
+    int32_t target_y;
+
+    if (s_menu_cursor == NULL || motion == NULL) {
+        return;
+    }
+
+    if (motion->cursor == DISPLAY_UI_MOTION_CURSOR_HIDE) {
+        lv_anim_delete(s_menu_cursor, cursor_y_anim_cb);
+        lv_obj_add_flag(s_menu_cursor, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    if (motion->cursor == DISPLAY_UI_MOTION_CURSOR_NONE) {
+        return;
+    }
+
+    target_y = UI_ROW_Y + (int32_t)motion->cursor_row * UI_ROW_H;
+    lv_obj_remove_flag(s_menu_cursor, LV_OBJ_FLAG_HIDDEN);
+    if (motion->cursor == DISPLAY_UI_MOTION_CURSOR_SNAP) {
+        lv_anim_delete(s_menu_cursor, cursor_y_anim_cb);
+        lv_obj_set_y(s_menu_cursor, target_y);
+    } else if (motion->cursor == DISPLAY_UI_MOTION_CURSOR_ANIMATE) {
+        start_position_animation(s_menu_cursor, cursor_y_anim_cb,
+                                 lv_obj_get_y(s_menu_cursor), target_y,
+                                 UI_CURSOR_ANIM_MS);
+    }
+}
+
+static void apply_page_motion(const display_ui_motion_result_t *motion)
+{
+    int32_t from_x;
+
+    if (s_root == NULL || motion == NULL ||
+        motion->slide == DISPLAY_UI_MOTION_SLIDE_NONE) {
+        return;
+    }
+
+    from_x = display_ui_motion_slide_start(motion->slide,
+                                          lv_obj_get_x(s_root),
+                                          UI_PAGE_SLIDE_X);
+    lv_anim_delete(s_root, page_x_anim_cb);
+    lv_obj_set_x(s_root, from_x);
+    start_position_animation(s_root, page_x_anim_cb, from_x, 0,
+                             UI_PAGE_ANIM_MS);
+}
+
 static void format_baud(char *out, size_t out_size, uint32_t baud)
 {
     if (out == NULL || out_size == 0) {
@@ -293,10 +393,10 @@ static void update_menu_view(const display_ui_state_t *state)
     lv_label_set_text(s_title, menu->title[0] ? menu->title : " ");
 
     for (uint8_t i = 0; i < SYSTEM_MENU_ROWS; i++) {
-        bool selected = menu->rows[i][0] == '>';
         set_label_long_mode(s_rows[i], LV_LABEL_LONG_MODE_CLIP);
         lv_label_set_text(s_rows[i], menu->rows[i][0] ? menu->rows[i] : " ");
-        set_row_selected(s_rows[i], selected);
+        /* The moving difference cursor supplies the reverse rendering. */
+        set_row_selected(s_rows[i], false);
     }
 
     lv_label_set_text(s_footer, menu->footer[0] ? menu->footer : "S4 NEXT S5 OK");
@@ -481,13 +581,42 @@ void display_ui_build(lv_obj_t *screen)
 
     s_footer = make_label(s_root, UI_MARGIN_X, UI_FOOTER_Y, 124, 8, "OK E0 U0m");
     lv_obj_set_style_text_align(s_footer, LV_TEXT_ALIGN_CENTER, 0);
+
+    s_menu_cursor = lv_obj_create(s_root);
+    lv_obj_set_pos(s_menu_cursor, UI_MARGIN_X, UI_ROW_Y);
+    lv_obj_set_size(s_menu_cursor, 124, UI_ROW_H);
+    make_plain_box(s_menu_cursor);
+    lv_obj_set_style_bg_color(s_menu_cursor, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(s_menu_cursor, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_menu_cursor, 2, 0);
+    lv_obj_set_style_blend_mode(s_menu_cursor, LV_BLEND_MODE_DIFFERENCE, 0);
+    lv_obj_add_flag(s_menu_cursor, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(s_menu_cursor);
 }
 
 void display_ui_update(const display_ui_state_t *state)
 {
+    display_ui_motion_view_t view;
+    display_ui_motion_result_t motion;
+    int8_t cursor_row;
+
     if (state == NULL || s_root == NULL) {
         return;
     }
+
+    if (state->overlay_active) {
+        view = DISPLAY_UI_MOTION_VIEW_OVERLAY;
+        cursor_row = -1;
+    } else if (state->menu.active) {
+        view = DISPLAY_UI_MOTION_VIEW_MENU;
+        cursor_row = selected_menu_row(&state->menu);
+    } else {
+        view = DISPLAY_UI_MOTION_VIEW_HOME;
+        cursor_row = -1;
+    }
+    motion = display_ui_motion_step(&s_motion_state, view,
+                                    state->menu.page, state->menu.depth,
+                                    cursor_row);
 
     clear_status_bar();
     if (state->overlay_active) {
@@ -497,4 +626,7 @@ void display_ui_update(const display_ui_state_t *state)
     } else {
         update_closed_view(state);
     }
+
+    apply_cursor_motion(&motion);
+    apply_page_motion(&motion);
 }

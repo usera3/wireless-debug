@@ -21,6 +21,7 @@ add_subdirectory(${LVGL_ROOT} ${CMAKE_BINARY_DIR}/lvgl)
 add_executable(lvgl_oled_pc_sim
     main.c
     ${PROJECT_ROOT}/main/display_ui.c
+    ${PROJECT_ROOT}/main/display_ui_motion.c
     ${PROJECT_ROOT}/main/system_menu.c
 )
 

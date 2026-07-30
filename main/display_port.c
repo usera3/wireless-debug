@@ -39,16 +39,18 @@ static i2c_master_bus_handle_t s_i2c_bus;
 static i2c_master_dev_handle_t s_i2c_dev;
 static bool s_panel_ready;
 
+#define SSD1315_TX_CHUNK_BYTES 128
+
 static esp_err_t ssd1315_write_control(uint8_t control, const uint8_t *data, size_t len)
 {
     if (s_i2c_dev == NULL || data == NULL || len == 0) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    uint8_t tx[17];
+    uint8_t tx[SSD1315_TX_CHUNK_BYTES + 1];
     tx[0] = control;
     while (len > 0) {
-        size_t chunk = len > (sizeof(tx) - 1) ? (sizeof(tx) - 1) : len;
+        size_t chunk = len > SSD1315_TX_CHUNK_BYTES ? SSD1315_TX_CHUNK_BYTES : len;
         memcpy(&tx[1], data, chunk);
         esp_err_t ret = i2c_master_transmit(s_i2c_dev, tx, chunk + 1, 20);
         if (ret != ESP_OK) {
