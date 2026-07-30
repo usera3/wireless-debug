@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const source = readFileSync('main/cloud_mqtt.c', 'utf8');
 const uplink = readFileSync('main/cloud_ws_uplink.c', 'utf8');
@@ -12,7 +12,24 @@ const manifest = readFileSync('main/idf_component.yml', 'utf8');
 const cmake = readFileSync('main/CMakeLists.txt', 'utf8');
 const wifiTransport = readFileSync('main/wifi_transport.c', 'utf8');
 const webApi = readFileSync('main/web_api.c', 'utf8');
+const commStatsHeader = readFileSync('main/comm_stats.h', 'utf8');
+const commStatsSource = readFileSync('main/comm_stats.c', 'utf8');
+const uartTransport = readFileSync('main/uart_transport.c', 'utf8');
 const sdkconfig = readFileSync('sdkconfig', 'utf8');
+const batchPolicyHeaderPath = 'main/cloud_ws_batch_policy.h';
+const batchPolicySourcePath = 'main/cloud_ws_batch_policy.c';
+
+assert.ok(
+  existsSync(batchPolicyHeaderPath) && existsSync(batchPolicySourcePath),
+  'deadline-bounded cloud aggregation policy module is missing',
+);
+const batchPolicyHeader = readFileSync(batchPolicyHeaderPath, 'utf8');
+
+function readNumericDefine(sourceText, name) {
+  const match = sourceText.match(new RegExp(`^#define\\s+${name}\\s+(\\d+)\\s*$`, 'm'));
+  assert.ok(match, `missing numeric firmware constant: ${name}`);
+  return Number(match[1]);
+}
 
 assert.match(
   sdkconfig,
@@ -28,6 +45,31 @@ for (const token of [
 ]) {
   assert.ok(uplink.includes(token), `cloud uplink external transport missing: ${token}`);
 }
+assert.match(
+  uplinkHeader,
+  /uint64_t sent_bytes;/,
+  'cumulative sent bytes must not wrap at the 32-bit boundary',
+);
+assert.match(
+  uplink,
+  /static uint64_t s_queue_dequeued_bytes;[\s\S]*s_stats\.queue_pending_bytes\s*=\s*s_stats\.queued_bytes >= s_queue_dequeued_bytes[\s\S]*s_stats\.queued_bytes - s_queue_dequeued_bytes/,
+  'pending-byte telemetry must derive from commutative enqueue/dequeue totals',
+);
+assert.match(
+  uplink,
+  /stats_note_queue_dequeue\(size_t len\)[\s\S]*s_queue_dequeued_bytes \+= len;/,
+  'dequeue telemetry must remain correct when dequeue accounting races ahead of enqueue accounting',
+);
+assert.doesNotMatch(
+  uplink,
+  /if \(len >= s_stats\.queue_pending_bytes\)/,
+  'pending-byte telemetry must not permanently clamp away an enqueue/dequeue reordering',
+);
+assert.match(
+  uplink,
+  /stats_note_sent\(source_frames, raw_len, send_len\)/,
+  'successful source frames and raw/wire bytes must be committed atomically',
+);
 assert.match(
   uplink,
   /WEBSOCKET_EVENT_CONNECTED[\s\S]*esp_transport_get_socket\(s_tcp_transport\)[\s\S]*cloud_ws_socket_enable_nodelay/,
@@ -45,8 +87,8 @@ assert.match(
 );
 
 assert.ok(
-  uplinkHeader.includes('#define CLOUD_WS_UPLINK_SCHEMA_VERSION 6U'),
-  'negotiated waveform telemetry must use schema version 6',
+  uplinkHeader.includes('#define CLOUD_WS_UPLINK_SCHEMA_VERSION 7U'),
+  'byte-conserving waveform telemetry must use schema version 7',
 );
 for (const token of [
   'cloud_ws_uplink_downlink_fn_t',
@@ -58,6 +100,57 @@ for (const token of [
 ]) {
   assert.ok(uplinkHeader.includes(token), `firmware downlink API missing token: ${token}`);
 }
+for (const token of [
+  'queued_bytes',
+  'queue_pending_bytes',
+  'queue_high_water_frames',
+  'queue_high_water_bytes',
+  'overload_dropped_bytes',
+  'rejected_frames',
+  'rejected_bytes',
+  'queued_fallback_bytes',
+  'stop_dropped_bytes',
+]) {
+  assert.ok(uplinkHeader.includes(token), `schema-7 byte ledger missing: ${token}`);
+  assert.ok(source.includes(token), `cloud status missing schema-7 field: ${token}`);
+  assert.ok(webApi.includes(token), `local status missing schema-7 field: ${token}`);
+}
+for (const token of [
+  'uart_fifo_overflows',
+  'uart_buffer_full_overflows',
+  'uart_overflow_assemble_bytes',
+  'uart_overflow_driver_bytes',
+  'uart_last_overflow_event',
+  'uart_last_overflow_assemble_bytes',
+  'uart_last_overflow_driver_bytes',
+  'uart_dispatch_calls',
+  'uart_dispatch_total_us',
+  'uart_dispatch_max_us',
+  'uart_cloud_route_total_us',
+  'uart_cloud_route_max_us',
+  'uart_local_route_total_us',
+  'uart_local_route_max_us',
+]) {
+  assert.ok(commStatsHeader.includes(token), `UART diagnostic snapshot missing: ${token}`);
+  assert.ok(commStatsSource.includes(token), `UART diagnostic accounting missing: ${token}`);
+  assert.ok(source.includes(token), `cloud UART status missing: ${token}`);
+  assert.ok(webApi.includes(token), `local UART status missing: ${token}`);
+}
+assert.match(
+  uartTransport,
+  /uart_get_buffered_data_len[\s\S]*comm_stats_uart_overflow\(event\.type,[\s\S]*assemble_len/,
+  'UART overflow telemetry must record event type and both discarded byte pools before flush',
+);
+assert.match(
+  uartTransport,
+  /esp_timer_get_time\(\)[\s\S]*s_frame_cb[\s\S]*comm_stats_uart_dispatch/,
+  'UART dispatch telemetry must measure the complete synchronous callback',
+);
+assert.match(
+  mainSource,
+  /cloud_mqtt_publish_ws_frame[\s\S]*comm_stats_uart_route_timing[\s\S]*router_dispatch_uart_frame[\s\S]*comm_stats_uart_route_timing/,
+  'UART callback must separately time cloud enqueue and local routing',
+);
 for (const token of [
   'compression_capable',
   'compression_active',
@@ -133,10 +226,21 @@ assert.match(
   /#define CLOUD_WS_UPLINK_SEND_TIMEOUT_MS 5000/,
   'cloud websocket network operations must tolerate normal WAN latency',
 );
+const cloudSenderPriority = readNumericDefine(uplink, 'CLOUD_WS_UPLINK_SENDER_TASK_PRIORITY');
+const cloudClientPriority = readNumericDefine(uplink, 'CLOUD_WS_UPLINK_CLIENT_TASK_PRIORITY');
 assert.match(
   uplink,
-  /#define CLOUD_WS_UPLINK_TASK_PRIORITY 9[\s\S]*xTaskCreate\(sender_task,[\s\S]*CLOUD_WS_UPLINK_TASK_PRIORITY/,
+  /xTaskCreate\(sender_task,[\s\S]*CLOUD_WS_UPLINK_SENDER_TASK_PRIORITY/,
   'cloud sender priority must stay between local WiFi send (7) and UART receive (10)',
+);
+assert.match(
+  uplink,
+  /\.task_prio\s*=\s*CLOUD_WS_UPLINK_CLIENT_TASK_PRIORITY/,
+  'cloud websocket receive task must use its named scheduling priority',
+);
+assert.ok(
+  cloudClientPriority > cloudSenderPriority,
+  `cloud websocket receive priority (${cloudClientPriority}) must exceed sender priority (${cloudSenderPriority})`,
 );
 
 assert.match(
@@ -170,8 +274,13 @@ const overloadSendBody = uplink.match(
 )?.[1] || '';
 assert.match(
   overloadSendBody,
-  /xQueueSend\(s_queue, &frame, 0\)[\s\S]*xQueueReceive\(s_queue, &dropped, 0\)[\s\S]*overload_dropped_frames[\s\S]*xQueueSend\(s_queue, &frame, 0\)/,
+  /xQueueSend\(s_queue, &frame, 0\)[\s\S]*xQueueReceive\(s_queue, &dropped, 0\)[\s\S]*stats_note_overload_drop\(dropped\.source_frames, dropped\.len\)[\s\S]*xQueueSend\(s_queue, &frame, 0\)/,
   'queue overload must evict the oldest cloud UART frame and retry the newest frame',
+);
+assert.doesNotMatch(
+  overloadSendBody,
+  /if \(xQueueReceive\(s_queue, &dropped, 0\) != pdTRUE\) \{[\s\S]*return false;/,
+  'a concurrent sender drain must not prevent retrying the newest frame',
 );
 assert.ok(
   !overloadSendBody.includes('!s_connected'),
@@ -226,6 +335,11 @@ assert.match(
   source,
   /is_osc_stop_frame[\s\S]*ws_osc_state_set\(false, 0\)/,
   'receiving an osc stop frame must immediately close the cloud osc uplink window',
+);
+assert.match(
+  source,
+  /#define CLOUD_MQTT_WS_ACTIVE_US \(30LL \* 1000LL \* 1000LL\)/,
+  'cloud response lease must tolerate measured double-digit WAN heartbeat latency',
 );
 assert.match(
   source,
@@ -339,20 +453,20 @@ assert.match(
 );
 assert.match(
   uplink,
-  /static void sender_task\([\s\S]*uxQueueMessagesWaiting\(s_queue\) == 0[\s\S]*ulTaskNotifyTake\(pdTRUE, portMAX_DELAY\)[\s\S]*active = s_active[\s\S]*should_run = [\s\S]*s_wifi_ready;[\s\S]*esp_websocket_client_start[\s\S]*esp_websocket_client_stop[\s\S]*if \(!active\)[\s\S]*xQueueReceive\(s_queue, &chunk, 0\)/,
+  /static void sender_task\([\s\S]*uxQueueMessagesWaiting\(s_queue\) == 0[\s\S]*ulTaskNotifyTake\(pdTRUE, portMAX_DELAY\)[\s\S]*active = s_active[\s\S]*should_run = [\s\S]*s_wifi_ready;[\s\S]*esp_websocket_client_start[\s\S]*esp_websocket_client_stop[\s\S]*if \(!active\)[\s\S]*xQueueReceive\(s_queue, s_sender_chunk, 0\)/,
   'the worker must preconnect on STA readiness and gate only cloud UART data on the active lease',
 );
 const senderTaskBody = uplink.match(
   /static void sender_task\(void \*arg\)\n\{([\s\S]*?)\n\}/,
 )?.[1] || '';
 assert.equal(
-  [...senderTaskBody.matchAll(/while \(xQueueReceive\(s_queue, &chunk, 0\) == pdTRUE\)/g)].length,
+  [...senderTaskBody.matchAll(/while \(xQueueReceive\(s_queue, s_sender_chunk, 0\) == pdTRUE\)/g)].length,
   1,
   'only the explicit-stop cleanup path may drain multiple queued frames in one worker iteration',
 );
 assert.match(
   senderTaskBody,
-  /if \(!active\) \{[\s\S]*while \(xQueueReceive\(s_queue, &chunk, 0\) == pdTRUE\)[\s\S]*stats_increment\(&s_stats\.stop_dropped_frames, dropped\)[\s\S]*continue;[\s\S]*if \(xQueueReceive\(s_queue, &chunk, 0\)/,
+  /if \(!active\) \{[\s\S]*while \(xQueueReceive\(s_queue, s_sender_chunk, 0\) == pdTRUE\)[\s\S]*stats_note_queue_dequeue\(s_sender_chunk->len\)[\s\S]*stats_note_stop_drop\(dropped, dropped_bytes\)[\s\S]*continue;[\s\S]*if \(xQueueReceive\(s_queue, s_sender_chunk, 0\)/,
   'explicit osc stop must count each stale frame it removes, including concurrent late enqueues',
 );
 assert.ok(
@@ -405,13 +519,24 @@ assert.match(
   /if \(xQueueSend\(s_queue, &frame, 0\) != pdTRUE\)[\s\S]*xQueueReceive\(s_queue, &dropped, 0\)/,
   'transient disconnects must retain newest data with bounded oldest-frame eviction',
 );
+assert.match(
+  uplinkSendBody,
+  /if \(xQueueSend\(s_queue, &frame, 0\) != pdTRUE\) \{[\s\S]*stats_note_rejected\(len\);[\s\S]*return false;/,
+  'a replacement frame that still cannot be enqueued must be counted as rejected bytes',
+);
 assert.ok(
-  uplink.includes('#define CLOUD_WS_UPLINK_QUEUE_DEPTH 128U'),
-  'cloud binary uplink queue must absorb mobile-network jitter without blocking UART',
+  uplink.includes('#define CLOUD_WS_UPLINK_QUEUE_DEPTH 512U'),
+  'PSRAM uplink queue must absorb observed multi-second network stalls without blocking UART',
 );
 assert.ok(
   uplink.includes('CLOUD_WAVEFORM_MAX_RAW_SIZE'),
   'cloud worker must drain a bounded 32768-byte raw aggregate',
+);
+assert.ok(
+  batchPolicyHeader.includes('#define CLOUD_WS_BATCH_TARGET_BYTES 4096U') &&
+    batchPolicyHeader.includes('#define CLOUD_WS_BATCH_MAX_WAIT_US 40000U') &&
+    batchPolicyHeader.includes('cloud_ws_batch_wait_us'),
+  'cloud aggregation must target 4096 bytes with one absolute 40 ms deadline',
 );
 assert.match(
   uplink,
@@ -435,13 +560,18 @@ assert.match(
 );
 assert.match(
   senderTaskBody,
-  /cloud_ws_uplink_frame_t next[\s\S]*xQueuePeek\(s_queue, &next, 0\)[\s\S]*raw_len \+ next\.len <= CLOUD_WAVEFORM_MAX_RAW_SIZE[\s\S]*xQueueReceive\(s_queue, &next, 0\)[\s\S]*memcpy\(s_raw_aggregate \+ raw_len/,
-  'cloud uplink worker must coalesce only an existing backlog without blocking UART flow',
+  /cloud_ws_batch_wait_us\(raw_len,[\s\S]*xQueuePeek\(s_queue, s_sender_next,[\s\S]*wait_ticks[\s\S]*raw_len \+ s_sender_next->len > CLOUD_WAVEFORM_MAX_RAW_SIZE[\s\S]*xQueueReceive\(s_queue, s_sender_next, 0\)[\s\S]*memcpy\(s_raw_aggregate \+ raw_len/,
+  'cloud uplink worker must collect one bounded batch using the remaining absolute deadline',
+);
+assert.match(
+  uplink,
+  /static cloud_ws_uplink_frame_t \*s_sender_chunk;[\s\S]*static cloud_ws_uplink_frame_t \*s_sender_next;/,
+  'sender queue scratch records must live off the nearly exhausted task stack',
 );
 assert.doesNotMatch(
   senderTaskBody,
-  /xQueueReceive\(s_queue, &chunk, 0\)[\s\S]{0,500}vTaskDelay[\s\S]{0,500}xQueuePeek/,
-  'waveform aggregation must not add a coalescing wait',
+  /cloud_ws_uplink_frame_t\s+(chunk|next)\s*;/,
+  'sender task must not reserve either 512-byte queue record on its stack',
 );
 assert.match(
   senderTaskBody,
@@ -467,7 +597,7 @@ assert.match(
 );
 assert.match(
   uplink,
-  /fallback_frame[\s\S]*queued_fallback_frames/,
+  /fallback_frame[\s\S]*stats_note_fallback_queued\(source_frames, len\)/,
   'successful queued fallback must account for every source frame',
 );
 assert.match(
@@ -510,7 +640,7 @@ for (const token of [
   'xQueueCreateWithCaps',
   'MALLOC_CAP_SPIRAM',
   'heap_caps_calloc',
-  'portMUX_INITIALIZER_UNLOCKED',
+  's_free_frame_queue',
   'wifi_frame_merge',
   'WIFI_TRANSPORT_COALESCE_WAIT_MS',
 ]) {
@@ -528,8 +658,10 @@ assert.match(
 );
 assert.ok(
   !wifiTransport.includes('xSemaphoreTake(s_pool_mutex') &&
-    !wifiTransport.includes('xSemaphoreCreateMutex'),
-  'UART-to-WiFi frame allocation must not block on a mutex during high-rate bursts',
+    !wifiTransport.includes('xSemaphoreCreateMutex') &&
+    !wifiTransport.includes('s_pool_lock') &&
+    !wifiTransport.includes('portENTER_CRITICAL(&s_pool_lock)'),
+  'UART-to-WiFi frame allocation must remain O(1) without blocking or scanning under a lock',
 );
 assert.match(
   mainSource,

@@ -27,15 +27,14 @@ typedef struct {
     int fd;
     uint8_t data[WIFI_TRANSPORT_FRAME_MAX_LEN];
     size_t len;
-    bool in_use;
 } wifi_frame_t;
 
 static wifi_transport_config_t s_config;
 static httpd_handle_t s_server;
 static int s_ws_client_fd = -1;
 static QueueHandle_t s_send_queue;
+static QueueHandle_t s_free_frame_queue;
 static wifi_frame_t *s_frame_pool;
-static portMUX_TYPE s_pool_lock = portMUX_INITIALIZER_UNLOCKED;
 
 static void ws_client_clear_if_current(httpd_handle_t hd, int fd)
 {
@@ -61,31 +60,21 @@ static bool ws_client_is_active(void)
 static wifi_frame_t *frame_acquire(void)
 {
     wifi_frame_t *slot = NULL;
-    if (s_frame_pool == NULL) {
+    if (s_free_frame_queue == NULL ||
+        xQueueReceive(s_free_frame_queue, &slot, 0) != pdTRUE) {
         return NULL;
     }
-
-    portENTER_CRITICAL(&s_pool_lock);
-    for (int i = 0; i < WIFI_TRANSPORT_FRAME_POOL_SIZE; i++) {
-        if (!s_frame_pool[i].in_use) {
-            s_frame_pool[i].in_use = true;
-            slot = &s_frame_pool[i];
-            break;
-        }
-    }
-    portEXIT_CRITICAL(&s_pool_lock);
     return slot;
 }
 
 static void frame_release(wifi_frame_t *frame)
 {
-    if (frame == NULL) {
+    if (frame == NULL || s_free_frame_queue == NULL) {
         return;
     }
-
-    portENTER_CRITICAL(&s_pool_lock);
-    frame->in_use = false;
-    portEXIT_CRITICAL(&s_pool_lock);
+    if (xQueueSend(s_free_frame_queue, &frame, 0) != pdTRUE) {
+        ESP_LOGE(TAG, "Free frame queue accounting error");
+    }
 }
 
 static bool wifi_frame_merge(wifi_frame_t *target, wifi_frame_t *source)
@@ -250,6 +239,28 @@ esp_err_t wifi_transport_init(const wifi_transport_config_t *config)
         }
     }
 
+    if (s_free_frame_queue == NULL) {
+        s_free_frame_queue = xQueueCreateWithCaps(
+            WIFI_TRANSPORT_FRAME_POOL_SIZE,
+            sizeof(wifi_frame_t *),
+            MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        if (s_free_frame_queue == NULL) {
+            heap_caps_free(s_frame_pool);
+            s_frame_pool = NULL;
+            return ESP_ERR_NO_MEM;
+        }
+        for (size_t i = 0; i < WIFI_TRANSPORT_FRAME_POOL_SIZE; i++) {
+            wifi_frame_t *frame = &s_frame_pool[i];
+            if (xQueueSend(s_free_frame_queue, &frame, 0) != pdTRUE) {
+                vQueueDeleteWithCaps(s_free_frame_queue);
+                s_free_frame_queue = NULL;
+                heap_caps_free(s_frame_pool);
+                s_frame_pool = NULL;
+                return ESP_FAIL;
+            }
+        }
+    }
+
     if (s_send_queue == NULL) {
         s_send_queue = xQueueCreateWithCaps(
             WIFI_TRANSPORT_SEND_QUEUE_LEN,
@@ -314,8 +325,6 @@ size_t wifi_transport_send(const uint8_t *data, size_t len)
     while (queued < len) {
         wifi_frame_t *frame = frame_acquire();
         if (frame == NULL) {
-            ESP_LOGW(TAG, "Frame pool exhausted, queued=%u/%u",
-                     (unsigned)queued, (unsigned)len);
             comm_stats_wifi_pool_exhausted();
             break;
         }
@@ -326,8 +335,6 @@ size_t wifi_transport_send(const uint8_t *data, size_t len)
         memcpy(frame->data, data + queued, frame->len);
 
         if (xQueueSend(s_send_queue, &frame, 0) != pdTRUE) {
-            ESP_LOGW(TAG, "WiFi send queue full, queued=%u/%u",
-                     (unsigned)queued, (unsigned)len);
             comm_stats_wifi_queue_full();
             frame_release(frame);
             break;

@@ -18,20 +18,16 @@ const char *router_mode_name(router_mode_t mode)
     }
 }
 
-static void router_send_or_log(router_mode_t mode, router_send_fn_t send,
-                               const uint8_t *data, size_t len)
+static void router_send_or_count(bool available, router_send_fn_t send,
+                                 const uint8_t *data, size_t len)
 {
-    if (send == NULL) {
-        ESP_LOGW(TAG, "%s route unavailable, dropping len=%u",
-                 router_mode_name(mode), (unsigned)len);
+    if (!available || send == NULL) {
         comm_stats_route_unavailable_drop(len);
         return;
     }
 
     size_t sent = send(data, len);
     if (sent < len) {
-        ESP_LOGW(TAG, "%s dropped tail, sent=%u/%u",
-                 router_mode_name(mode), (unsigned)sent, (unsigned)len);
         comm_stats_route_partial_drop(len - sent);
     }
 }
@@ -51,7 +47,6 @@ void router_dispatch_uart_frame(const router_context_t *ctx, const uint8_t *data
         }
 
         if (mode == ROUTER_MODE_IDLE) {
-            ESP_LOGW(TAG, "UART data received in IDLE mode, dropping.");
             comm_stats_route_idle_drop(len);
             return;
         }
@@ -63,8 +58,10 @@ void router_dispatch_uart_frame(const router_context_t *ctx, const uint8_t *data
     }
 
     if (mode == ROUTER_MODE_WIFI) {
-        router_send_or_log(mode, ctx->send_wifi, data, len);
+        router_send_or_count(ctx->wifi_available,
+                             ctx->send_wifi, data, len);
     } else if (mode == ROUTER_MODE_BLE) {
-        router_send_or_log(mode, ctx->send_ble, data, len);
+        router_send_or_count(ctx->ble_available,
+                             ctx->send_ble, data, len);
     }
 }

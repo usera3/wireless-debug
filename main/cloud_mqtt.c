@@ -1,5 +1,7 @@
 #include "cloud_mqtt.h"
+#include "cloud_osc_keepalive.h"
 #include "cloud_ws_uplink.h"
+#include "motor_diag.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +13,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "mqtt_client.h"
 
 #define CLOUD_MQTT_STATUS_INTERVAL_US (5LL * 1000LL * 1000LL)
@@ -22,9 +25,12 @@
 #define CLOUD_MQTT_TOPIC_INBOX_FMT "wireless-debug/%s/inbox"
 #define CLOUD_MQTT_TOPIC_BUS_ACK_FMT "wireless-debug/%s/bus-ack"
 #define CLOUD_MQTT_TOPIC_PUB_FMT "wireless-debug/%s/pub"
-#define CLOUD_MQTT_WS_ACTIVE_US (10LL * 1000LL * 1000LL)
+#define CLOUD_MQTT_WS_ACTIVE_US (30LL * 1000LL * 1000LL)
 #define CLOUD_MQTT_WS_FRAME_MAX_LEN 512
 #define CLOUD_MQTT_OSC_MAGIC_LEN 4U
+#define CLOUD_MQTT_OSC_HEARTBEAT_INTERVAL_US (1LL * 1000LL * 1000LL)
+#define CLOUD_MQTT_OSC_KEEPALIVE_TASK_STACK 4096U
+#define CLOUD_MQTT_OSC_KEEPALIVE_TASK_PRIORITY 11U
 
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -41,6 +47,12 @@ static bool s_connected;
 static bool s_ws_osc_streaming;
 static int64_t s_ws_active_until_us;
 static uint32_t s_ws_lease_generation;
+static cloud_osc_keepalive_t s_ws_keepalive;
+static TaskHandle_t s_ws_keepalive_task;
+static uint32_t s_ws_keepalive_sent;
+static uint32_t s_ws_keepalive_failures;
+static uint32_t s_ws_keepalive_expirations;
+static int64_t s_ws_keepalive_last_sent_us;
 static portMUX_TYPE s_ws_osc_state_lock = portMUX_INITIALIZER_UNLOCKED;
 static char s_status_topic[CLOUD_MQTT_TOPIC_MAX_LEN];
 static char s_availability_topic[CLOUD_MQTT_TOPIC_MAX_LEN];
@@ -86,7 +98,7 @@ static uint32_t ws_osc_state_expire(int64_t now_us)
 {
     uint32_t generation = 0;
     portENTER_CRITICAL(&s_ws_osc_state_lock);
-    if (s_ws_active_until_us > 0 && now_us > s_ws_active_until_us) {
+    if (s_ws_active_until_us > 0 && now_us >= s_ws_active_until_us) {
         s_ws_osc_streaming = false;
         s_ws_active_until_us = 0;
         generation = ws_osc_next_generation_locked();
@@ -116,6 +128,94 @@ static bool is_osc_stop_frame(const uint8_t *data, size_t len)
 static bool is_osc_start_frame(const uint8_t *data, size_t len)
 {
     return data != NULL && len >= 2U && data[0] == 0xff && data[1] == 0x71;
+}
+
+static void ws_osc_keepalive_note_control(const uint8_t *data, size_t len,
+                                          int64_t now_us)
+{
+    portENTER_CRITICAL(&s_ws_osc_state_lock);
+    cloud_osc_keepalive_note_control(&s_ws_keepalive, data, len, now_us,
+                                     CLOUD_MQTT_WS_ACTIVE_US,
+                                     CLOUD_MQTT_OSC_HEARTBEAT_INTERVAL_US);
+    portEXIT_CRITICAL(&s_ws_osc_state_lock);
+    if (s_ws_keepalive_task != NULL) {
+        xTaskNotifyGive(s_ws_keepalive_task);
+    }
+}
+
+static TickType_t ws_osc_keepalive_wait_ticks(int64_t now_us)
+{
+    bool active = false;
+    int64_t deadline_us = 0;
+    portENTER_CRITICAL(&s_ws_osc_state_lock);
+    active = s_ws_keepalive.active;
+    if (active) {
+        deadline_us = MIN(s_ws_keepalive.lease_deadline_us,
+                          s_ws_keepalive.heartbeat_deadline_us);
+    }
+    portEXIT_CRITICAL(&s_ws_osc_state_lock);
+
+    if (!active) {
+        return portMAX_DELAY;
+    }
+    if (deadline_us <= now_us) {
+        return 0;
+    }
+
+    int64_t wait_ms = (deadline_us - now_us + 999LL) / 1000LL;
+    TickType_t wait_ticks = pdMS_TO_TICKS(wait_ms);
+    return wait_ticks == 0 ? 1 : wait_ticks;
+}
+
+static void ws_osc_keepalive_task(void *arg)
+{
+    (void)arg;
+    while (true) {
+        int64_t now_us = esp_timer_get_time();
+        uint8_t slave_id = 0;
+        cloud_osc_keepalive_action_t action;
+
+        portENTER_CRITICAL(&s_ws_osc_state_lock);
+        action = cloud_osc_keepalive_poll(
+            &s_ws_keepalive, now_us,
+            CLOUD_MQTT_OSC_HEARTBEAT_INTERVAL_US, &slave_id);
+        if (action == CLOUD_OSC_KEEPALIVE_EXPIRED) {
+            s_ws_keepalive_expirations++;
+        }
+        portEXIT_CRITICAL(&s_ws_osc_state_lock);
+
+        if (action == CLOUD_OSC_KEEPALIVE_EXPIRED) {
+            uint32_t lease_generation = ws_osc_state_expire(now_us);
+            if (lease_generation != 0) {
+                cloud_ws_uplink_set_active(false, lease_generation);
+            }
+            ESP_LOGW(TAG, "cloud osc control lease expired");
+        } else if (action == CLOUD_OSC_KEEPALIVE_SEND) {
+            motor_diag_frame_t frame;
+            esp_err_t err = motor_diag_build_osc_heartbeat(slave_id, &frame);
+            if (err == ESP_OK && s_runtime.send_ws_frame != NULL) {
+                err = s_runtime.send_ws_frame(frame.data, frame.len, s_runtime.ctx);
+            } else if (err == ESP_OK) {
+                err = ESP_ERR_INVALID_STATE;
+            }
+
+            portENTER_CRITICAL(&s_ws_osc_state_lock);
+            if (err == ESP_OK) {
+                s_ws_keepalive_sent++;
+                s_ws_keepalive_last_sent_us = now_us;
+            } else {
+                s_ws_keepalive_failures++;
+            }
+            portEXIT_CRITICAL(&s_ws_osc_state_lock);
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "cloud osc local heartbeat failed: %s",
+                         esp_err_to_name(err));
+            }
+        }
+
+        TickType_t wait_ticks = ws_osc_keepalive_wait_ticks(esp_timer_get_time());
+        (void)ulTaskNotifyTake(pdTRUE, wait_ticks);
+    }
 }
 
 static int make_topic_from_format(char *out, size_t out_size, const char *fmt)
@@ -254,6 +354,32 @@ static void add_comm_stats_status(cJSON *root)
     cJSON_AddNumberToObject(uart, "tx_bytes", (double)stats.uart_tx_bytes);
     cJSON_AddNumberToObject(uart, "tx_failures", (double)stats.uart_tx_failures);
     cJSON_AddNumberToObject(uart, "overflows", (double)stats.uart_overflows);
+    cJSON_AddNumberToObject(uart, "fifo_overflows", (double)stats.uart_fifo_overflows);
+    cJSON_AddNumberToObject(uart, "buffer_full_overflows",
+                            (double)stats.uart_buffer_full_overflows);
+    cJSON_AddNumberToObject(uart, "overflow_assemble_bytes",
+                            (double)stats.uart_overflow_assemble_bytes);
+    cJSON_AddNumberToObject(uart, "overflow_driver_bytes",
+                            (double)stats.uart_overflow_driver_bytes);
+    cJSON_AddNumberToObject(uart, "last_overflow_event",
+                            (double)stats.uart_last_overflow_event);
+    cJSON_AddNumberToObject(uart, "last_overflow_assemble_bytes",
+                            (double)stats.uart_last_overflow_assemble_bytes);
+    cJSON_AddNumberToObject(uart, "last_overflow_driver_bytes",
+                            (double)stats.uart_last_overflow_driver_bytes);
+    cJSON_AddNumberToObject(uart, "dispatch_calls", (double)stats.uart_dispatch_calls);
+    cJSON_AddNumberToObject(uart, "dispatch_total_us", (double)stats.uart_dispatch_total_us);
+    cJSON_AddNumberToObject(uart, "dispatch_max_us", (double)stats.uart_dispatch_max_us);
+    cJSON_AddNumberToObject(uart, "cloud_route_calls", (double)stats.uart_cloud_route_calls);
+    cJSON_AddNumberToObject(uart, "cloud_route_total_us",
+                            (double)stats.uart_cloud_route_total_us);
+    cJSON_AddNumberToObject(uart, "cloud_route_max_us",
+                            (double)stats.uart_cloud_route_max_us);
+    cJSON_AddNumberToObject(uart, "local_route_calls", (double)stats.uart_local_route_calls);
+    cJSON_AddNumberToObject(uart, "local_route_total_us",
+                            (double)stats.uart_local_route_total_us);
+    cJSON_AddNumberToObject(uart, "local_route_max_us",
+                            (double)stats.uart_local_route_max_us);
 
     cJSON_AddNumberToObject(ble, "rx_frames", (double)stats.ble_rx_frames);
     cJSON_AddNumberToObject(ble, "rx_bytes", (double)stats.ble_rx_bytes);
@@ -304,17 +430,43 @@ static void add_cloud_ws_uplink_status(cJSON *root)
     cJSON_AddBoolToObject(obj, "compression_active", stats.compression_active);
     cJSON_AddNumberToObject(obj, "sender_stack_min_free", (double)stats.sender_stack_min_free);
     cJSON_AddNumberToObject(obj, "queue_pending_frames", (double)stats.queue_pending_frames);
+    cJSON_AddNumberToObject(obj, "queue_pending_bytes", (double)stats.queue_pending_bytes);
+    cJSON_AddNumberToObject(obj, "queue_high_water_frames",
+                            (double)stats.queue_high_water_frames);
+    cJSON_AddNumberToObject(obj, "queue_high_water_bytes",
+                            (double)stats.queue_high_water_bytes);
+    cJSON_AddNumberToObject(obj, "queue_dequeue_age_samples",
+                            (double)stats.queue_dequeue_age_samples);
+    cJSON_AddNumberToObject(obj, "queue_dequeue_age_total_us",
+                            (double)stats.queue_dequeue_age_total_us);
+    cJSON_AddNumberToObject(obj, "queue_dequeue_age_max_us",
+                            (double)stats.queue_dequeue_age_max_us);
+    cJSON_AddNumberToObject(obj, "queue_batch_ready_age_max_us",
+                            (double)stats.queue_batch_ready_age_max_us);
+    cJSON_AddNumberToObject(obj, "queue_send_start_age_max_us",
+                            (double)stats.queue_send_start_age_max_us);
+    cJSON_AddNumberToObject(obj, "queue_drop_age_max_us",
+                            (double)stats.queue_drop_age_max_us);
+    cJSON_AddNumberToObject(obj, "batch_wait_max_us",
+                            (double)stats.batch_wait_max_us);
     cJSON_AddNumberToObject(obj, "queued_frames", (double)stats.queued_frames);
+    cJSON_AddNumberToObject(obj, "queued_bytes", (double)stats.queued_bytes);
     cJSON_AddNumberToObject(obj, "sent_frames", (double)stats.sent_frames);
     cJSON_AddNumberToObject(obj, "sent_bytes", (double)stats.sent_bytes);
     cJSON_AddNumberToObject(obj, "queue_full", (double)stats.queue_full);
     cJSON_AddNumberToObject(obj, "overload_dropped_frames",
                             (double)stats.overload_dropped_frames);
+    cJSON_AddNumberToObject(obj, "overload_dropped_bytes",
+                            (double)stats.overload_dropped_bytes);
+    cJSON_AddNumberToObject(obj, "rejected_frames", (double)stats.rejected_frames);
+    cJSON_AddNumberToObject(obj, "rejected_bytes", (double)stats.rejected_bytes);
     cJSON_AddNumberToObject(obj, "send_failures", (double)stats.send_failures);
     cJSON_AddNumberToObject(obj, "fallback_frames", (double)stats.fallback_frames);
     cJSON_AddNumberToObject(obj, "queued_fallback_frames", (double)stats.queued_fallback_frames);
+    cJSON_AddNumberToObject(obj, "queued_fallback_bytes", (double)stats.queued_fallback_bytes);
     cJSON_AddNumberToObject(obj, "fallback_failures", (double)stats.fallback_failures);
     cJSON_AddNumberToObject(obj, "stop_dropped_frames", (double)stats.stop_dropped_frames);
+    cJSON_AddNumberToObject(obj, "stop_dropped_bytes", (double)stats.stop_dropped_bytes);
     cJSON_AddNumberToObject(obj, "connect_events", (double)stats.connect_events);
     cJSON_AddNumberToObject(obj, "disconnect_events", (double)stats.disconnect_events);
     cJSON_AddNumberToObject(obj, "error_events", (double)stats.error_events);
@@ -333,8 +485,67 @@ static void add_cloud_ws_uplink_status(cJSON *root)
     cJSON_AddNumberToObject(obj, "send_calls", (double)stats.send_calls);
     cJSON_AddNumberToObject(obj, "send_total_us", (double)stats.send_total_us);
     cJSON_AddNumberToObject(obj, "send_max_us", (double)stats.send_max_us);
+    cJSON_AddNumberToObject(obj, "ws_data_lock_wait_max_us",
+                            (double)stats.ws_data_lock_wait_max_us);
+    cJSON_AddNumberToObject(obj, "ws_data_lock_timeouts",
+                            (double)stats.ws_data_lock_timeouts);
+    cJSON_AddNumberToObject(obj, "ws_transport_send_max_us",
+                            (double)stats.ws_transport_send_max_us);
+    cJSON_AddNumberToObject(obj, "ws_ping_lock_wait_max_us",
+                            (double)stats.ws_ping_lock_wait_max_us);
+    cJSON_AddNumberToObject(obj, "ws_ping_lock_timeouts",
+                            (double)stats.ws_ping_lock_timeouts);
+    cJSON_AddNumberToObject(obj, "ws_ping_send_max_us",
+                            (double)stats.ws_ping_send_max_us);
     cJSON_AddNumberToObject(obj, "last_event_id", (double)stats.last_event_id);
     cJSON_AddItemToObject(root, "cloud_ws_uplink", obj);
+}
+
+static void add_cloud_osc_keepalive_status(cJSON *root)
+{
+    bool active;
+    int64_t lease_deadline_us;
+    int64_t heartbeat_deadline_us;
+    int64_t last_sent_us;
+    uint32_t sent;
+    uint32_t failures;
+    uint32_t expirations;
+
+    portENTER_CRITICAL(&s_ws_osc_state_lock);
+    active = s_ws_keepalive.active;
+    lease_deadline_us = s_ws_keepalive.lease_deadline_us;
+    heartbeat_deadline_us = s_ws_keepalive.heartbeat_deadline_us;
+    last_sent_us = s_ws_keepalive_last_sent_us;
+    sent = s_ws_keepalive_sent;
+    failures = s_ws_keepalive_failures;
+    expirations = s_ws_keepalive_expirations;
+    portEXIT_CRITICAL(&s_ws_osc_state_lock);
+
+    int64_t now_us = esp_timer_get_time();
+    cJSON *obj = cJSON_CreateObject();
+    if (obj == NULL) {
+        return;
+    }
+    cJSON_AddBoolToObject(obj, "active", active);
+    cJSON_AddNumberToObject(
+        obj, "lease_remaining_ms",
+        active && lease_deadline_us > now_us
+            ? (double)((lease_deadline_us - now_us) / 1000LL)
+            : 0);
+    cJSON_AddNumberToObject(
+        obj, "heartbeat_due_ms",
+        active && heartbeat_deadline_us > now_us
+            ? (double)((heartbeat_deadline_us - now_us) / 1000LL)
+            : 0);
+    cJSON_AddNumberToObject(obj, "sent", (double)sent);
+    cJSON_AddNumberToObject(obj, "failures", (double)failures);
+    cJSON_AddNumberToObject(obj, "expirations", (double)expirations);
+    cJSON_AddNumberToObject(
+        obj, "last_sent_age_ms",
+        last_sent_us > 0 && now_us > last_sent_us
+            ? (double)((now_us - last_sent_us) / 1000LL)
+            : 0);
+    cJSON_AddItemToObject(root, "cloud_osc_keepalive", obj);
 }
 
 static void add_display_status(cJSON *root)
@@ -690,6 +901,8 @@ void cloud_mqtt_note_realtime_control(const uint8_t *data, size_t len)
     if (data == NULL || len == 0) {
         return;
     }
+    int64_t now_us = esp_timer_get_time();
+    ws_osc_keepalive_note_control(data, len, now_us);
     if (is_osc_stop_frame(data, len)) {
         uint32_t lease_generation = ws_osc_state_set(false, 0);
         cloud_ws_uplink_set_active(false, lease_generation);
@@ -697,7 +910,7 @@ void cloud_mqtt_note_realtime_control(const uint8_t *data, size_t len)
     }
     uint32_t lease_generation = ws_osc_state_refresh(
         is_osc_start_frame(data, len),
-        esp_timer_get_time() + CLOUD_MQTT_WS_ACTIVE_US);
+        now_us + CLOUD_MQTT_WS_ACTIVE_US);
     cloud_ws_uplink_set_active(true, lease_generation);
 }
 
@@ -896,6 +1109,17 @@ esp_err_t cloud_mqtt_init(const cloud_mqtt_config_t *config,
         return ESP_ERR_NO_MEM;
     }
     esp_mqtt_client_register_event(s_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
+    cloud_osc_keepalive_reset(&s_ws_keepalive);
+    if (xTaskCreate(ws_osc_keepalive_task, "cloud_osc_hb",
+                    CLOUD_MQTT_OSC_KEEPALIVE_TASK_STACK, NULL,
+                    CLOUD_MQTT_OSC_KEEPALIVE_TASK_PRIORITY,
+                    &s_ws_keepalive_task) != pdPASS) {
+        esp_mqtt_client_destroy(s_client);
+        s_client = NULL;
+        esp_timer_delete(s_status_timer);
+        s_status_timer = NULL;
+        return ESP_ERR_NO_MEM;
+    }
     s_initialized = true;
     ESP_LOGI(TAG, "cloud MQTT configured: id=%s uri=%s", s_config.device_id, s_config.mqtt_uri);
     return ESP_OK;
@@ -969,6 +1193,7 @@ void cloud_mqtt_publish_status_now(void)
     add_heap_status(root);
     add_comm_stats_status(root);
     add_cloud_ws_uplink_status(root);
+    add_cloud_osc_keepalive_status(root);
     add_display_status(root);
     add_menu_status(root);
     add_motor_params_status(root);

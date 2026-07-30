@@ -333,8 +333,9 @@ const uplinkHandler = app.match(
 )?.[1] || '';
 assert.ok(uplinkHandler, 'backend must define a device uplink handler');
 assert.ok(
-  uplinkHandler.includes('broadcast_remote_ws_bytes(device_id, data)'),
-  'device uplink binary data must be forwarded directly to browser clients',
+  uplinkHandler.includes('decoded = session.decode(data)') &&
+    uplinkHandler.includes('broadcast_remote_ws_bytes(device_id, decoded)'),
+  'device uplink envelopes must be losslessly decoded before browser fan-out',
 );
 assert.ok(!uplinkHandler.includes('db_connect()'), 'device uplink must not access PostgreSQL');
 assert.ok(!uplinkHandler.includes('mqtt_client'), 'device uplink must not route waveform data through MQTT');
@@ -370,8 +371,8 @@ assert.match(
 );
 assert.match(
   app,
-  /CLOUD_WS_MAX_MESSAGE_BYTES\s*=\s*int\(os\.environ\.get\('CLOUD_WS_MAX_MESSAGE_BYTES', '16384'\)\)[\s\S]*max_size=CLOUD_WS_MAX_MESSAGE_BYTES/,
-  'cloud WebSocket server must accept the firmware 2048-byte aggregated uplink frame',
+  /CLOUD_WS_MAX_MESSAGE_BYTES\s*=\s*int\(os\.environ\.get\('CLOUD_WS_MAX_MESSAGE_BYTES', '65536'\)\)[\s\S]*max_size=CLOUD_WS_MAX_MESSAGE_BYTES/,
+  'cloud WebSocket server must accept the maximum negotiated waveform envelope',
 );
 assert.ok(
   /def cloud_ws_handler\(connection: ServerConnection\):[\s\S]*cloud_ws_uplink_device_id[\s\S]*cloud_ws_uplink_handler/.test(app),

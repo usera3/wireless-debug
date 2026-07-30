@@ -25,6 +25,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 #include "app_core.h"
 #include "ble_transport.h"
@@ -260,7 +261,11 @@ static void app_uart_frame_received(const uint8_t *data, size_t len, void *ctx)
         return;
     }
 
+    int64_t cloud_started_us = esp_timer_get_time();
     cloud_mqtt_publish_ws_frame(data, len);
+    int64_t cloud_elapsed_us = esp_timer_get_time() - cloud_started_us;
+    comm_stats_uart_route_timing(
+        true, cloud_elapsed_us <= 0 ? 0 : (uint32_t)cloud_elapsed_us);
 
     router_context_t router_ctx = {
         .current_mode = current_router_mode(),
@@ -275,7 +280,11 @@ static void app_uart_frame_received(const uint8_t *data, size_t len, void *ctx)
         .set_mode = set_router_mode,
         .set_mode_ctx = NULL,
     };
+    int64_t local_started_us = esp_timer_get_time();
     router_dispatch_uart_frame(&router_ctx, data, len);
+    int64_t local_elapsed_us = esp_timer_get_time() - local_started_us;
+    comm_stats_uart_route_timing(
+        false, local_elapsed_us <= 0 ? 0 : (uint32_t)local_elapsed_us);
 }
 
 #if CONFIG_ENABLE_BLE

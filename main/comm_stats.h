@@ -1,6 +1,7 @@
 #ifndef COMM_STATS_H
 #define COMM_STATS_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -10,6 +11,22 @@ typedef struct {
     uint64_t uart_tx_bytes;
     uint64_t uart_tx_failures;
     uint64_t uart_overflows;
+    uint64_t uart_fifo_overflows;
+    uint64_t uart_buffer_full_overflows;
+    uint64_t uart_overflow_assemble_bytes;
+    uint64_t uart_overflow_driver_bytes;
+    uint64_t uart_last_overflow_event;
+    uint64_t uart_last_overflow_assemble_bytes;
+    uint64_t uart_last_overflow_driver_bytes;
+    uint64_t uart_dispatch_calls;
+    uint64_t uart_dispatch_total_us;
+    uint64_t uart_dispatch_max_us;
+    uint64_t uart_cloud_route_calls;
+    uint64_t uart_cloud_route_total_us;
+    uint64_t uart_cloud_route_max_us;
+    uint64_t uart_local_route_calls;
+    uint64_t uart_local_route_total_us;
+    uint64_t uart_local_route_max_us;
 
     uint64_t ble_rx_frames;
     uint64_t ble_rx_bytes;
@@ -38,7 +55,9 @@ typedef struct {
 
 void comm_stats_uart_rx_frame(size_t bytes);
 void comm_stats_uart_tx_result(size_t requested, int written);
-void comm_stats_uart_overflow(void);
+void comm_stats_uart_overflow(int event_type, size_t assemble_bytes, size_t driver_bytes);
+void comm_stats_uart_dispatch(uint32_t duration_us);
+void comm_stats_uart_route_timing(bool cloud_route, uint32_t duration_us);
 
 void comm_stats_ble_rx_frame(size_t bytes);
 void comm_stats_ble_tx_bytes(size_t bytes);

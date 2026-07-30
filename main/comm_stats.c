@@ -1,6 +1,7 @@
 #include "comm_stats.h"
 
 #include <string.h>
+#include "driver/uart.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
 
@@ -39,9 +40,51 @@ void comm_stats_uart_tx_result(size_t requested, int written)
     portEXIT_CRITICAL(&s_stats_lock);
 }
 
-void comm_stats_uart_overflow(void)
+void comm_stats_uart_overflow(int event_type, size_t assemble_bytes, size_t driver_bytes)
 {
-    inc_u64(&s_stats.uart_overflows);
+    portENTER_CRITICAL(&s_stats_lock);
+    s_stats.uart_overflows++;
+    if (event_type == UART_FIFO_OVF) {
+        s_stats.uart_fifo_overflows++;
+    } else if (event_type == UART_BUFFER_FULL) {
+        s_stats.uart_buffer_full_overflows++;
+    }
+    s_stats.uart_overflow_assemble_bytes += assemble_bytes;
+    s_stats.uart_overflow_driver_bytes += driver_bytes;
+    s_stats.uart_last_overflow_event = (uint64_t)event_type;
+    s_stats.uart_last_overflow_assemble_bytes = assemble_bytes;
+    s_stats.uart_last_overflow_driver_bytes = driver_bytes;
+    portEXIT_CRITICAL(&s_stats_lock);
+}
+
+void comm_stats_uart_dispatch(uint32_t duration_us)
+{
+    portENTER_CRITICAL(&s_stats_lock);
+    s_stats.uart_dispatch_calls++;
+    s_stats.uart_dispatch_total_us += duration_us;
+    if (duration_us > s_stats.uart_dispatch_max_us) {
+        s_stats.uart_dispatch_max_us = duration_us;
+    }
+    portEXIT_CRITICAL(&s_stats_lock);
+}
+
+void comm_stats_uart_route_timing(bool cloud_route, uint32_t duration_us)
+{
+    portENTER_CRITICAL(&s_stats_lock);
+    if (cloud_route) {
+        s_stats.uart_cloud_route_calls++;
+        s_stats.uart_cloud_route_total_us += duration_us;
+        if (duration_us > s_stats.uart_cloud_route_max_us) {
+            s_stats.uart_cloud_route_max_us = duration_us;
+        }
+    } else {
+        s_stats.uart_local_route_calls++;
+        s_stats.uart_local_route_total_us += duration_us;
+        if (duration_us > s_stats.uart_local_route_max_us) {
+            s_stats.uart_local_route_max_us = duration_us;
+        }
+    }
+    portEXIT_CRITICAL(&s_stats_lock);
 }
 
 void comm_stats_ble_rx_frame(size_t bytes)

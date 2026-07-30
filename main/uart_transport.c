@@ -5,6 +5,7 @@
 #include "driver/gpio.h"
 #include "driver/uart.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -35,8 +36,11 @@ static void dispatch_frame(size_t len)
     if (len == 0 || s_frame_cb == NULL) {
         return;
     }
+    int64_t started_us = esp_timer_get_time();
     comm_stats_uart_rx_frame(len);
     s_frame_cb(s_assemble_buf, len, s_frame_cb_ctx);
+    int64_t elapsed_us = esp_timer_get_time() - started_us;
+    comm_stats_uart_dispatch(elapsed_us <= 0 ? 0 : (uint32_t)elapsed_us);
 }
 
 static void uart_transport_task(void *pvParameters)
@@ -92,7 +96,9 @@ static void uart_transport_task(void *pvParameters)
 
         if (event.type == UART_FIFO_OVF || event.type == UART_BUFFER_FULL) {
             ESP_LOGW(TAG, "UART overflow event=%d, flushing", event.type);
-            comm_stats_uart_overflow();
+            size_t driver_bytes = 0;
+            (void)uart_get_buffered_data_len(UART_TRANSPORT_PORT, &driver_bytes);
+            comm_stats_uart_overflow(event.type, assemble_len, driver_bytes);
             uart_transport_flush();
             assemble_len = 0;
         }

@@ -1,5 +1,6 @@
 #include "cloud_ws_uplink.h"
 #include "cloud_ws_downlink_reassembly.h"
+#include "cloud_ws_batch_policy.h"
 #include "cloud_ws_compression_state.h"
 #include "cloud_ws_lease.h"
 #include "cloud_ws_socket.h"
@@ -21,15 +22,17 @@
 #include "freertos/task.h"
 
 #define CLOUD_WS_UPLINK_MAX_FRAME 512U
-#define CLOUD_WS_UPLINK_QUEUE_DEPTH 128U
+#define CLOUD_WS_UPLINK_QUEUE_DEPTH 512U
 #define CLOUD_WS_UPLINK_URI_MAX_LEN 192U
 #define CLOUD_WS_UPLINK_SEND_TIMEOUT_MS 5000
 #define CLOUD_WS_UPLINK_WS_BUFFER_SIZE 2048U
-#define CLOUD_WS_UPLINK_TASK_PRIORITY 9
+#define CLOUD_WS_UPLINK_SENDER_TASK_PRIORITY 9
+#define CLOUD_WS_UPLINK_CLIENT_TASK_PRIORITY 10
 
 typedef struct {
     size_t len;
     uint32_t source_frames;
+    int64_t enqueued_us;
     uint8_t data[CLOUD_WS_UPLINK_MAX_FRAME];
 } cloud_ws_uplink_frame_t;
 
@@ -40,6 +43,8 @@ static QueueHandle_t s_queue;
 static TaskHandle_t s_sender_task;
 static uint8_t *s_raw_aggregate;
 static uint8_t *s_wire_aggregate;
+static cloud_ws_uplink_frame_t *s_sender_chunk;
+static cloud_ws_uplink_frame_t *s_sender_next;
 static void *s_compressor_workspace;
 static size_t s_compressor_workspace_size;
 static cloud_waveform_encoder_t s_waveform_encoder;
@@ -57,6 +62,7 @@ static char s_uri[CLOUD_WS_UPLINK_URI_MAX_LEN];
 static portMUX_TYPE s_state_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_stats_lock = portMUX_INITIALIZER_UNLOCKED;
 static cloud_ws_uplink_stats_t s_stats;
+static uint64_t s_queue_dequeued_bytes;
 static cloud_ws_downlink_reassembly_t s_downlink_reassembly;
 static cloud_ws_compression_state_t s_compression_state;
 
@@ -64,6 +70,121 @@ static void stats_increment(uint32_t *counter, uint32_t amount)
 {
     portENTER_CRITICAL(&s_stats_lock);
     *counter += amount;
+    portEXIT_CRITICAL(&s_stats_lock);
+}
+
+static void stats_note_queue_enqueue(size_t len)
+{
+    uint32_t pending_frames = (uint32_t)uxQueueMessagesWaiting(s_queue);
+    portENTER_CRITICAL(&s_stats_lock);
+    s_stats.queued_frames++;
+    s_stats.queued_bytes += len;
+    s_stats.queue_pending_bytes = s_stats.queued_bytes >= s_queue_dequeued_bytes
+                                      ? s_stats.queued_bytes - s_queue_dequeued_bytes
+                                      : 0;
+    if (pending_frames > s_stats.queue_high_water_frames) {
+        s_stats.queue_high_water_frames = pending_frames;
+    }
+    if (s_stats.queue_pending_bytes > s_stats.queue_high_water_bytes) {
+        s_stats.queue_high_water_bytes = s_stats.queue_pending_bytes;
+    }
+    portEXIT_CRITICAL(&s_stats_lock);
+}
+
+static void stats_note_queue_dequeue(size_t len)
+{
+    portENTER_CRITICAL(&s_stats_lock);
+    s_queue_dequeued_bytes += len;
+    s_stats.queue_pending_bytes = s_stats.queued_bytes >= s_queue_dequeued_bytes
+                                      ? s_stats.queued_bytes - s_queue_dequeued_bytes
+                                      : 0;
+    portEXIT_CRITICAL(&s_stats_lock);
+}
+
+static uint32_t elapsed_us_clamped(int64_t started_us, int64_t finished_us)
+{
+    int64_t elapsed_us = finished_us - started_us;
+    if (elapsed_us <= 0) {
+        return 0;
+    }
+    return elapsed_us > UINT32_MAX ? UINT32_MAX : (uint32_t)elapsed_us;
+}
+
+static void stats_note_queue_dequeue_age(int64_t enqueued_us,
+                                         int64_t dequeued_us)
+{
+    if (enqueued_us <= 0) {
+        return;
+    }
+    uint32_t age_us = elapsed_us_clamped(enqueued_us, dequeued_us);
+    portENTER_CRITICAL(&s_stats_lock);
+    s_stats.queue_dequeue_age_samples++;
+    s_stats.queue_dequeue_age_total_us += age_us;
+    if (age_us > s_stats.queue_dequeue_age_max_us) {
+        s_stats.queue_dequeue_age_max_us = age_us;
+    }
+    portEXIT_CRITICAL(&s_stats_lock);
+}
+
+static void stats_note_queue_stage_age(uint32_t *max_age_us,
+                                       int64_t enqueued_us,
+                                       int64_t stage_us)
+{
+    if (max_age_us == NULL || enqueued_us <= 0) {
+        return;
+    }
+    uint32_t age_us = elapsed_us_clamped(enqueued_us, stage_us);
+    portENTER_CRITICAL(&s_stats_lock);
+    if (age_us > *max_age_us) {
+        *max_age_us = age_us;
+    }
+    portEXIT_CRITICAL(&s_stats_lock);
+}
+
+static void stats_note_duration_max(uint32_t *max_elapsed_us,
+                                    int64_t started_us,
+                                    int64_t finished_us)
+{
+    if (max_elapsed_us == NULL) {
+        return;
+    }
+    uint32_t elapsed_us = elapsed_us_clamped(started_us, finished_us);
+    portENTER_CRITICAL(&s_stats_lock);
+    if (elapsed_us > *max_elapsed_us) {
+        *max_elapsed_us = elapsed_us;
+    }
+    portEXIT_CRITICAL(&s_stats_lock);
+}
+
+static void stats_note_overload_drop(uint32_t source_frames, size_t bytes)
+{
+    portENTER_CRITICAL(&s_stats_lock);
+    s_stats.overload_dropped_frames += source_frames;
+    s_stats.overload_dropped_bytes += bytes;
+    portEXIT_CRITICAL(&s_stats_lock);
+}
+
+static void stats_note_rejected(size_t bytes)
+{
+    portENTER_CRITICAL(&s_stats_lock);
+    s_stats.rejected_frames++;
+    s_stats.rejected_bytes += bytes;
+    portEXIT_CRITICAL(&s_stats_lock);
+}
+
+static void stats_note_fallback_queued(uint32_t source_frames, size_t bytes)
+{
+    portENTER_CRITICAL(&s_stats_lock);
+    s_stats.queued_fallback_frames += source_frames;
+    s_stats.queued_fallback_bytes += bytes;
+    portEXIT_CRITICAL(&s_stats_lock);
+}
+
+static void stats_note_stop_drop(uint32_t source_frames, size_t bytes)
+{
+    portENTER_CRITICAL(&s_stats_lock);
+    s_stats.stop_dropped_frames += source_frames;
+    s_stats.stop_dropped_bytes += bytes;
     portEXIT_CRITICAL(&s_stats_lock);
 }
 
@@ -91,9 +212,11 @@ static void stats_note_compression(const cloud_waveform_encode_result_t *result,
     portEXIT_CRITICAL(&s_stats_lock);
 }
 
-static void stats_note_sent_bytes(size_t raw_len, size_t wire_len)
+static void stats_note_sent(uint32_t source_frames, size_t raw_len, size_t wire_len)
 {
     portENTER_CRITICAL(&s_stats_lock);
+    s_stats.sent_frames += source_frames;
+    s_stats.sent_bytes += raw_len;
     s_stats.raw_bytes += raw_len;
     s_stats.wire_bytes += wire_len;
     portEXIT_CRITICAL(&s_stats_lock);
@@ -185,7 +308,7 @@ static bool fallback_frame(const uint8_t *data, size_t len, uint32_t source_fram
         offset += chunk_len;
     }
     if (complete) {
-        stats_increment(&s_stats.queued_fallback_frames, source_frames);
+        stats_note_fallback_queued(source_frames, len);
     }
     return complete;
 }
@@ -193,8 +316,6 @@ static bool fallback_frame(const uint8_t *data, size_t len, uint32_t source_fram
 static void sender_task(void *arg)
 {
     (void)arg;
-    cloud_ws_uplink_frame_t chunk;
-    cloud_ws_uplink_frame_t next;
     while (true) {
         if (uxQueueMessagesWaiting(s_queue) == 0) {
             (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
@@ -250,31 +371,72 @@ static void sender_task(void *arg)
 
         if (!active) {
             uint32_t dropped = 0;
-            while (xQueueReceive(s_queue, &chunk, 0) == pdTRUE) {
-                dropped += chunk.source_frames;
+            size_t dropped_bytes = 0;
+            while (xQueueReceive(s_queue, s_sender_chunk, 0) == pdTRUE) {
+                stats_note_queue_dequeue(s_sender_chunk->len);
+                dropped += s_sender_chunk->source_frames;
+                dropped_bytes += s_sender_chunk->len;
             }
             if (dropped > 0) {
-                stats_increment(&s_stats.stop_dropped_frames, dropped);
+                stats_note_stop_drop(dropped, dropped_bytes);
             }
             continue;
         }
 
-        if (xQueueReceive(s_queue, &chunk, 0) == pdTRUE) {
-            size_t raw_len = chunk.len;
-            uint32_t source_frames = chunk.source_frames;
-            memcpy(s_raw_aggregate, chunk.data, chunk.len);
-            while (xQueuePeek(s_queue, &next, 0) == pdTRUE &&
-                   raw_len + next.len <= CLOUD_WAVEFORM_MAX_RAW_SIZE) {
-                if (xQueueReceive(s_queue, &next, 0) != pdTRUE) {
+        if (xQueueReceive(s_queue, s_sender_chunk, 0) == pdTRUE) {
+            int64_t batch_started_us = esp_timer_get_time();
+            stats_note_queue_dequeue(s_sender_chunk->len);
+            stats_note_queue_dequeue_age(s_sender_chunk->enqueued_us,
+                                         batch_started_us);
+            size_t raw_len = s_sender_chunk->len;
+            uint32_t source_frames = s_sender_chunk->source_frames;
+            int64_t oldest_enqueued_us = s_sender_chunk->enqueued_us;
+            memcpy(s_raw_aggregate, s_sender_chunk->data, s_sender_chunk->len);
+            while (raw_len < CLOUD_WAVEFORM_MAX_RAW_SIZE) {
+                int64_t elapsed = esp_timer_get_time() - batch_started_us;
+                uint32_t elapsed_us = elapsed <= 0
+                                          ? 0
+                                          : elapsed > UINT32_MAX
+                                                ? UINT32_MAX
+                                                : (uint32_t)elapsed;
+                uint32_t wait_us = cloud_ws_batch_wait_us(raw_len, elapsed_us);
+                if (wait_us == 0) {
                     break;
                 }
-                memcpy(s_raw_aggregate + raw_len, next.data, next.len);
-                raw_len += next.len;
-                source_frames += next.source_frames;
+                TickType_t wait_ticks = pdMS_TO_TICKS((wait_us + 999U) / 1000U);
+                if (wait_ticks == 0) {
+                    wait_ticks = 1;
+                }
+                if (xQueuePeek(s_queue, s_sender_next, wait_ticks) != pdTRUE ||
+                    raw_len + s_sender_next->len > CLOUD_WAVEFORM_MAX_RAW_SIZE) {
+                    break;
+                }
+                if (xQueueReceive(s_queue, s_sender_next, 0) != pdTRUE) {
+                    break;
+                }
+                int64_t dequeued_us = esp_timer_get_time();
+                stats_note_queue_dequeue(s_sender_next->len);
+                stats_note_queue_dequeue_age(s_sender_next->enqueued_us,
+                                             dequeued_us);
+                if (s_sender_next->enqueued_us > 0 &&
+                    (oldest_enqueued_us <= 0 ||
+                     s_sender_next->enqueued_us < oldest_enqueued_us)) {
+                    oldest_enqueued_us = s_sender_next->enqueued_us;
+                }
+                memcpy(s_raw_aggregate + raw_len,
+                       s_sender_next->data, s_sender_next->len);
+                raw_len += s_sender_next->len;
+                source_frames += s_sender_next->source_frames;
             }
+            int64_t batch_ready_us = esp_timer_get_time();
+            stats_note_duration_max(&s_stats.batch_wait_max_us,
+                                    batch_started_us, batch_ready_us);
+            stats_note_queue_stage_age(
+                &s_stats.queue_batch_ready_age_max_us,
+                oldest_enqueued_us, batch_ready_us);
             if (!s_connected || s_client == NULL) {
                 if (!fallback_frame(s_raw_aggregate, raw_len, source_frames)) {
-                    stats_increment(&s_stats.overload_dropped_frames, source_frames);
+                    stats_note_overload_drop(source_frames, raw_len);
                 }
                 continue;
             }
@@ -301,13 +463,15 @@ static void sender_task(void *arg)
                 if (!encoded) {
                     stats_increment(&s_stats.send_failures, 1);
                     if (!fallback_frame(s_raw_aggregate, raw_len, source_frames)) {
-                        stats_increment(&s_stats.overload_dropped_frames, source_frames);
+                        stats_note_overload_drop(source_frames, raw_len);
                     }
                     continue;
                 }
                 send_data = s_wire_aggregate;
             }
             int64_t send_started_us = esp_timer_get_time();
+            stats_note_queue_stage_age(&s_stats.queue_send_start_age_max_us,
+                                       oldest_enqueued_us, send_started_us);
             int sent = esp_websocket_client_send_bin(
                 s_client,
                 (const char *)send_data,
@@ -318,13 +482,11 @@ static void sender_task(void *arg)
             if (sent != (int)send_len) {
                 stats_increment(&s_stats.send_failures, 1);
                 if (!fallback_frame(s_raw_aggregate, raw_len, source_frames)) {
-                    stats_increment(&s_stats.overload_dropped_frames, source_frames);
+                    stats_note_overload_drop(source_frames, raw_len);
                 }
                 ESP_LOGW(TAG, "binary send failed: sent=%d len=%u", sent, (unsigned)send_len);
             } else {
-                stats_increment(&s_stats.sent_frames, source_frames);
-                stats_increment(&s_stats.sent_bytes, (uint32_t)raw_len);
-                stats_note_sent_bytes(raw_len, send_len);
+                stats_note_sent(source_frames, raw_len, send_len);
             }
         }
     }
@@ -494,7 +656,7 @@ esp_err_t cloud_ws_uplink_init(const cloud_ws_uplink_config_t *config)
         .uri = s_uri,
         .disable_auto_reconnect = false,
         .enable_close_reconnect = true,
-        .task_prio = 5,
+        .task_prio = CLOUD_WS_UPLINK_CLIENT_TASK_PRIORITY,
         .task_stack = 4096,
         .buffer_size = CLOUD_WS_UPLINK_WS_BUFFER_SIZE,
         .network_timeout_ms = CLOUD_WS_UPLINK_SEND_TIMEOUT_MS,
@@ -539,8 +701,46 @@ esp_err_t cloud_ws_uplink_init(const cloud_ws_uplink_config_t *config)
         return err;
     }
 
+    s_sender_chunk = heap_caps_calloc(
+        1, sizeof(*s_sender_chunk), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_sender_next = heap_caps_calloc(
+        1, sizeof(*s_sender_next), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (s_sender_chunk == NULL || s_sender_next == NULL) {
+        heap_caps_free(s_sender_chunk);
+        heap_caps_free(s_sender_next);
+        s_sender_chunk = heap_caps_calloc(
+            1, sizeof(*s_sender_chunk), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        s_sender_next = heap_caps_calloc(
+            1, sizeof(*s_sender_next), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    if (s_sender_chunk == NULL || s_sender_next == NULL) {
+        heap_caps_free(s_sender_chunk);
+        heap_caps_free(s_sender_next);
+        s_sender_chunk = NULL;
+        s_sender_next = NULL;
+        esp_websocket_client_destroy(s_client);
+        s_client = NULL;
+        esp_transport_destroy(s_ws_transport);
+        s_ws_transport = NULL;
+        esp_transport_destroy(s_tcp_transport);
+        s_tcp_transport = NULL;
+        heap_caps_free(s_compressor_workspace);
+        s_compressor_workspace = NULL;
+        heap_caps_free(s_wire_aggregate);
+        s_wire_aggregate = NULL;
+        heap_caps_free(s_raw_aggregate);
+        s_raw_aggregate = NULL;
+        vQueueDeleteWithCaps(s_queue);
+        s_queue = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+
     if (xTaskCreate(sender_task, "cloud_ws_tx", 8192, NULL,
-                    CLOUD_WS_UPLINK_TASK_PRIORITY, &s_sender_task) != pdPASS) {
+                    CLOUD_WS_UPLINK_SENDER_TASK_PRIORITY, &s_sender_task) != pdPASS) {
+        heap_caps_free(s_sender_chunk);
+        s_sender_chunk = NULL;
+        heap_caps_free(s_sender_next);
+        s_sender_next = NULL;
         esp_websocket_client_destroy(s_client);
         s_client = NULL;
         esp_transport_destroy(s_ws_transport);
@@ -599,20 +799,28 @@ bool cloud_ws_uplink_send(const uint8_t *data, size_t len)
         return false;
     }
 
-    cloud_ws_uplink_frame_t frame = {.len = len, .source_frames = 1};
+    cloud_ws_uplink_frame_t frame = {
+        .len = len,
+        .source_frames = 1,
+        .enqueued_us = esp_timer_get_time(),
+    };
     cloud_ws_uplink_frame_t dropped;
     memcpy(frame.data, data, len);
     if (xQueueSend(s_queue, &frame, 0) != pdTRUE) {
         stats_increment(&s_stats.queue_full, 1);
-        if (xQueueReceive(s_queue, &dropped, 0) != pdTRUE) {
-            return false;
+        if (xQueueReceive(s_queue, &dropped, 0) == pdTRUE) {
+            stats_note_queue_dequeue(dropped.len);
+            stats_note_queue_stage_age(&s_stats.queue_drop_age_max_us,
+                                       dropped.enqueued_us,
+                                       frame.enqueued_us);
+            stats_note_overload_drop(dropped.source_frames, dropped.len);
         }
-        stats_increment(&s_stats.overload_dropped_frames, dropped.source_frames);
         if (xQueueSend(s_queue, &frame, 0) != pdTRUE) {
+            stats_note_rejected(len);
             return false;
         }
     }
-    stats_increment(&s_stats.queued_frames, 1);
+    stats_note_queue_enqueue(len);
     xTaskNotifyGive(s_sender_task);
     return true;
 }
@@ -651,4 +859,19 @@ void cloud_ws_uplink_get_stats(cloud_ws_uplink_stats_t *out)
     out->compression_capable = s_compression_capable;
     out->compression_active = s_compression_state.active;
     portEXIT_CRITICAL(&s_state_lock);
+
+    esp_websocket_client_tx_diagnostics_t tx_diagnostics = {0};
+    if (s_client != NULL &&
+        esp_websocket_client_get_tx_diagnostics(
+            s_client, &tx_diagnostics) == ESP_OK) {
+        out->ws_data_lock_wait_max_us =
+            tx_diagnostics.data_lock_wait_max_us;
+        out->ws_data_lock_timeouts = tx_diagnostics.data_lock_timeouts;
+        out->ws_transport_send_max_us =
+            tx_diagnostics.transport_send_max_us;
+        out->ws_ping_lock_wait_max_us =
+            tx_diagnostics.ping_lock_wait_max_us;
+        out->ws_ping_lock_timeouts = tx_diagnostics.ping_lock_timeouts;
+        out->ws_ping_send_max_us = tx_diagnostics.ping_send_max_us;
+    }
 }
