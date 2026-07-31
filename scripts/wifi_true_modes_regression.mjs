@@ -100,5 +100,7 @@ assert.ok(main.includes('AT+WIFI=APSTA'),
   'UART help and parser must include AT+WIFI=APSTA');
 assert.ok(main.includes('wifi_manager_schedule_net_mode(SYSTEM_NET_APSTA)'),
   'UART APSTA command must schedule APSTA mode');
-assert.ok(/case SYSTEM_NET_APSTA:[\s\S]*?AP:%s[\s\S]*?lv_label_set_text\(s_rows\[2\],[\s\S]*?state->wifi_sta_ip/.test(displayUi),
-  'OLED home IP formatting must handle APSTA AP IP plus raw STA IP lines');
+assert.ok(
+  /case SYSTEM_NET_APSTA:[\s\S]*?home_row\(1\), "AP:"[\s\S]*?home_row\(2\)[\s\S]*?state->wifi_ap_ip[\s\S]*?home_row\(3\), "STA:"[\s\S]*?home_row\(4\)[\s\S]*?state->wifi_sta_ip/.test(displayUi),
+  'OLED home IP formatting must render separate AP and STA IP rows',
+);

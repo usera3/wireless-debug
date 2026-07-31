@@ -269,6 +269,26 @@ for (const token of [
 ]) {
   assert.ok(localStatusBody.includes(token), `local device status missing uplink field: ${token}`);
 }
+assert.doesNotMatch(
+  localStatusBody,
+  /char\s+resp\s*\[\s*5120\s*\]/,
+  'the 5 KiB device status response must not be allocated on the HTTPD task stack',
+);
+assert.match(
+  webApi,
+  /#define DEVICE_STATUS_RESPONSE_CAPACITY 5120U/,
+  'device status response capacity must remain explicit',
+);
+assert.match(
+  localStatusBody,
+  /heap_caps_malloc\(\s*DEVICE_STATUS_RESPONSE_CAPACITY,\s*MALLOC_CAP_SPIRAM \| MALLOC_CAP_8BIT\)[\s\S]*heap_caps_malloc\(\s*DEVICE_STATUS_RESPONSE_CAPACITY,\s*MALLOC_CAP_INTERNAL \| MALLOC_CAP_8BIT\)/,
+  'device status must allocate from PSRAM first and fall back to internal RAM',
+);
+assert.match(
+  localStatusBody,
+  /if \(resp == NULL\)[\s\S]*httpd_resp_send_err\(req, HTTPD_500_INTERNAL_SERVER_ERROR,[\s\S]*device status allocation failed/,
+  'device status must report allocation failure without dereferencing a null buffer',
+);
 const overloadSendBody = uplink.match(
   /bool cloud_ws_uplink_send\(const uint8_t \*data, size_t len\)\n\{([\s\S]*?)\n\}/,
 )?.[1] || '';
@@ -301,8 +321,13 @@ for (const token of [
 }
 assert.match(
   localStatusBody,
-  /int written = snprintf\(resp, sizeof\(resp\),[\s\S]*if \(written < 0 \|\| \(size_t\)written >= sizeof\(resp\)\)[\s\S]*httpd_resp_send_err/,
+  /int written = snprintf\(resp, DEVICE_STATUS_RESPONSE_CAPACITY,[\s\S]*if \(written < 0 \|\| \(size_t\)written >= DEVICE_STATUS_RESPONSE_CAPACITY\)[\s\S]*heap_caps_free\(resp\);[\s\S]*httpd_resp_send_err/,
   'local status must fail explicitly instead of returning truncated JSON',
+);
+assert.match(
+  localStatusBody,
+  /esp_err_t send_ret = httpd_resp_sendstr\(req, resp\);[\s\S]*heap_caps_free\(resp\);[\s\S]*return send_ret;/,
+  'device status must release its heap response after the HTTP send completes',
 );
 const publishWsFrameBody = source.match(
   /static void publish_ws_frame\(const uint8_t \*data, size_t len\)\n\{([\s\S]*?)\n\}/,

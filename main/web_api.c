@@ -18,6 +18,8 @@
 #include "motor_diag.h"
 #include "uart_transport.h"
 
+#define DEVICE_STATUS_RESPONSE_CAPACITY 5120U
+
 static web_api_context_t s_ctx;
 
 typedef enum {
@@ -1081,8 +1083,20 @@ static esp_err_t device_status_handler(httpd_req_t *req)
     cloud_ws_uplink_get_stats(&uplink);
     http_prepare_json(req);
 
-    char resp[5120];
-    int written = snprintf(resp, sizeof(resp),
+    char *resp = heap_caps_malloc(
+        DEVICE_STATUS_RESPONSE_CAPACITY,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (resp == NULL) {
+        resp = heap_caps_malloc(
+            DEVICE_STATUS_RESPONSE_CAPACITY,
+            MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    }
+    if (resp == NULL) {
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   "device status allocation failed");
+    }
+
+    int written = snprintf(resp, DEVICE_STATUS_RESPONSE_CAPACITY,
              "{\"ok\":true,\"net\":\"%s\",\"comm\":\"%s\",\"uart_baud\":%lu,"
              "\"ble_ready\":%s,\"wifi_ws_client\":%s,"
              "\"display_backend\":\"%s\",\"display_status\":\"%s\","
@@ -1233,12 +1247,14 @@ static esp_err_t device_status_handler(httpd_req_t *req)
              (long)uplink.last_event_id,
              (unsigned)motor_diag_param_count(),
              (unsigned)motor_diag_param_capacity());
-    if (written < 0 || (size_t)written >= sizeof(resp)) {
+    if (written < 0 || (size_t)written >= DEVICE_STATUS_RESPONSE_CAPACITY) {
+        heap_caps_free(resp);
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                                    "device status response too large");
     }
-    httpd_resp_sendstr(req, resp);
-    return ESP_OK;
+    esp_err_t send_ret = httpd_resp_sendstr(req, resp);
+    heap_caps_free(resp);
+    return send_ret;
 }
 
 static esp_err_t comm_mode_get_handler(httpd_req_t *req)

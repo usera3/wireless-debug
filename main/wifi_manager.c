@@ -25,21 +25,25 @@
 #define WIFI_MANAGER_DEFAULT_STA_SSID "vivo X300"
 #define WIFI_MANAGER_DEFAULT_STA_PASS "88888888"
 #define WIFI_MANAGER_START_STA_ON_BOOT 1
-#define WIFI_MANAGER_SCAN_ACTIVE_MIN_MS 10
-#define WIFI_MANAGER_SCAN_ACTIVE_MAX_MS 30
 #define WIFI_MANAGER_SCAN_HOME_DWELL_MS 150
 #define WIFI_MANAGER_AUTO_SCAN_IMMEDIATE_MS 1000
 #define WIFI_MANAGER_AUTO_SCAN_STA_MS 30000
 #define WIFI_MANAGER_AUTO_SCAN_APSTA_MS 60000
+#define WIFI_MANAGER_AUTO_SCAN_CHANNEL_GAP_MS 5000
 #define WIFI_MANAGER_AUTO_SCAN_BACKOFF_AFTER 5
 #define WIFI_MANAGER_AUTO_SCAN_MAX_MS 120000
+#define WIFI_MANAGER_COUNTRY_CODE "CN"
 
 static const char *TAG = "wifi_manager";
+static const uint8_t s_auto_scan_channels[] = {
+    1, 6, 11, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13,
+};
 
 static wifi_manager_config_t s_config;
 static esp_netif_t *s_ap_netif;
 static esp_netif_t *s_sta_netif;
 static SemaphoreHandle_t s_mode_mutex;
+static portMUX_TYPE s_auto_scan_state_lock = portMUX_INITIALIZER_UNLOCKED;
 static esp_timer_handle_t s_sta_fallback_timer;
 static esp_timer_handle_t s_auto_scan_timer;
 static system_net_mode_t s_net_mode = SYSTEM_NET_APSTA;
@@ -49,6 +53,11 @@ static bool s_sta_connecting;
 static bool s_sta_connected;
 static bool s_auto_scan_task_running;
 static uint8_t s_auto_scan_failures;
+static uint8_t s_auto_scan_channel_index;
+static uint8_t s_ap_client_count;
+static bool s_auto_scan_in_progress;
+static bool s_auto_scan_cancel_requested;
+static bool s_auto_scan_started;
 static bool s_save_sta_on_connect;
 static bool s_restore_sta_on_fail;
 static char s_ap_ssid[33];
@@ -128,6 +137,84 @@ static void unlock_mode(void)
     if (s_mode_mutex != NULL) {
         xSemaphoreGive(s_mode_mutex);
     }
+}
+
+static bool auto_scan_ap_service_active_locked(void)
+{
+    return s_net_mode == SYSTEM_NET_AP || s_net_mode == SYSTEM_NET_APSTA;
+}
+
+static uint8_t ap_client_count(void)
+{
+    uint8_t count;
+    portENTER_CRITICAL(&s_auto_scan_state_lock);
+    count = s_ap_client_count;
+    portEXIT_CRITICAL(&s_auto_scan_state_lock);
+    return count;
+}
+
+static bool note_ap_client_connected(void)
+{
+    bool stop_auto_scan = false;
+    portENTER_CRITICAL(&s_auto_scan_state_lock);
+    if (s_ap_client_count < UINT8_MAX) {
+        s_ap_client_count++;
+    }
+    if (s_auto_scan_in_progress) {
+        s_auto_scan_cancel_requested = true;
+        stop_auto_scan = s_auto_scan_started;
+    }
+    portEXIT_CRITICAL(&s_auto_scan_state_lock);
+    return stop_auto_scan;
+}
+
+static bool note_ap_client_disconnected(void)
+{
+    bool became_idle = false;
+    portENTER_CRITICAL(&s_auto_scan_state_lock);
+    if (s_ap_client_count > 0) {
+        s_ap_client_count--;
+        became_idle = s_ap_client_count == 0;
+    }
+    portEXIT_CRITICAL(&s_auto_scan_state_lock);
+    return became_idle;
+}
+
+static bool auto_scan_begin_if_allowed(void)
+{
+    bool allowed;
+    bool ap_service_active = auto_scan_ap_service_active_locked();
+    portENTER_CRITICAL(&s_auto_scan_state_lock);
+    allowed = !ap_service_active || s_ap_client_count == 0;
+    if (allowed) {
+        s_auto_scan_in_progress = true;
+        s_auto_scan_cancel_requested = false;
+        s_auto_scan_started = false;
+    }
+    portEXIT_CRITICAL(&s_auto_scan_state_lock);
+    return allowed;
+}
+
+static bool auto_scan_mark_started(void)
+{
+    bool cancel_requested;
+    portENTER_CRITICAL(&s_auto_scan_state_lock);
+    cancel_requested = s_auto_scan_cancel_requested;
+    s_auto_scan_started = !cancel_requested;
+    portEXIT_CRITICAL(&s_auto_scan_state_lock);
+    return cancel_requested;
+}
+
+static bool auto_scan_end(void)
+{
+    bool cancelled;
+    portENTER_CRITICAL(&s_auto_scan_state_lock);
+    cancelled = s_auto_scan_cancel_requested;
+    s_auto_scan_in_progress = false;
+    s_auto_scan_cancel_requested = false;
+    s_auto_scan_started = false;
+    portEXIT_CRITICAL(&s_auto_scan_state_lock);
+    return cancelled;
 }
 
 static void clear_pending_save_locked(void)
@@ -442,6 +529,9 @@ static bool auto_scan_should_run_locked(system_net_mode_t *target_mode,
     if (target != SYSTEM_NET_STA && target != SYSTEM_NET_APSTA) {
         return false;
     }
+    if (auto_scan_ap_service_active_locked() && ap_client_count() > 0) {
+        return false;
+    }
     if (s_sta_ssid[0] == '\0' || s_sta_connected || s_sta_connecting) {
         return false;
     }
@@ -498,21 +588,26 @@ static void auto_scan_timer_cb(void *arg)
     (void)arg;
     bool start_task = false;
 
-    if (lock_mode(0) == pdTRUE) {
-        if (!s_auto_scan_task_running &&
-            auto_scan_should_run_locked(NULL, NULL, 0, NULL, 0)) {
-            s_auto_scan_task_running = true;
-            start_task = true;
+    if (lock_mode(0) != pdTRUE) {
+        if (ap_client_count() == 0 && s_auto_scan_timer != NULL) {
+            (void)esp_timer_start_once(s_auto_scan_timer,
+                                       WIFI_MANAGER_AUTO_SCAN_IMMEDIATE_MS * 1000ULL);
         }
-        unlock_mode();
+        return;
     }
+    if (!s_auto_scan_task_running &&
+        auto_scan_should_run_locked(NULL, NULL, 0, NULL, 0)) {
+        s_auto_scan_task_running = true;
+        start_task = true;
+    }
+    unlock_mode();
 
     if (!start_task) {
         return;
     }
     if (xTaskCreate(auto_scan_task, "wifi_auto_scan", 4096,
                     NULL, 3, NULL) != pdPASS) {
-        if (lock_mode(pdMS_TO_TICKS(50)) == pdTRUE) {
+        if (lock_mode(portMAX_DELAY) == pdTRUE) {
             s_auto_scan_task_running = false;
             if (s_auto_scan_failures < UINT8_MAX) {
                 s_auto_scan_failures++;
@@ -522,6 +617,90 @@ static void auto_scan_timer_cb(void *arg)
         }
         ESP_LOGW(TAG, "Failed to create WiFi auto scan task");
     }
+}
+
+static bool advance_auto_scan_channel_locked(void)
+{
+    s_auto_scan_channel_index++;
+    if (s_auto_scan_channel_index >= sizeof(s_auto_scan_channels)) {
+        s_auto_scan_channel_index = 0;
+        return true;
+    }
+    return false;
+}
+
+static esp_err_t auto_scan_saved_channel(const char *ssid, uint8_t channel,
+                                         bool *found)
+{
+    if (ssid == NULL || ssid[0] == '\0' || found == NULL ||
+        channel == 0 || channel > 13) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *found = false;
+    if (s_mode_mutex == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (xSemaphoreTake(s_mode_mutex, pdMS_TO_TICKS(3000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    if (!auto_scan_begin_if_allowed()) {
+        xSemaphoreGive(s_mode_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    wifi_scan_config_t scan_config = {
+        .ssid = (uint8_t *)ssid,
+        .channel = channel,
+        .show_hidden = false,
+        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+        .scan_time.active.min = WIFI_ACTIVE_SCAN_MIN_DEFAULT_TIME,
+        .scan_time.active.max = WIFI_ACTIVE_SCAN_MAX_DEFAULT_TIME,
+        .home_chan_dwell_time = WIFI_MANAGER_SCAN_HOME_DWELL_MS,
+        .coex_background_scan = true,
+    };
+    int64_t scan_started_us = esp_timer_get_time();
+    bool cancel_before_start = auto_scan_mark_started();
+    esp_err_t ret;
+    if (cancel_before_start) {
+        ret = ESP_ERR_INVALID_STATE;
+    } else {
+        ret = esp_wifi_scan_start(&scan_config, true);
+    }
+    bool scan_started = ret == ESP_OK;
+    bool scan_cancelled = auto_scan_end();
+    int64_t scan_duration_ms = (esp_timer_get_time() - scan_started_us) / 1000;
+    uint16_t ap_count = 0;
+
+    if (scan_cancelled) {
+        ret = ESP_ERR_INVALID_STATE;
+    }
+
+    if (ret == ESP_OK) {
+        ret = esp_wifi_scan_get_ap_num(&ap_count);
+        if (ret == ESP_OK) {
+            *found = ap_count > 0;
+        }
+    }
+    if (scan_started) {
+        esp_err_t clear_ret = esp_wifi_clear_ap_list();
+        if (ret == ESP_OK && clear_ret != ESP_OK) {
+            ret = clear_ret;
+        }
+    }
+
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Auto scan channel=%u duration=%lldms found=%s",
+                 (unsigned)channel, (long long)scan_duration_ms,
+                 *found ? "yes" : "no");
+    } else {
+        ESP_LOGW(TAG, "Auto scan channel=%u failed: %s duration=%lldms",
+                 (unsigned)channel, esp_err_to_name(ret),
+                 (long long)scan_duration_ms);
+    }
+
+    xSemaphoreGive(s_mode_mutex);
+    return ret;
 }
 
 static void auto_scan_task(void *arg)
@@ -534,28 +713,20 @@ static void auto_scan_task(void *arg)
     bool found_saved = false;
     esp_err_t scan_ret = ESP_OK;
     esp_err_t connect_ret = ESP_FAIL;
-    wifi_manager_scan_ap_t aps[WIFI_MANAGER_SCAN_MAX_APS];
-    size_t ap_count = 0;
+    uint8_t scan_channel = s_auto_scan_channels[0];
 
     if (lock_mode(pdMS_TO_TICKS(100)) == pdTRUE) {
         should_scan = auto_scan_should_run_locked(&target_mode,
                                                   saved_ssid, sizeof(saved_ssid),
                                                   saved_pass, sizeof(saved_pass));
+        scan_channel = s_auto_scan_channels[s_auto_scan_channel_index];
         unlock_mode();
     }
     if (!should_scan) {
         goto finish;
     }
 
-    scan_ret = wifi_manager_scan(aps, WIFI_MANAGER_SCAN_MAX_APS, &ap_count);
-    if (scan_ret == ESP_OK) {
-        for (size_t i = 0; i < ap_count; i++) {
-            if (strcmp(aps[i].ssid, saved_ssid) == 0) {
-                found_saved = true;
-                break;
-            }
-        }
-    }
+    scan_ret = auto_scan_saved_channel(saved_ssid, scan_channel, &found_saved);
 
     if (found_saved) {
         ESP_LOGI(TAG, "Auto scan found saved SSID %s; reconnecting as %s",
@@ -569,13 +740,22 @@ static void auto_scan_task(void *arg)
     }
 
 finish:
-    if (lock_mode(pdMS_TO_TICKS(100)) == pdTRUE) {
+    if (lock_mode(portMAX_DELAY) == pdTRUE) {
         s_auto_scan_task_running = false;
         if (should_scan && connect_ret != ESP_OK) {
-            if (s_auto_scan_failures < UINT8_MAX) {
-                s_auto_scan_failures++;
+            if (auto_scan_ap_service_active_locked() && ap_client_count() > 0) {
+                stop_auto_scan_locked();
+            } else if (scan_ret == ESP_ERR_INVALID_STATE) {
+                schedule_auto_scan_locked(WIFI_MANAGER_AUTO_SCAN_IMMEDIATE_MS);
+            } else {
+                bool completed_sweep = advance_auto_scan_channel_locked();
+                if (completed_sweep && s_auto_scan_failures < UINT8_MAX) {
+                    s_auto_scan_failures++;
+                }
+                schedule_auto_scan_locked(completed_sweep ?
+                                          auto_scan_delay_for_target(target_mode) :
+                                          WIFI_MANAGER_AUTO_SCAN_CHANNEL_GAP_MS);
             }
-            schedule_auto_scan_locked(auto_scan_delay_for_target(target_mode));
         }
         unlock_mode();
     }
@@ -776,14 +956,15 @@ esp_err_t wifi_manager_scan(wifi_manager_scan_ap_t *out, size_t capacity,
     wifi_scan_config_t scan_config = {
         .show_hidden = false,
         .scan_type = WIFI_SCAN_TYPE_ACTIVE,
-        .scan_time.active.min = WIFI_MANAGER_SCAN_ACTIVE_MIN_MS,
-        .scan_time.active.max = WIFI_MANAGER_SCAN_ACTIVE_MAX_MS,
+        .scan_time.active.min = WIFI_ACTIVE_SCAN_MIN_DEFAULT_TIME,
+        .scan_time.active.max = WIFI_ACTIVE_SCAN_MAX_DEFAULT_TIME,
         /*
-         * In APSTA mode the radio leaves the SoftAP channel while scanning.
-         * Use the maximum allowed home-channel dwell so clients can keep
-         * receiving ESP32 AP beacons between scanned channels.
+         * Bluetooth coexistence requires the driver default scan timing.
+         * Return to the SoftAP home channel between scanned channels so AP
+         * clients continue receiving beacons while BLE is active.
          */
         .home_chan_dwell_time = WIFI_MANAGER_SCAN_HOME_DWELL_MS,
+        .coex_background_scan = true,
     };
     scan_started_us = esp_timer_get_time();
     ret = esp_wifi_scan_start(&scan_config, true);
@@ -1128,7 +1309,37 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data)
 {
     (void)arg;
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STACONNECTED) {
+        wifi_event_ap_staconnected_t *event =
+            (wifi_event_ap_staconnected_t *)event_data;
+        bool stop_in_flight_scan = note_ap_client_connected();
+        if (lock_mode(0) == pdTRUE) {
+            stop_auto_scan_locked();
+            unlock_mode();
+        }
+        if (stop_in_flight_scan) {
+            (void)esp_wifi_scan_stop();
+        }
+        ESP_LOGI(TAG, "SoftAP client connected, aid=%d clients=%u; auto scan paused",
+                 event ? event->aid : -1, (unsigned)ap_client_count());
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+        wifi_event_ap_stadisconnected_t *event =
+            (wifi_event_ap_stadisconnected_t *)event_data;
+        bool resume_auto_scan = note_ap_client_disconnected();
+        if (resume_auto_scan) {
+            if (lock_mode(pdMS_TO_TICKS(50)) == pdTRUE) {
+                schedule_auto_scan_locked(WIFI_MANAGER_AUTO_SCAN_IMMEDIATE_MS);
+                unlock_mode();
+            } else if (s_auto_scan_timer != NULL) {
+                (void)esp_timer_stop(s_auto_scan_timer);
+                (void)esp_timer_start_once(s_auto_scan_timer,
+                                           WIFI_MANAGER_AUTO_SCAN_IMMEDIATE_MS * 1000ULL);
+            }
+        }
+        ESP_LOGI(TAG, "SoftAP client disconnected, aid=%d clients=%u; auto scan %s",
+                 event ? event->aid : -1, (unsigned)ap_client_count(),
+                 resume_auto_scan ? "resumed" : "paused");
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *event = (wifi_event_sta_disconnected_t *)event_data;
         ESP_LOGW(TAG, "STA disconnected, reason=%d", event ? event->reason : -1);
         bool should_retry = false;
@@ -1234,13 +1445,26 @@ esp_err_t wifi_manager_init(const wifi_manager_config_t *config)
     if (s_mode_mutex == NULL) {
         return ESP_ERR_NO_MEM;
     }
-
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ret = esp_wifi_init(&cfg);
     if (ret != ESP_OK) {
         return ret;
     }
+    ret = esp_wifi_set_country_code(WIFI_MANAGER_COUNTRY_CODE, true);
+    if (ret != ESP_OK) {
+        return ret;
+    }
     ret = esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED,
+                                              &wifi_event_handler, NULL, NULL);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    ret = esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_AP_STACONNECTED,
+                                              &wifi_event_handler, NULL, NULL);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    ret = esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_AP_STADISCONNECTED,
                                               &wifi_event_handler, NULL, NULL);
     if (ret != ESP_OK) {
         return ret;
