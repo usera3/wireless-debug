@@ -6,6 +6,8 @@ The firmware provides UART transparent transmission over BLE SPP and WiFi WebSoc
 
 The `oled-smooth-ui-20260730` branch is the hardware-verified checkpoint for
 continuous local/cloud oscilloscope transport and smooth LVGL OLED menu motion.
+The `wifi-provisioning-fix-20260803` branch builds on that checkpoint with the
+WiFi provisioning and SoftAP continuity fixes documented below.
 
 ## Current Hardware
 
@@ -233,6 +235,13 @@ the connection-status delay and SoftAP disruption seen when the browser submits
 STA credentials; they do not change the oscilloscope sample format or waveform
 rendering path.
 
+| Item | Ref |
+|------|-----|
+| August fix branch | `wifi-provisioning-fix-20260803` |
+| Comparison branch and previous tip | `oled-smooth-ui-20260730` at `b3b3b23` |
+| WiFi status delivery fix | `3f40dd5` |
+| SoftAP-preserving reconnect fix | `a342545` |
+
 Compared with the 2026-07-30 baseline:
 
 - The browser no longer has to wait tens of seconds (and sometimes up to a
@@ -337,7 +346,8 @@ Common endpoints:
 
 | Purpose | Ref |
 |---------|-----|
-| Current recovery branch | `oled-smooth-ui-20260730` |
+| August WiFi provisioning branch | `wifi-provisioning-fix-20260803` |
+| July 30 OLED baseline branch | `oled-smooth-ui-20260730` |
 | Hardware-verified OLED firmware | `stable-oled-smooth-ui-20260730` |
 | Verified oscilloscope pacing baseline | `stable-osc-pacing-20260730` |
 | Verified WiFi provisioning fix | `a342545` (includes `3f40dd5`) |
