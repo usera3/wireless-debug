@@ -187,7 +187,15 @@
         const connectEl = document.getElementById("connect");
         const statusEl = document.getElementById("status");
         const apListEl = document.getElementById("apList");
+        const CONNECT_STATUS_TIMEOUT_MS = 1500;
+        const CONNECT_POLL_INITIAL_DELAY_MS = 600;
+        const CONNECT_POLL_RETRY_MS = 300;
+        const CONNECT_FAILURE_GRACE_MS = 4000;
+        const STATUS_WS_RECONNECT_MS = 350;
         let pollTimer = 0;
+        let pollGeneration = 0;
+        let statusSocket = null;
+        let statusSocketReconnectTimer = 0;
 
         function setBusy(busy) {
           scanEl.disabled = busy;
@@ -231,14 +239,18 @@
         }
 
         function stopPolling() {
+          pollGeneration += 1;
           if (pollTimer) {
-            clearInterval(pollTimer);
+            clearTimeout(pollTimer);
             pollTimer = 0;
           }
         }
 
-        async function loadStatus() {
-          const data = await jsonFetch("/api/wifi/status");
+        function fetchWifiStatus(timeoutMs = 4500) {
+          return jsonFetch("/api/wifi/status", {}, timeoutMs);
+        }
+
+        function renderWifiStatus(data) {
           if (data.sta_ssid && !ssidEl.value) ssidEl.value = data.sta_ssid;
           if (data.sta_connected) {
             setStatus(`connected: ${data.sta_ssid || "-"} ${data.sta_ip || ""}`);
@@ -249,6 +261,63 @@
           } else {
             setStatus(`AP ready: ${data.ap_ssid || "ESP32-S3_AP"}`);
           }
+        }
+
+        function statusSocketUrl() {
+          const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+          return `${protocol}//${location.host}/ws/wifi-status`;
+        }
+
+        function scheduleStatusSocketReconnect() {
+          if (statusSocketReconnectTimer || document.visibilityState === "hidden") return;
+          statusSocketReconnectTimer = setTimeout(() => {
+            statusSocketReconnectTimer = 0;
+            openStatusSocket();
+          }, STATUS_WS_RECONNECT_MS);
+        }
+
+        function openStatusSocket() {
+          if (
+            statusSocket &&
+            (statusSocket.readyState === WebSocket.OPEN ||
+              statusSocket.readyState === WebSocket.CONNECTING)
+          ) {
+            return;
+          }
+
+          let socket;
+          try {
+            socket = new WebSocket(statusSocketUrl());
+          } catch (err) {
+            scheduleStatusSocketReconnect();
+            return;
+          }
+          statusSocket = socket;
+          socket.onmessage = (event) => {
+            if (socket !== statusSocket) return;
+            try {
+              const data = JSON.parse(event.data);
+              if (!data || data.type !== "wifi_status") return;
+              renderWifiStatus(data);
+              if (data.sta_connected) {
+                stopPolling();
+                setBusy(false);
+              }
+            } catch (err) {
+              // HTTP polling remains active if a malformed push is received.
+            }
+          };
+          socket.onclose = () => {
+            if (socket === statusSocket) statusSocket = null;
+            scheduleStatusSocketReconnect();
+          };
+          socket.onerror = () => socket.close();
+        }
+
+        async function loadStatus(statusToken = pollGeneration) {
+          const data = await fetchWifiStatus();
+          if (statusToken !== pollGeneration) return data;
+          renderWifiStatus(data);
           return data;
         }
 
@@ -331,27 +400,48 @@
 
         function pollConnect(targetSsid) {
           stopPolling();
+          const pollToken = pollGeneration;
+          const failureGraceDeadline = Date.now() + CONNECT_FAILURE_GRACE_MS;
           const deadline = Date.now() + 120000;
-          pollTimer = setInterval(async () => {
+
+          const pollOnce = async () => {
+            pollTimer = 0;
+            if (pollToken !== pollGeneration) return;
+
             try {
-              const data = await loadStatus();
+              const data = await fetchWifiStatus(CONNECT_STATUS_TIMEOUT_MS);
+              if (pollToken !== pollGeneration) return;
+              renderWifiStatus(data);
               if (data.sta_connected) {
                 stopPolling();
                 setBusy(false);
-              } else if (!data.sta_connecting) {
+                return;
+              }
+              if (!data.sta_connecting && Date.now() >= failureGraceDeadline) {
                 stopPolling();
                 setBusy(false);
                 setStatus(`failed: ${targetSsid || data.sta_ssid || "-"}`);
+                return;
+              }
+              if (!data.sta_connecting) {
+                setStatus(`connecting: ${targetSsid || data.sta_ssid || "-"}`);
               }
             } catch (err) {
+              if (pollToken !== pollGeneration) return;
               setStatus(`${formatNetworkError(err)}...`);
             }
+
             if (Date.now() >= deadline) {
               stopPolling();
               setBusy(false);
               setStatus(`connect timeout: ${targetSsid || "-"}`);
+              return;
             }
-          }, 1500);
+
+            pollTimer = setTimeout(pollOnce, CONNECT_POLL_RETRY_MS);
+          };
+
+          pollTimer = setTimeout(pollOnce, CONNECT_POLL_INITIAL_DELAY_MS);
         }
 
         form.addEventListener("submit", async (event) => {
@@ -362,6 +452,7 @@
             setStatus("missing ssid");
             return;
           }
+          stopPolling();
           setBusy(true);
           setStatus("connecting... AP may reconnect");
           try {
@@ -402,7 +493,17 @@
 
         scanEl.addEventListener("click", scanWifi);
 
-        loadStatus().catch((err) => setStatus(`status failed: ${err.message}`));
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") openStatusSocket();
+        });
+        openStatusSocket();
+
+        const initialStatusToken = pollGeneration;
+        loadStatus(initialStatusToken).catch((err) => {
+          if (initialStatusToken === pollGeneration) {
+            setStatus(`status failed: ${err.message}`);
+          }
+        });
       })();
     </script>
   </body>

@@ -44,6 +44,7 @@
 #include "web_api.h"
 #include "web_static.h"
 #include "wifi_manager.h"
+#include "wifi_status_ws.h"
 #include "wifi_transport.h"
 #include "freertos/FreeRTOS.h"
 #include "esp_heap_caps.h"
@@ -834,6 +835,11 @@ static void start_webserver(void)
         ESP_LOGW(TAG, "WebSocket handler failed to register: %s",
                  esp_err_to_name(ws_ret));
     }
+    esp_err_t status_ws_ret = wifi_status_ws_register(g_server);
+    if (status_ws_ret != ESP_OK) {
+        ESP_LOGW(TAG, "WiFi status WebSocket handler failed to register: %s",
+                 esp_err_to_name(status_ws_ret));
+    }
     esp_err_t static_ret = web_static_register_handlers(g_server);
     if (static_ret != ESP_OK) {
         ESP_LOGW(TAG, "Some static/file handlers failed to register: %s",
@@ -863,7 +869,7 @@ static void wifi_manager_label_changed(const char *label, void *ctx)
     display_lvgl_set_wifi_ssid(label);
 }
 
-static void wifi_manager_state_changed(const wifi_manager_status_t *status, void *ctx)
+static void wifi_manager_wifi_state_changed(const wifi_manager_status_t *status, void *ctx)
 {
     (void)ctx;
     if (status == NULL) {
@@ -874,6 +880,7 @@ static void wifi_manager_state_changed(const wifi_manager_status_t *status, void
                                 status->sta_ip,
                                 status->sta_connecting,
                                 status->sta_connected);
+    wifi_status_ws_publish(status);
     cloud_mqtt_notify_wifi_state(status);
     cloud_ws_uplink_notify_wifi_state(status);
 }
@@ -992,7 +999,7 @@ void app_main(void)
         .on_net_mode = wifi_manager_net_mode_changed,
         .on_message = wifi_manager_message_changed,
         .on_wifi_label = wifi_manager_label_changed,
-        .on_wifi_state = wifi_manager_state_changed,
+        .on_wifi_state = wifi_manager_wifi_state_changed,
         .on_status = wifi_manager_status_changed,
         .ctx = NULL,
     };
