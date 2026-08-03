@@ -225,6 +225,52 @@ Known cosmetic edge: immediately reversing a forward page transition during its
 200ms animation can let the returning content finish in the original direction.
 Normal physical-button operation did not expose a jump or crash.
 
+## 2026-08-03 WiFi Provisioning Fixes
+
+This branch keeps the 2026-07-30 OLED and oscilloscope baseline and adds a
+hardware-verified fix for the WiFi provisioning workflow. The changes address
+the connection-status delay and SoftAP disruption seen when the browser submits
+STA credentials; they do not change the oscilloscope sample format or waveform
+rendering path.
+
+Compared with the 2026-07-30 baseline:
+
+- The browser no longer has to wait tens of seconds (and sometimes up to a
+  minute or more) after the OLED already reports that STA has connected. The
+  firmware now exposes a dedicated `/ws/wifi-status` WebSocket, sends an
+  immediate status snapshot, and publishes subsequent state changes.
+- The provisioning page uses the WebSocket as its primary status path and a
+  sequential, short-timeout HTTP poll as a fallback. Poll generations prevent
+  late responses from an earlier connection attempt from overwriting the
+  current result, and polling stops as soon as `sta_connected` is reported.
+- When the device is already running APSTA, reconnecting STA credentials now
+  disconnects and reconfigures only the STA interface in place. It no longer
+  needlessly reapplies APSTA mode or rewrites the SoftAP configuration, which
+  avoids invalidating the browser's existing connection to `192.168.4.1`.
+- The browser's success/failure state is now driven by the same firmware WiFi
+  state callback that updates the OLED and cloud transports, instead of relying
+  only on a delayed HTTP observation.
+
+The earlier scan-stability work from the July 31 branch tip remains in place:
+APSTA mode is preserved during scans, scans are suppressed while an AP client
+is active, and the SoftAP home-channel dwell is bounded for reliable beacons.
+
+Verification for this increment:
+
+```text
+node scripts/wifi_page_regression.mjs
+node scripts/wifi_status_push_regression.mjs
+python3 scripts/wifi_apsta_reconnect_regression.py
+node scripts/wifi_true_modes_regression.mjs
+git diff --check
+ninja -C build-wifi-status -j 8
+```
+
+All listed regressions passed. The resulting firmware was flashed and checked
+on an ESP32-S3: the device came up in APSTA mode, both AP and STA HTTP endpoints
+returned 200, the status WebSocket delivered its initial snapshot immediately,
+and the board's `wifi.html` and `orig/a.js` matched the local SPIFFS sources.
+
 ## Partition Table
 
 | Name | Type | Offset | Size | Purpose |
@@ -294,4 +340,5 @@ Common endpoints:
 | Current recovery branch | `oled-smooth-ui-20260730` |
 | Hardware-verified OLED firmware | `stable-oled-smooth-ui-20260730` |
 | Verified oscilloscope pacing baseline | `stable-osc-pacing-20260730` |
+| Verified WiFi provisioning fix | `a342545` (includes `3f40dd5`) |
 | Previous OLED/oscilloscope baseline | `stable-osc-ui-20260707` |
