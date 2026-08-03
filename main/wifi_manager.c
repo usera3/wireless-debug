@@ -879,7 +879,17 @@ static esp_err_t start_apsta_connect_locked(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t ret = start_apsta_locked();
+    bool preserve_apsta = s_driver_started && s_net_mode == SYSTEM_NET_APSTA;
+    esp_err_t ret;
+    if (preserve_apsta) {
+        esp_err_t disconnect_ret = esp_wifi_disconnect();
+        if (disconnect_ret != ESP_OK && disconnect_ret != ESP_ERR_WIFI_NOT_CONNECT) {
+            return disconnect_ret;
+        }
+        ret = configure_sta_locked();
+    } else {
+        ret = start_apsta_locked();
+    }
     if (ret != ESP_OK) {
         return ret;
     }
