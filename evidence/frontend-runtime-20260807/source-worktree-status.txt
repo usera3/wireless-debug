@@ -1,0 +1,54 @@
+ M package.json
+ M reference/mcu_code/lwmb.c
+ M scripts/cloud-waveform-integrity-replay.ts
+ M scripts/frame-router-regression.ts
+ M scripts/osc-fast-start-regression.ts
+ M scripts/osc-local-pacing-regression.ts
+ M scripts/osc-pipeline-replay.ts
+ M scripts/osc-real-time-axis-regression.ts
+ M scripts/osc-request-regression.ts
+ M scripts/parameter-source-policy-regression.ts
+ M src/components/BootloaderPage.tsx
+ M src/components/DashboardPage.tsx
+ M src/components/EspFilePicker.tsx
+ M src/components/ModbusOscPage.tsx
+ M src/components/OscChannelConfig.tsx
+ M src/components/OscChart.tsx
+ M src/components/OscilloscoperPage.tsx
+ M src/components/ParamPage.tsx
+ M src/hooks/useOscController.ts
+ M src/lib/blModbusClient.ts
+ M src/lib/flasher.ts
+ M src/lib/oscRequest.ts
+ M src/lib/oscilloscope.ts
+ M src/lib/paramParser.ts
+ M src/lib/parameterSourcePolicy.ts
+ M src/store/modbusOscStore.ts
+ M src/store/oscStore.ts
+?? .claude/
+?? AGENTS.md
+?? CLAUDE.md
+?? fixtures/cloud-waveform-integrity-20260729-144138.analysis.json
+?? fixtures/cloud-waveform-integrity-20260729-144138.bin.gz
+?? fixtures/cloud-waveform-integrity-20260729-144603.analysis.json
+?? fixtures/osc-c52c-local-30s-cdp-20260727.analysis.json
+?? fixtures/osc-c52c-local-30s-cdp-20260727.json.gz
+?? fixtures/osc-c52c-local-30s-cdp-20260727.png
+?? fixtures/osc_20260727_180715.csv
+?? fixtures/param_osc_20260727_180625.csv
+?? scripts/bootloader-cloud-timeout-regression.ts
+?? scripts/osc-channel-types-regression.ts
+?? scripts/osc-display-format-regression.ts
+?? scripts/osc-view-window-regression.ts
+?? scripts/osc-zoom-anchor-regression.ts
+?? scripts/param-parser-regression.ts
+?? scripts/parameter-filename-regression.ts
+?? scripts/parameter-table-data-regression.ts
+?? scripts/parameter-upload-regression.ts
+?? src/lib/oscChannelHandshake.ts
+?? src/lib/oscChannelTypes.ts
+?? src/lib/oscDisplay.ts
+?? src/lib/oscZoom.ts
+?? src/lib/parameterFileUpload.ts
+?? src/lib/parameterFilename.ts
+?? src/lib/parameterTableData.ts

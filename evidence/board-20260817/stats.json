@@ -1,0 +1,53 @@
+{
+  "ok": true,
+  "uart": {
+    "rx_frames": 150274,
+    "rx_bytes": 37579436,
+    "tx_bytes": 6320,
+    "tx_failures": 0,
+    "overflows": 0,
+    "fifo_overflows": 0,
+    "buffer_full_overflows": 0,
+    "overflow_assemble_bytes": 0,
+    "overflow_driver_bytes": 0,
+    "last_overflow_event": 0,
+    "last_overflow_assemble_bytes": 0,
+    "last_overflow_driver_bytes": 0,
+    "dispatch_calls": 150274,
+    "dispatch_total_us": 72728147,
+    "dispatch_max_us": 15359,
+    "cloud_route_calls": 150274,
+    "cloud_route_total_us": 21596724,
+    "cloud_route_max_us": 4984,
+    "local_route_calls": 150274,
+    "local_route_total_us": 15504956,
+    "local_route_max_us": 4132
+  },
+  "ble": {
+    "rx_frames": 0,
+    "rx_bytes": 0,
+    "tx_bytes": 0,
+    "notify_failures": 0,
+    "no_subscriber_drops": 0,
+    "dropped_bytes": 0,
+    "alloc_failures": 0
+  },
+  "wifi": {
+    "rx_frames": 183,
+    "rx_bytes": 1464,
+    "tx_queued_bytes": 37579044,
+    "tx_sent_bytes": 37562544,
+    "tx_failures": 0,
+    "no_client_drops": 0,
+    "pool_exhausted": 0,
+    "queue_full": 0,
+    "httpd_queue_failures": 0,
+    "rx_failures": 1
+  },
+  "route": {
+    "idle_drops": 0,
+    "unavailable_drops": 49,
+    "partial_drops": 0,
+    "dropped_bytes": 392
+  }
+}

@@ -1,0 +1,1261 @@
+diff --git a/package.json b/package.json
+index 550a96a..da96ddc 100644
+--- a/package.json
++++ b/package.json
+@@ -9,6 +9,12 @@
+     "build:firmware-assets": "npm run build && node scripts/sync-firmware-dist.mjs",
+     "lint": "eslint .",
+     "test:frame-router": "esbuild scripts/frame-router-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/frame-router-regression.mjs && node node_modules/.tmp/frame-router-regression.mjs",
++    "test:osc-channel-types": "esbuild scripts/osc-channel-types-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/osc-channel-types-regression.mjs && node node_modules/.tmp/osc-channel-types-regression.mjs",
++    "test:bootloader-cloud-timeout": "esbuild scripts/bootloader-cloud-timeout-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/bootloader-cloud-timeout-regression.mjs && node node_modules/.tmp/bootloader-cloud-timeout-regression.mjs",
++    "test:param-parser": "esbuild scripts/param-parser-regression.ts --bundle --platform=node --format=esm --external:xlsx --outfile=node_modules/.tmp/param-parser-regression.mjs && node node_modules/.tmp/param-parser-regression.mjs",
++    "test:parameter-upload": "esbuild scripts/parameter-upload-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/parameter-upload-regression.mjs && node node_modules/.tmp/parameter-upload-regression.mjs",
++    "test:parameter-filename": "esbuild scripts/parameter-filename-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/parameter-filename-regression.mjs && node node_modules/.tmp/parameter-filename-regression.mjs",
++    "test:parameter-table-data": "esbuild scripts/parameter-table-data-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/parameter-table-data-regression.mjs && node node_modules/.tmp/parameter-table-data-regression.mjs",
+     "test:param-batch-read": "esbuild scripts/param-batch-read-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/param-batch-read-regression.mjs && node node_modules/.tmp/param-batch-read-regression.mjs",
+     "test:connection-panel": "esbuild scripts/connection-panel-copy-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/connection-panel-copy-regression.mjs && node node_modules/.tmp/connection-panel-copy-regression.mjs",
+     "test:connection-target": "esbuild scripts/connection-target-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/connection-target-regression.mjs && node node_modules/.tmp/connection-target-regression.mjs",
+@@ -29,6 +35,9 @@
+     "test:osc-pipeline-replay": "esbuild scripts/osc-pipeline-replay.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/osc-pipeline-replay.mjs && node node_modules/.tmp/osc-pipeline-replay.mjs",
+     "test:cloud-waveform-integrity": "esbuild scripts/cloud-waveform-integrity-replay.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/cloud-waveform-integrity-replay.mjs && node node_modules/.tmp/cloud-waveform-integrity-replay.mjs",
+     "test:osc-render-budget": "esbuild scripts/osc-render-budget-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/osc-render-budget-regression.mjs && node node_modules/.tmp/osc-render-budget-regression.mjs",
++    "test:osc-display-format": "esbuild scripts/osc-display-format-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/osc-display-format-regression.mjs && node node_modules/.tmp/osc-display-format-regression.mjs",
++    "test:osc-zoom-anchor": "esbuild scripts/osc-zoom-anchor-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/osc-zoom-anchor-regression.mjs && node node_modules/.tmp/osc-zoom-anchor-regression.mjs",
++    "test:osc-view-window": "esbuild scripts/osc-view-window-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/osc-view-window-regression.mjs && node node_modules/.tmp/osc-view-window-regression.mjs",
+     "test:osc-history-render-order": "esbuild scripts/osc-history-render-order-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/osc-history-render-order-regression.mjs && node node_modules/.tmp/osc-history-render-order-regression.mjs",
+     "test:osc-jitter-buffer": "esbuild scripts/osc-jitter-buffer-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/osc-jitter-buffer-regression.mjs && node node_modules/.tmp/osc-jitter-buffer-regression.mjs",
+     "test:osc-local-pacing": "esbuild scripts/osc-local-pacing-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/osc-local-pacing-regression.mjs && node node_modules/.tmp/osc-local-pacing-regression.mjs",
+diff --git a/reference/mcu_code/lwmb.c b/reference/mcu_code/lwmb.c
+index c0e3938..0886375 100644
+--- a/reference/mcu_code/lwmb.c
++++ b/reference/mcu_code/lwmb.c
+@@ -205,7 +205,7 @@ void lwmb_osc_sample()
+                     // 8位数据按16位处理，高位填0
+                     u8_temp                            = *((uint8_t *)abs_addr);
+                     lwmb_osc_sample_buf[index * 2]     = 0;               // 高字节
+-                    lwmb_osc_sample_buf[index * 2 + 1] = u16_temp & 0xFF; // 低字节
++                    lwmb_osc_sample_buf[index * 2 + 1] = u8_temp; // 低字节
+                     index += 1;
+                     break;
+                 case LWMB_OSC_PARA_TYPE_DEFAULT:
+diff --git a/scripts/cloud-waveform-integrity-replay.ts b/scripts/cloud-waveform-integrity-replay.ts
+index c055251..6e568c0 100644
+--- a/scripts/cloud-waveform-integrity-replay.ts
++++ b/scripts/cloud-waveform-integrity-replay.ts
+@@ -16,7 +16,7 @@ const raw = gunzipSync(readFileSync(CAPTURE_PATH));
+ assert.equal(createHash('sha256').update(raw).digest('hex'), EXPECTED_SHA256);
+ 
+ const router = new FrameRouter();
+-const descriptors = Array.from({ length: 4 }, () => ({ byteWidth: 2, paramType: 0 }));
++const descriptors = Array.from({ length: 4 }, () => ({ typeKey: 'default-int16' as const }));
+ let frames = 0;
+ let samples = 0;
+ let discontinuities = 0;
+diff --git a/scripts/frame-router-regression.ts b/scripts/frame-router-regression.ts
+index fd1fdae..cca7cdd 100644
+--- a/scripts/frame-router-regression.ts
++++ b/scripts/frame-router-regression.ts
+@@ -101,7 +101,7 @@ for (const splitOffset of [1, 2, 3]) {
+   oscFrame.fill(0, 246, 250);
+   const parsed = parseOscDataFrame(
+     oscFrame,
+-    [{ byteWidth: 2, paramType: 0x00 }],
++    [{ typeKey: 'default-int16' }],
+     { requireCrc: true },
+   );
+ 
+@@ -111,7 +111,7 @@ for (const splitOffset of [1, 2, 3]) {
+ 
+ {
+   const oscFrame = makeOscFrame(12);
+-  oscFrame[4] = 0xff;
++  oscFrame[4] = 0x00;
+   oscFrame[5] = 0xfe;
+   const payloadCrc = crc16(oscFrame.slice(4, 6));
+   oscFrame[6] = payloadCrc & 0xff;
+@@ -119,14 +119,14 @@ for (const splitOffset of [1, 2, 3]) {
+ 
+   const parsed = parseOscDataFrame(
+     oscFrame,
+-    [{ byteWidth: 2, paramType: 0x01 }],
++    [{ typeKey: 'uint8' }],
+     { requireCrc: true },
+   );
+ 
+   assert.deepEqual(
+     parsed?.channels,
+-    [[0xfffe]],
+-    'unsigned 16-bit osc channels must retain values above Int16.MAX_VALUE',
++    [[0xfe]],
++    '0x01 channels carry an unsigned 8-bit value in a two-byte slot',
+   );
+ }
+ 
+@@ -232,7 +232,7 @@ for (const splitOffset of [1, 2, 3]) {
+ 
+   assert.equal(frames.length, 0, 'zero footer must not bypass an invalid CRC');
+   assert.equal(
+-    parseOscDataFrame(oscFrame, [{ byteWidth: 2, paramType: 0x00 }]),
++    parseOscDataFrame(oscFrame, [{ typeKey: 'default-int16' }]),
+     null,
+     'parser must reject a frame when both CRC and footer are invalid',
+   );
+@@ -252,7 +252,7 @@ for (const splitOffset of [1, 2, 3]) {
+ 
+   assert.equal(frames.length, 2, 'alternating valid boundary blocks must both be routed');
+   assert.notEqual(
+-    parseOscDataFrame(footerAnchored, [{ byteWidth: 2, paramType: 0x00 }], { requireCrc: true }),
++    parseOscDataFrame(footerAnchored, [{ typeKey: 'default-int16' }], { requireCrc: true }),
+     null,
+     'parser must accept a CRC-valid footer-anchored block',
+   );
+@@ -358,7 +358,7 @@ for (const splitOffset of [1, 2, 3]) {
+ 
+   assert.equal(frames.length, 0, 'CRC alone must not accept an unanchored block');
+   assert.equal(
+-    parseOscDataFrame(unanchored, [{ byteWidth: 2, paramType: 0x00 }]),
++    parseOscDataFrame(unanchored, [{ typeKey: 'default-int16' }]),
+     null,
+     'parser must reject a block with neither boundary',
+   );
+diff --git a/scripts/osc-fast-start-regression.ts b/scripts/osc-fast-start-regression.ts
+index 1ef64eb..40481fb 100644
+--- a/scripts/osc-fast-start-regression.ts
++++ b/scripts/osc-fast-start-regression.ts
+@@ -8,10 +8,21 @@ assert.match(source, /selectOscStartupMode/);
+ assert.match(source, /oscCapabilityCache/);
+ assert.match(source, /frameRouter\.onOscFrame[\s\S]*wsClient\.send\(buildStartOsc\(\)\)/,
+   'waveform handler must be registered before the start command');
+-assert.doesNotMatch(source, /cloud-cached[\s\S]{0,1800}await sendAndWait\(buildSetChannel/,
+-  'warm cloud startup must not wait for every channel ACK');
+-assert.match(source, /cloud-cached[\s\S]{0,3200}const request = buildSetChannel[\s\S]{0,300}wsClient\.send\(request\)/,
+-  'warm cloud startup must still send every channel configuration');
++assert.match(
++  source,
++  /const channelRequests = channels\.map\([\s\S]*?buildSetChannel\([\s\S]*?await configureOscChannels\([\s\S]*?target\.kind === 'cloud' \? 'parallel' : 'serial'/,
++  'cloud channel configuration must await all ACKs in parallel while local mode stays serial',
++);
++assert.doesNotMatch(
++  source,
++  /configureOscChannels\([\s\S]{0,300}sendAndWaitWithRetry/,
++  'non-idempotent channel configuration must not use the retrying query helper',
++);
++assert.match(
++  source,
++  /configureOscChannels\([\s\S]{0,300}\(request\) => sendAndWaitOnce\(request\)/,
++  'channel configuration must use the non-retrying ACK waiter',
++);
+ assert.match(
+   source,
+   /const stop = useCallback\(\(\) => \{[\s\S]*?oscPlaybackBuffer\.drainAll\(\)[\s\S]*?appendSamples\(playbackTail\.batch\)[\s\S]*?oscPlaybackBuffer\.clear\(\)/,
+diff --git a/scripts/osc-local-pacing-regression.ts b/scripts/osc-local-pacing-regression.ts
+index efefb7e..85a7c84 100644
+--- a/scripts/osc-local-pacing-regression.ts
++++ b/scripts/osc-local-pacing-regression.ts
+@@ -36,8 +36,7 @@ const channelNos = Array.from(
+   (_, index) => index + 1,
+ );
+ const descriptors = channelNos.map(() => ({
+-  byteWidth: 2,
+-  paramType: capture.config.param_type ?? 0,
++  typeKey: 'default-int16' as const,
+ }));
+ const router = new FrameRouter();
+ const playback = new OscJitterBuffer();
+diff --git a/scripts/osc-pipeline-replay.ts b/scripts/osc-pipeline-replay.ts
+index cdfd2b7..f7b6d60 100644
+--- a/scripts/osc-pipeline-replay.ts
++++ b/scripts/osc-pipeline-replay.ts
+@@ -84,10 +84,9 @@ function runReplay(mode: string, capture: Capture, chunks: ReplayChunk[]): Repla
+   const jitter = new OscJitterBuffer();
+   const channels = Array.from({ length: capture.config.channel_count }, (_, index) => ({
+     channelNo: index + 1,
+-    byteWidth: 2,
+-    paramType: 0,
++    typeKey: 'default-int16' as const,
+   }));
+-  const descriptors = channels.map(({ byteWidth, paramType }) => ({ byteWidth, paramType }));
++  const descriptors = channels.map(({ typeKey }) => ({ typeKey }));
+   const expectedHashes = capture.analysis.logical_frame_hashes_sha256;
+   const frameHashes: string[] = [];
+   const baseTimeMs = 1_000;
+diff --git a/scripts/osc-real-time-axis-regression.ts b/scripts/osc-real-time-axis-regression.ts
+index 7590b6b..3923aca 100644
+--- a/scripts/osc-real-time-axis-regression.ts
++++ b/scripts/osc-real-time-axis-regression.ts
+@@ -28,9 +28,8 @@ const addressStore = useOscStore.getState();
+ const addressChannel = {
+   channelNo: 1,
+   varAddr: 0xc52c,
+-  paramType: 0,
++  typeKey: 'default-int16' as const,
+   label: 'CH1',
+-  byteWidth: 2,
+ };
+ addressStore.resetHistory([addressChannel], 1000);
+ addressStore.appendSamples(
+diff --git a/scripts/osc-request-regression.ts b/scripts/osc-request-regression.ts
+index 4f16bfc..a7b3aea 100644
+--- a/scripts/osc-request-regression.ts
++++ b/scripts/osc-request-regression.ts
+@@ -1,5 +1,6 @@
+ import assert from 'node:assert/strict';
+ import { waitForOscResponse, waitForOscResponseWithRetry } from '../src/lib/oscRequest';
++import { buildSetChannel } from '../src/lib/oscilloscope';
+ 
+ type Handler = (frame: Uint8Array) => void;
+ 
+@@ -54,6 +55,22 @@ async function main() {
+     'same-function stale responses with implausible values must be ignored',
+   );
+ 
++  const channelRequest = buildSetChannel(1, 0x03, 0x1000);
++  const staleChannelAck = buildSetChannel(1, 0x00, 0x0000);
++  const channelPending = waitForOscResponse({
++    request: channelRequest,
++    timeoutMs: 80,
++    subscribe: (handler) => source.subscribe(handler),
++    send: () => {},
++  });
++  setTimeout(() => source.emit([...staleChannelAck]), 5);
++  setTimeout(() => source.emit([...channelRequest]), 20);
++  assert.deepEqual(
++    [...await channelPending],
++    [...channelRequest],
++    'a stale ACK for the same channel but a different type/address must be ignored',
++  );
++
+   await assert.rejects(
+     waitForOscResponse({
+       request,
+diff --git a/scripts/parameter-source-policy-regression.ts b/scripts/parameter-source-policy-regression.ts
+index b81183f..484bbee 100644
+--- a/scripts/parameter-source-policy-regression.ts
++++ b/scripts/parameter-source-policy-regression.ts
+@@ -5,14 +5,18 @@ const cloud = parameterSourcePolicy('cloud');
+ assert.equal(cloud.showLocalFilePicker, true, 'cloud users on phones and personal computers need local file access');
+ assert.equal(cloud.allowRemoteUpload, true, 'cloud users must be able to publish a parameter table');
+ assert.equal(cloud.allowRemoteDelete, true, 'cloud users must be able to manage server parameter tables');
+-assert.equal(cloud.autoLoadSingleRemoteFile, true);
++assert.equal(
++  'autoLoadSingleRemoteFile' in cloud,
++  false,
++  'the server table dialog must not contain a single-file auto-load path',
++);
+ assert.equal(cloud.remoteButtonLabel, '服务器参数表');
+ 
+ const local = parameterSourcePolicy('local');
+ assert.equal(local.showLocalFilePicker, true);
+ assert.equal(local.allowRemoteUpload, true);
+ assert.equal(local.allowRemoteDelete, true);
+-assert.equal(local.autoLoadSingleRemoteFile, false);
++assert.equal('autoLoadSingleRemoteFile' in local, false);
+ assert.equal(local.remoteButtonLabel, '设备参数表');
+ 
+ console.log('parameter source policy regression passed');
+diff --git a/src/components/BootloaderPage.tsx b/src/components/BootloaderPage.tsx
+index 725fb7d..b7ec53f 100644
+--- a/src/components/BootloaderPage.tsx
++++ b/src/components/BootloaderPage.tsx
+@@ -2,6 +2,8 @@ import { useRef, useState, useCallback, useEffect } from 'react';
+ import { useBootloaderStore } from '../store/bootloaderStore';
+ import { Flasher } from '../lib/flasher';
+ import { loadFirmwareDocument } from '../lib/firmwareDocument';
++import { currentConnectionTarget } from '../lib/apiClient';
++import { bootloaderResponseTimeoutMs } from '../lib/blModbusClient';
+ 
+ // ── Modals ────────────────────────────────────────────────────────────────────
+ 
+@@ -203,11 +205,12 @@ export function BootloaderPage() {
+   }, [logs]);
+ 
+   const makeFlasher = useCallback(() => {
++    const responseTimeoutMs = bootloaderResponseTimeoutMs(currentConnectionTarget().kind);
+     return new Flasher(0xff, {
+       onLog: (msg, type = 'info') => addLog(msg, type),
+       onStatus: (s, msg) => setStatus(s, msg),
+       onProgress: (_cur, _tot, pct) => setProgress(pct, `${pct}%`),
+-    });
++    }, { responseTimeoutMs });
+   }, [addLog, setStatus, setProgress]);
+ 
+   // ── Load firmware document ─────────────────────────────────────────────────
+diff --git a/src/components/DashboardPage.tsx b/src/components/DashboardPage.tsx
+index d1f5ec4..de8883c 100644
+--- a/src/components/DashboardPage.tsx
++++ b/src/components/DashboardPage.tsx
+@@ -4,8 +4,9 @@ import { GaugeChart } from './GaugeChart';
+ import { useDashboardPoller } from '../hooks/useDashboardPoller';
+ import { EspFilePicker } from './EspFilePicker';
+ import { parseParameterTable } from '../lib/paramParser';
+-import { currentConnectionTarget } from '../lib/apiClient';
++import { apiFetch, currentConnectionTarget } from '../lib/apiClient';
+ import { parameterSourcePolicy } from '../lib/parameterSourcePolicy';
++import { buildParameterUploadRequest } from '../lib/parameterFileUpload';
+ 
+ // 数码管风格的只读显示块
+ function DigitDisplay({ label, value, unit }: { label: string; value: string; unit?: string }) {
+@@ -39,7 +40,14 @@ export function DashboardPage() {
+   async function loadFile(file: File) {
+     setLoading(true);
+     try {
+-      const { params: p, pages: pg } = await parseParameterTable(file);
++      const parsed = await parseParameterTable(file);
++      if (currentConnectionTarget().kind === 'cloud') {
++        const request = await buildParameterUploadRequest('/api/excel/upload', file);
++        const { url, ...init } = request;
++        const response = await apiFetch(url, init);
++        if (!response.ok) throw new Error(`参数表上传失败：HTTP ${response.status}`);
++      }
++      const { params: p, pages: pg } = parsed;
+       loadParams(p, pg);
+       setActivePage(pg[0] ?? '');
+     } catch (err) {
+diff --git a/src/components/EspFilePicker.tsx b/src/components/EspFilePicker.tsx
+index 9a19ada..c2a2983 100644
+--- a/src/components/EspFilePicker.tsx
++++ b/src/components/EspFilePicker.tsx
+@@ -1,6 +1,12 @@
+ import { useEffect, useRef, useState } from 'react';
+-import { apiFetch, apiUrl } from '../lib/apiClient';
++import { apiFetch, apiUrl, currentConnectionTarget } from '../lib/apiClient';
+ import type { ParameterSourcePolicy } from '../lib/parameterSourcePolicy';
++import {
++  ESP_PARAMETER_FILENAME_MAX_BYTES,
++  getEspParameterFilenameTransportLength,
++  isEspParameterFilenameSupported,
++} from '../lib/parameterFilename';
++import { buildParameterUploadRequest } from '../lib/parameterFileUpload';
+ 
+ interface Props {
+   /** 选中并成功下载文件后的回调，传入 File 对象供 parseParameterTable 使用 */
+@@ -32,17 +38,16 @@ export function EspFilePicker({ onFileReady, onClose, policy }: Props) {
+       const list: string[] = await apiFetch('/api/excel/list').then((r) => r.json());
+       setFiles(list);
+       st(list.length ? `共 ${list.length} 个文件` : '', list.length ? 'ok' : '');
+-      if (policy.autoLoadSingleRemoteFile && list.length === 1) {
+-        await selectFile(list[0]);
+-      }
+     } catch (e) {
+       st(`❌ 获取列表失败：${(e as Error).message}`, 'err');
+     }
+   }
+ 
+   async function handleUpload(file: File) {
+-    if (file.name.length > 16) {
+-      st(`⚠️ 文件名过长（${file.name.length} 字符），SPIFFS 限制 16 字符以内`, 'err');
++    const isCloud = currentConnectionTarget().kind === 'cloud';
++    const filenameLength = getEspParameterFilenameTransportLength(file.name);
++    if (!isCloud && !isEspParameterFilenameSupported(file.name)) {
++      st(`⚠️ 文件名过长（${filenameLength} 字节），设备最多支持 ${ESP_PARAMETER_FILENAME_MAX_BYTES} 字节`, 'err');
+       return;
+     }
+     st(`正在上传 ${file.name}（${(file.size / 1024).toFixed(1)} KB）...`, 'ing');
+@@ -51,13 +56,20 @@ export function EspFilePicker({ onFileReady, onClose, policy }: Props) {
+       await new Promise<void>((resolve, reject) => {
+         const xhr = new XMLHttpRequest();
+         xhr.open('POST', apiUrl('/api/excel/upload'));
+-        xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
++        if (!isCloud) xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
+         xhr.upload.onprogress = (e) => {
+           if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 95));
+         };
+         xhr.onload = () => (xhr.status === 200 ? resolve() : reject(new Error(xhr.responseText)));
+         xhr.onerror = () => reject(new Error('网络错误'));
+-        xhr.send(file);
++        if (isCloud) {
++          void buildParameterUploadRequest('/api/excel/upload', file).then((request) => {
++            Object.entries(request.headers).forEach(([name, value]) => xhr.setRequestHeader(name, value));
++            xhr.send(request.body);
++          }).catch(reject);
++        } else {
++          xhr.send(file);
++        }
+       });
+       setProgress(100);
+       setTimeout(() => setProgress(0), 800);
+diff --git a/src/components/ModbusOscPage.tsx b/src/components/ModbusOscPage.tsx
+index 7d20d3e..6fe0cac 100644
+--- a/src/components/ModbusOscPage.tsx
++++ b/src/components/ModbusOscPage.tsx
+@@ -33,6 +33,7 @@ function formatMemory(bytes: number): string {
+ 
+ function formatDuration(seconds: number): string {
+   if (!Number.isFinite(seconds) || seconds <= 0) return '0s';
++  if (seconds < 1) return `${(seconds * 1000).toFixed(seconds < 0.1 ? 1 : 0)}ms`;
+   if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+   return `${(seconds / 60).toFixed(seconds < 600 ? 1 : 0)}min`;
+ }
+diff --git a/src/components/OscChannelConfig.tsx b/src/components/OscChannelConfig.tsx
+index 935a797..29f8192 100644
+--- a/src/components/OscChannelConfig.tsx
++++ b/src/components/OscChannelConfig.tsx
+@@ -1,24 +1,12 @@
+ import type { ChannelConfig, ChannelRowState } from '../store/oscStore';
+ import { useOscStore, defaultRow } from '../store/oscStore';
+ import { useParamStore } from '../store/paramStore';
+-
+-const PARAM_TYPES = [
+-  { value: 0x00, label: '0x00 int16' },
+-  { value: 0x01, label: '0x01 uint16' },
+-  { value: 0x02, label: '0x02 int32' },
+-  { value: 0x03, label: '0x03 float32' },
+-  { value: 0x04, label: '0x04 float64' },
+-  { value: 0x05, label: '0x05 float→Q14' },
+-  { value: 0x06, label: '0x06 float×1000' },
+-  { value: 0x07, label: '0x07 double→float' },
+-  { value: 0x08, label: '0x08 double→Q14' },
+-  { value: 0x09, label: '0x09 double×1000' },
+-];
+-
+-const BYTE_WIDTH_MAP: Record<number, number> = {
+-  0x00: 2, 0x01: 2, 0x02: 4, 0x03: 4, 0x04: 8,
+-  0x05: 2, 0x06: 2, 0x07: 4, 0x08: 2, 0x09: 2,
+-};
++import {
++  OSC_CHANNEL_TYPE_OPTIONS,
++  channelRowFromParam,
++  getOscChannelType,
++  parseOscAddressHex,
++} from '../lib/oscChannelTypes';
+ 
+ const MAX_CHANNELS = 12;
+ 
+@@ -37,10 +25,9 @@ const COMM_RATE_OPTIONS = [
+ export function buildChannelConfigs(rows: ChannelRowState[], numChannels: number): ChannelConfig[] {
+   return rows.slice(0, numChannels).map((r, i) => ({
+     channelNo: i + 1,
+-    varAddr: parseInt(r.varAddrHex, 16) || 0,
+-    paramType: r.paramType,
++    varAddr: parseOscAddressHex(r.varAddrHex),
++    typeKey: r.typeKey,
+     label: r.label,
+-    byteWidth: BYTE_WIDTH_MAP[r.paramType] ?? 2,
+   }));
+ }
+ 
+@@ -57,10 +44,7 @@ export function OscChannelConfig() {
+   function handleAliasInput(i: number, alias: string) {
+     const param = params.find((p) => p.alias === alias);
+     if (param) {
+-      setRow(i, {
+-        varAddrHex: param.regAddr.toString(16).padStart(4, '0').toUpperCase(),
+-        label: alias,
+-      });
++      setRow(i, channelRowFromParam(param));
+     } else {
+       setRow(i, { label: alias });
+     }
+@@ -79,6 +63,10 @@ export function OscChannelConfig() {
+   }
+ 
+   const activeRows = configRows.slice(0, numChannels);
++  const occupiedSlots = activeRows.reduce(
++    (total, row) => total + getOscChannelType(row.typeKey).slotCount,
++    0,
++  );
+ 
+   return (
+     <div className="space-y-2">
+@@ -95,6 +83,9 @@ export function OscChannelConfig() {
+             <option key={n} value={n}>{n}</option>
+           ))}
+         </select>
++        <span className="text-slate-500 text-xs tabular-nums">
++          占用槽位 {occupiedSlots}/{maxChannels}
++        </span>
+         <label className="text-slate-500 text-xs">通讯速率</label>
+         <select
+           value={commRateLimit}
+@@ -110,7 +101,7 @@ export function OscChannelConfig() {
+       {/* 手机单栏 / 桌面双栏 */}
+       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+         {activeRows.map((row, i) => (
+-          <div key={i} className="grid grid-cols-[1.2rem_1fr_1fr_1.5fr] gap-1 items-center">
++          <div key={i} className="grid grid-cols-[1.2rem_minmax(4rem,0.8fr)_minmax(7rem,1.4fr)_minmax(4rem,0.8fr)] gap-1 items-center">
+             <span className="text-slate-500 text-xs text-right">{i + 1}</span>
+             <input
+               type="text"
+@@ -121,12 +112,12 @@ export function OscChannelConfig() {
+               maxLength={4}
+             />
+             <select
+-              value={row.paramType}
+-              onChange={(e) => setRow(i, { paramType: Number(e.target.value) })}
++              value={row.typeKey}
++              onChange={(e) => setRow(i, { typeKey: e.target.value as ChannelRowState['typeKey'] })}
+               className="bg-slate-700 border border-slate-600 rounded px-1 py-0.5 text-slate-100 text-xs w-full"
+             >
+-              {PARAM_TYPES.map((t) => (
+-                <option key={t.value} value={t.value}>{t.label}</option>
++              {OSC_CHANNEL_TYPE_OPTIONS.map((t) => (
++                <option key={t.key} value={t.key}>{t.label}</option>
+               ))}
+             </select>
+             <input
+@@ -141,4 +132,4 @@ export function OscChannelConfig() {
+       </div>
+     </div>
+   );
+-}
+\ No newline at end of file
++}
+diff --git a/src/components/OscChart.tsx b/src/components/OscChart.tsx
+index 569a57c..f0c5964 100644
+--- a/src/components/OscChart.tsx
++++ b/src/components/OscChart.tsx
+@@ -1,6 +1,8 @@
+ import { useEffect, useRef } from 'react';
+ import uPlot from 'uplot';
+ import 'uplot/dist/uPlot.min.css';
++import { getPlotRelativePosition, zoomRange } from '../lib/oscZoom';
++import { formatOscAxisValue, formatOscHoverTime, formatOscValue } from '../lib/oscDisplay';
+ 
+ const CHANNEL_COLORS = [
+   '#4ade80', '#60a5fa', '#f97316', '#e879f9',
+@@ -236,6 +238,7 @@ export function OscChart({
+   labels,
+ }: OscChartProps) {
+   const containerRef = useRef<HTMLDivElement>(null);
++  const hoverTooltipRef = useRef<HTMLDivElement>(null);
+   const plotRef = useRef<uPlot | null>(null);
+   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+   const channelOrderRef = useRef<number[]>([]);
+@@ -244,7 +247,7 @@ export function OscChart({
+   const xModeRef = useRef<'following' | 'manual'>('following');
+   const yModeRef = useRef<'auto' | 'manual'>('auto');
+   const syncingScalesRef = useRef(false);
+-  const xSpanRef = useRef(1); // 当前显示窗口宽度（秒），默认1s
++  const xSpanRef = useRef(1); // 未提供窗口时的回退值，实际下限由采样间隔决定
+   const windowSecondsRef = useRef(windowSeconds);
+   const defaultYRangeRef = useRef({ min: -5000, max: 5000 });
+   // 自动模式下已应用的 Y 范围。图例隐藏/恢复后要按当前可见曲线重新计算。
+@@ -283,6 +286,68 @@ export function OscChart({
+   const labelsRef = useRef(labels);
+   labelsRef.current = labels;
+ 
++  const updateHoverTooltip = (plot: uPlot) => {
++    const tooltip = hoverTooltipRef.current;
++    const container = containerRef.current;
++    if (!tooltip || !container) return;
++
++    const idx = plot.cursor.idx;
++    const xValue = idx == null ? null : plot.data[0]?.[idx];
++    if (idx == null || typeof xValue !== 'number' || !Number.isFinite(xValue)) {
++      tooltip.hidden = true;
++      return;
++    }
++
++    const rows: HTMLDivElement[] = [];
++    for (let seriesIdx = 1; seriesIdx < plot.series.length; seriesIdx++) {
++      if (plot.series[seriesIdx].show === false) continue;
++      const dataIdx = plot.cursor.idxs?.[seriesIdx] ?? idx;
++      if (dataIdx == null) continue;
++      const rawValue = plot.data[seriesIdx]?.[dataIdx];
++      if (typeof rawValue !== 'number' || !Number.isFinite(rawValue)) continue;
++
++      const row = document.createElement('div');
++      row.className = 'flex items-center gap-2 whitespace-nowrap';
++
++      const marker = document.createElement('span');
++      marker.className = 'inline-block h-2 w-2 shrink-0 rounded-full';
++      marker.style.backgroundColor = CHANNEL_COLORS[(seriesIdx - 1) % CHANNEL_COLORS.length];
++
++      const label = document.createElement('span');
++      label.className = 'text-slate-300';
++      label.textContent = `${String(plot.series[seriesIdx].label ?? `CH${seriesIdx}`)}:`;
++
++      const value = document.createElement('span');
++      value.className = 'font-semibold text-white';
++      value.textContent = formatOscValue(rawValue);
++
++      row.append(marker, label, value);
++      rows.push(row);
++    }
++
++    if (rows.length === 0) {
++      tooltip.hidden = true;
++      return;
++    }
++
++    const header = document.createElement('div');
++    header.className = 'mb-1 border-b border-slate-700 pb-1 font-semibold text-slate-100';
++    header.textContent = `Time: ${formatOscHoverTime(xValue, sampleInterval)}`;
++    tooltip.replaceChildren(header, ...rows);
++    tooltip.hidden = false;
++
++    const plotLeft = plot.bbox.left / uPlot.pxRatio;
++    const plotTop = plot.bbox.top / uPlot.pxRatio;
++    const cursorLeft = plot.cursor.left ?? -1;
++    const cursorTop = plot.cursor.top ?? -1;
++    const preferredLeft = plotLeft + cursorLeft + 12;
++    const preferredTop = plotTop + cursorTop + 12;
++    const maxLeft = Math.max(8, container.clientWidth - tooltip.offsetWidth - 8);
++    const maxTop = Math.max(8, container.clientHeight - tooltip.offsetHeight - 8);
++    tooltip.style.left = `${Math.max(8, Math.min(preferredLeft, maxLeft))}px`;
++    tooltip.style.top = `${Math.max(8, Math.min(preferredTop, maxTop))}px`;
++  };
++
+   const getLatestX = () => alignedDataRef.current[0][alignedDataRef.current[0].length - 1] ?? 0;
+ 
+   const getDefaultYRange = () => defaultYRangeRef.current;
+@@ -410,16 +475,6 @@ export function OscChart({
+     return null;
+   };
+ 
+-  const zoomRange = (min: number, max: number, anchor: number, scaleFactor: number) => {
+-    const span = Math.max(max - min, sampleInterval);
+-    const nextSpan = Math.max(span * scaleFactor, sampleInterval);
+-    const ratio = span === 0 ? 0.5 : (anchor - min) / span;
+-    return {
+-      min: anchor - nextSpan * ratio,
+-      max: anchor + nextSpan * (1 - ratio),
+-    };
+-  };
+-
+   const handleWheelZoom = (event: WheelEvent) => {
+     const plot = plotRef.current;
+     if (!plot) return;
+@@ -437,19 +492,15 @@ export function OscChart({
+       applyStoredSeriesVisibility(plot);
+ 
+       if (axis === 'x') {
+-        xSpanRef.current = Math.max(xSpanRef.current * scaleFactor, sampleInterval);
+-        if (xModeRef.current === 'following') {
+-          nextXRange = computeXView();
++        const { min, max } = plot.scales.x;
++        if (min != null && max != null) {
++          // plot.rect 是 uPlot 绘图区 overlay 的矩形，posToVal() 需要其内部坐标。
++          const position = getPlotRelativePosition(event.clientX, event.clientY, plot.rect);
++          const anchor = plot.posToVal(position.x, 'x');
++          nextXRange = zoomRange(min, max, anchor, scaleFactor, sampleInterval);
++          xSpanRef.current = Math.max(nextXRange.max - nextXRange.min, sampleInterval);
++          xModeRef.current = 'manual';
+           plot.setScale('x', nextXRange);
+-        } else {
+-          // manual 模式：以鼠标在 X 轴的位置为锚点缩放当前视口
+-          const { min, max } = plot.scales.x;
+-          if (min != null && max != null) {
+-            const plotLeft = plot.bbox.left / uPlot.pxRatio;
+-            const anchor = plot.posToVal(event.clientX - plot.rect.left - plotLeft, 'x');
+-            nextXRange = zoomRange(min, max, anchor, scaleFactor);
+-            plot.setScale('x', nextXRange);
+-          }
+         }
+ 
+         if (yModeRef.current === 'auto') {
+@@ -461,9 +512,9 @@ export function OscChart({
+         const { min, max } = plot.scales.y;
+         if (min == null || max == null) return;
+ 
+-        const plotTop = plot.bbox.top / uPlot.pxRatio;
+-        const anchor = plot.posToVal(event.clientY - plot.rect.top - plotTop, 'y');
+-        const next = zoomRange(min, max, anchor, scaleFactor);
++        const position = getPlotRelativePosition(event.clientX, event.clientY, plot.rect);
++        const anchor = plot.posToVal(position.y, 'y');
++        const next = zoomRange(min, max, anchor, scaleFactor, sampleInterval);
+         plot.setScale('y', next);
+         yModeRef.current = 'manual';
+       }
+@@ -710,22 +761,22 @@ export function OscChart({
+       if (startDist === 0) return;
+ 
+       const scaleFactor = startDist / currentDist; // >1 缩小，<1 放大
+-      const plotLeft = plot.bbox.left / uPlot.pxRatio;
+-      const plotTop = plot.bbox.top / uPlot.pxRatio;
+-      const rect = plot.root.getBoundingClientRect();
++      const plotRect = plot.rect;
+ 
+       syncingScalesRef.current = true;
+       plot.batch(() => {
+         if (zone === 'plot' || zone === 'x') {
+-          const anchorX = plot.posToVal(startMidX - rect.left - plotLeft, 'x');
+-          const next = zoomRange(startXMin, startXMax, anchorX, scaleFactor);
++          const startPosition = getPlotRelativePosition(startMidX, startMidY, plotRect);
++          const anchorX = plot.posToVal(startPosition.x, 'x');
++          const next = zoomRange(startXMin, startXMax, anchorX, scaleFactor, sampleInterval);
+           xSpanRef.current = Math.max(next.max - next.min, sampleInterval);
+           xModeRef.current = 'manual';
+           plot.setScale('x', next);
+         }
+         if (zone === 'plot' || zone === 'y') {
+-          const anchorY = plot.posToVal(startMidY - rect.top - plotTop, 'y');
+-          const next = zoomRange(startYMin, startYMax, anchorY, scaleFactor);
++          const startPosition = getPlotRelativePosition(startMidX, startMidY, plotRect);
++          const anchorY = plot.posToVal(startPosition.y, 'y');
++          const next = zoomRange(startYMin, startYMax, anchorY, scaleFactor, sampleInterval);
+           yModeRef.current = 'manual';
+           plot.setScale('y', next);
+         }
+@@ -773,6 +824,7 @@ export function OscChart({
+ 
+   useEffect(() => {
+     const container = containerRef.current;
++    const hoverTooltip = hoverTooltipRef.current;
+     const effectiveChannels = effectiveChannelsRef.current;
+     const externalData = alignedInputRef.current;
+     const externalSeries = seriesInputRef.current;
+@@ -863,6 +915,9 @@ export function OscChart({
+             grid: { stroke: 'rgba(148, 163, 184, 0.12)' },
+             ticks: { stroke: '#475569' },
+             label: 'Time (s)',
++            values: (_self, splits, _axisIdx, _foundSpace, foundIncr) => (
++              splits.map((value) => formatOscAxisValue(value, foundIncr))
++            ),
+           },
+           {
+             stroke: '#94a3b8',
+@@ -913,6 +968,9 @@ export function OscChart({
+               });
+             },
+           ],
++          setCursor: [
++            (self) => updateHoverTooltip(self),
++          ],
+           ready: [
+             (self) => {
+               syncingScalesRef.current = true;
+@@ -955,6 +1013,7 @@ export function OscChart({
+               // 将 wrapper 挂到 root 上，供 cleanup 取用
+               (self.root as HTMLElement & { _touchHandlers?: { onTouchStart: (e: TouchEvent) => void; onTouchMove: (e: TouchEvent) => void; onTouchEnd: (e: TouchEvent) => void } })._touchHandlers = { onTouchStart, onTouchMove, onTouchEnd };
+               (self.root as HTMLElement & { _legendClickHandler?: (e: MouseEvent) => void })._legendClickHandler = onLegendClick;
++              if (hoverTooltip) hoverTooltip.hidden = true;
+             },
+           ],
+         },
+@@ -992,6 +1051,7 @@ export function OscChart({
+       }
+       resizeObserver.disconnect();
+       resizeObserverRef.current = null;
++      if (hoverTooltip) hoverTooltip.hidden = true;
+       plot.destroy();
+       if (plotRef.current === plot) {
+         plotRef.current = null;
+@@ -1065,7 +1125,14 @@ export function OscChart({
+ 
+   return (
+     <div className="border border-slate-700 rounded bg-slate-900 h-full relative overflow-hidden">
+-      <div ref={containerRef} className="w-full h-full" />
++      <div ref={containerRef} className="relative w-full h-full">
++        <div
++          ref={hoverTooltipRef}
++          data-testid="osc-hover-tooltip"
++          hidden
++          className="pointer-events-none absolute z-20 min-w-[150px] rounded border border-slate-600 bg-slate-950/95 px-2.5 py-2 text-xs shadow-lg"
++        />
++      </div>
+     </div>
+   );
+ }
+diff --git a/src/components/OscilloscoperPage.tsx b/src/components/OscilloscoperPage.tsx
+index 23fbe88..f7d4fa9 100644
+--- a/src/components/OscilloscoperPage.tsx
++++ b/src/components/OscilloscoperPage.tsx
+@@ -14,6 +14,7 @@ import { exportCsv, importCsv } from '../lib/csvWave';
+ import { resolveConnectionTarget } from '../lib/connectionTarget';
+ import { describeOscTransport, shouldStopOscOnDisconnect } from '../lib/oscTransport';
+ import { oscPlotPointBudget } from '../lib/oscRenderBudget';
++import { getOscChannelType } from '../lib/oscChannelTypes';
+ 
+ function createMockOscData(): Map<number, number[]> {
+   const samples = 30_000;
+@@ -48,6 +49,7 @@ function formatMemory(bytes: number): string {
+ 
+ function formatDuration(seconds: number): string {
+   if (!Number.isFinite(seconds) || seconds <= 0) return '0s';
++  if (seconds < 1) return `${(seconds * 1000).toFixed(seconds < 0.1 ? 1 : 0)}ms`;
+   if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+   return `${(seconds / 60).toFixed(seconds < 600 ? 1 : 0)}min`;
+ }
+@@ -111,7 +113,10 @@ export function OscilloscoperPage() {
+   const selectedStartSeconds = Math.max(firstSeconds, selectedEndSeconds - viewWindowSeconds);
+ 
+   const estimatedBytesPerSecond = useMemo(() => {
+-    const sampleBytes = activeChannels.reduce((sum, channel) => sum + channel.byteWidth, 0);
++    const sampleBytes = activeChannels.reduce(
++      (sum, channel) => sum + getOscChannelType(channel.typeKey).byteWidth,
++      0,
++    );
+     return sampleBytes * Math.max(sampleRate, 0);
+   }, [activeChannels, sampleRate]);
+ 
+@@ -180,9 +185,8 @@ export function OscilloscoperPage() {
+     const mockChannels = Array.from({ length: 4 }, (_, index) => ({
+       channelNo: index + 1,
+       varAddr: 0,
+-      paramType: 0x03,
++      typeKey: 'float32' as const,
+       label: `SIM${index + 1}`,
+-      byteWidth: 4,
+     }));
+     setChannels(mockChannels);
+     setSampleRate(mockSampleRate);
+@@ -215,9 +219,8 @@ export function OscilloscoperPage() {
+       const importedChannels = labels.map((label, index) => ({
+         channelNo: index + 1,
+         varAddr: 0,
+-        paramType: 0x03,
++        typeKey: 'float32' as const,
+         label: label || `CH${index + 1}`,
+-        byteWidth: 4,
+       }));
+       const batch = new Map<number, number[]>();
+       columns.forEach((column, index) => batch.set(index + 1, column));
+diff --git a/src/components/ParamPage.tsx b/src/components/ParamPage.tsx
+index 899d319..38d34b2 100644
+--- a/src/components/ParamPage.tsx
++++ b/src/components/ParamPage.tsx
+@@ -5,8 +5,9 @@ import { parseParameterTable } from '../lib/paramParser';
+ import { ParamRow } from './ParamRow';
+ import { useModbusOps } from '../hooks/useModbusOps';
+ import { EspFilePicker } from './EspFilePicker';
+-import { currentConnectionTarget } from '../lib/apiClient';
++import { apiFetch, currentConnectionTarget } from '../lib/apiClient';
+ import { parameterSourcePolicy } from '../lib/parameterSourcePolicy';
++import { buildParameterUploadRequest } from '../lib/parameterFileUpload';
+ 
+ export function ParamPage() {
+   const { pages, params, loadParams, activePage, search, setActivePage, setSearch } = useParamStore();
+@@ -25,7 +26,14 @@ export function ParamPage() {
+   async function loadFile(file: File) {
+     setLoading(true);
+     try {
+-      const { params: p, pages: pg } = await parseParameterTable(file);
++      const parsed = await parseParameterTable(file);
++      if (currentConnectionTarget().kind === 'cloud') {
++        const request = await buildParameterUploadRequest('/api/excel/upload', file);
++        const { url, ...init } = request;
++        const response = await apiFetch(url, init);
++        if (!response.ok) throw new Error(`参数表上传失败：HTTP ${response.status}`);
++      }
++      const { params: p, pages: pg } = parsed;
+       loadParams(p, pg);
+       setActivePage(pg[0] ?? '');
+     } catch (err) {
+diff --git a/src/hooks/useOscController.ts b/src/hooks/useOscController.ts
+index fe9108f..e062157 100644
+--- a/src/hooks/useOscController.ts
++++ b/src/hooks/useOscController.ts
+@@ -13,7 +13,9 @@ import {
+ } from '../lib/oscilloscope';
+ import { useOscStore, ChannelConfig } from '../store/oscStore';
+ import { frameRouter } from '../lib/frameRouter';
+-import { waitForOscResponseWithRetry } from '../lib/oscRequest';
++import { waitForOscResponse, waitForOscResponseWithRetry } from '../lib/oscRequest';
++import { configureOscChannels } from '../lib/oscChannelHandshake';
++import { getOscChannelType, validateOscChannelConfigs } from '../lib/oscChannelTypes';
+ import { OscJitterBuffer } from '../lib/oscJitterBuffer';
+ import {
+   OscStopBarrierSequence,
+@@ -88,7 +90,7 @@ export function useOscController() {
+     setStartError,
+   } = useOscStore();
+ 
+-  /** 依次查询设备信息，再设置通道，最后开始采样 */
++  /** 查询设备能力、确认通道配置，最后开始采样。 */
+   const start = useCallback(async (channels: ChannelConfig[]) => {
+     if (stopPromise) await stopPromise;
+     else if (lastStopBarrierPromise) await lastStopBarrierPromise;
+@@ -109,8 +111,21 @@ export function useOscController() {
+     setStartError(null);
+     frameRouter.reset();
+ 
+-    // 单请求-响应辅助：只接受与当前请求匹配的完整 Modbus 响应。
+-    function sendAndWait(
++    // 能力查询允许重试；通道配置会改变设备累计槽位，不能重复发送。
++    function sendAndWaitOnce(
++      frame: Uint8Array,
++      acceptResponse?: (response: Uint8Array) => boolean,
++    ): Promise<Uint8Array> {
++      return waitForOscResponse({
++        request: frame,
++        timeoutMs: OSC_HANDSHAKE_TIMEOUT_MS,
++        subscribe: (handler) => frameRouter.subscribeModbusFrame(handler),
++        send: (request) => wsClient.send(request),
++        acceptResponse,
++      });
++    }
++
++    function sendAndWaitWithRetry(
+       frame: Uint8Array,
+       acceptResponse?: (response: Uint8Array) => boolean,
+     ): Promise<Uint8Array> {
+@@ -134,7 +149,7 @@ export function useOscController() {
+         return value != null && acceptValue(value);
+       };
+ 
+-      return sendAndWait(frame, acceptResponse);
++      return sendAndWaitWithRetry(frame, acceptResponse);
+     }
+ 
+     async function stopAndDrainPreviousRun(waitForAck = true) {
+@@ -148,17 +163,36 @@ export function useOscController() {
+     }
+ 
+     function registerOscHandler() {
+-      const channelDescs = channels.map((c) => ({ byteWidth: c.byteWidth, paramType: c.paramType }));
++      const channelDescs = channels.map((channel) => ({ typeKey: channel.typeKey }));
++      let decodeFailed = false;
+       frameRouter.onOscFrame((frame) => {
+-        const osc = parseOscDataFrame(frame, channelDescs);
+-        if (!osc) return;
++        if (decodeFailed) return;
++        try {
++          const osc = parseOscDataFrame(frame, channelDescs);
++          if (!osc) return;
+ 
+-        const batch = new Map<number, number[]>();
+-        osc.channels.forEach((samples, idx) => {
+-          const channel = channels[idx];
+-          if (channel) batch.set(channel.channelNo, samples);
+-        });
+-        oscPlaybackBuffer.appendBatch(batch);
++          const batch = new Map<number, number[]>();
++          osc.channels.forEach((samples, idx) => {
++            const channel = channels[idx];
++            if (channel) batch.set(channel.channelNo, samples);
++          });
++          oscPlaybackBuffer.appendBatch(batch);
++        } catch (error) {
++          decodeFailed = true;
++          if (heartbeatTimer) {
++            clearInterval(heartbeatTimer);
++            heartbeatTimer = null;
++          }
++          stopStoreFlushTimer();
++          oscPlaybackBuffer.clear();
++          frameRouter.onOscFrame(() => {});
++          setRunning(false);
++          setStartError(
++            `地址示波器解码失败：${error instanceof Error ? error.message : '数据类型不匹配'}`,
++          );
++          console.error('[osc] frame decode failed', error);
++          void queueOscStopBarrier();
++        }
+       });
+     }
+ 
+@@ -179,7 +213,7 @@ export function useOscController() {
+       if (startupMode === 'cloud-cached' && capabilities) {
+         applyCapabilities(capabilities);
+       } else {
+-        // 冷启动只串行读取三个解析所必需的能力值；云端通道配置不再逐个等待 ACK。
++        // 冷启动只串行读取三个解析所必需的能力值。
+         const flResp = await queryWithRetry(buildQueryFrameLen(), (value) => value >= 32 && value <= 512);
+         const mcResp = await queryWithRetry(buildQueryMaxChannels(), (value) => value >= 1 && value <= 32);
+         const srResp = await queryWithRetry(buildQuerySampleRate(), (value) => value >= 100 && value <= 100000);
+@@ -192,17 +226,26 @@ export function useOscController() {
+         oscCapabilityCache.write(target, capabilities);
+       }
+ 
+-      // 云端按序连续发送，局域网继续逐个确认。
+-      for (const ch of channels) {
+-        const request = buildSetChannel(ch.channelNo, ch.paramType, ch.varAddr);
+-        if (target.kind === 'cloud') wsClient.send(request);
+-        else await sendAndWait(request);
+-      }
++      validateOscChannelConfigs(
++        channels.map(({ channelNo, varAddr, typeKey }) => ({ channelNo, varAddr, typeKey })),
++        capabilities.maxChannels,
++      );
++
++      const channelRequests = channels.map((channel) => buildSetChannel(
++        channel.channelNo,
++        getOscChannelType(channel.typeKey).paramType,
++        channel.varAddr,
++      ));
++      await configureOscChannels(
++        channelRequests,
++        target.kind === 'cloud' ? 'parallel' : 'serial',
++        (request) => sendAndWaitOnce(request),
++      );
+ 
+       // 4.5 若设置了通讯速率限制，发送 0x73；部分设备不支持该功能码，允许超时/错误
+       if (commRateLimit !== 0) {
+         if (target.kind === 'cloud') wsClient.send(buildSetBaudRate(commRateLimit));
+-        else try { await sendAndWait(buildSetBaudRate(commRateLimit)); }
++        else try { await sendAndWaitWithRetry(buildSetBaudRate(commRateLimit)); }
+         catch { console.warn('[osc] 0x73 not supported by device, ignored'); }
+       }
+ 
+diff --git a/src/lib/blModbusClient.ts b/src/lib/blModbusClient.ts
+index c3a9435..43d2904 100644
+--- a/src/lib/blModbusClient.ts
++++ b/src/lib/blModbusClient.ts
+@@ -7,8 +7,16 @@
+ import { wsClient } from './wsClient';
+ import { frameRouter } from './frameRouter';
+ import { appendCrc, verifyCrc } from './crc16';
++import type { ConnectionTarget } from './connectionTarget';
+ 
+-const TIMEOUT_MS = 500;
++const LOCAL_BOOTLOADER_RESPONSE_TIMEOUT_MS = 500;
++const CLOUD_BOOTLOADER_RESPONSE_TIMEOUT_MS = 5000;
++
++export function bootloaderResponseTimeoutMs(kind: ConnectionTarget['kind']): number {
++  return kind === 'cloud'
++    ? CLOUD_BOOTLOADER_RESPONSE_TIMEOUT_MS
++    : LOCAL_BOOTLOADER_RESPONSE_TIMEOUT_MS;
++}
+ 
+ /** Bootloader 广播地址（进入BL时固定使用，无需知道从站ID） */
+ const BL_ENTER_SLAVE_ID = 0xff;
+@@ -28,7 +36,10 @@ const RESPONSE_LEN: Record<number, number> = {
+ const noop = (_unused: Uint8Array) => { void _unused; };
+ 
+ export class BlModbusClient {
+-  constructor(public slaveId: number = 1) {}
++  constructor(
++    public slaveId: number = 1,
++    private readonly responseTimeoutMs: number = LOCAL_BOOTLOADER_RESPONSE_TIMEOUT_MS,
++  ) {}
+ 
+   // ── Private ────────────────────────────────────────────────────────────────
+ 
+@@ -48,7 +59,7 @@ export class BlModbusClient {
+       const timeout = setTimeout(() => {
+         frameRouter.onModbusFrame(noop);
+         reject(new Error('响应超时'));
+-      }, TIMEOUT_MS);
++      }, this.responseTimeoutMs);
+ 
+       frameRouter.onModbusFrame((frame: Uint8Array) => {
+         const merged = new Uint8Array(buf.length + frame.length);
+@@ -104,7 +115,16 @@ export class BlModbusClient {
+   async enterBootloaderMode(): Promise<{ success: true; message: string }> {
+     const header = new Uint8Array([BL_ENTER_SLAVE_ID, 0x65]);
+     const req = appendCrc(header);
+-    const resp = await this._sendRequest(req, 0x65);
++    let resp: Uint8Array;
++    try {
++      resp = await this._sendRequest(req, 0x65);
++    } catch (error) {
++      // The application may switch to Bootloader before it can send the first
++      // ACK. Repeating this idempotent transition command mirrors the required
++      // second click while preserving real protocol and CRC failures.
++      if (!(error instanceof Error) || error.message !== '响应超时') throw error;
++      resp = await this._sendRequest(req, 0x65);
++    }
+     const data = this._checkResponse(resp, 0x65);
+     if (data.length < 1) throw new Error('响应数据长度不足');
+     const status = data[0];
+@@ -229,4 +249,4 @@ export class BlModbusClient {
+     }
+     return { success: true, registers };
+   }
+-}
+\ No newline at end of file
++}
+diff --git a/src/lib/flasher.ts b/src/lib/flasher.ts
+index 5e9b773..8dea50e 100644
+--- a/src/lib/flasher.ts
++++ b/src/lib/flasher.ts
+@@ -13,14 +13,18 @@ export interface FlasherCallbacks {
+   onProgress: (current: number, total: number, pct: number) => void;
+ }
+ 
++export interface FlasherOptions {
++  responseTimeoutMs?: number;
++}
++
+ export class Flasher {
+   private client: BlModbusClient;
+   private cb: FlasherCallbacks;
+   private shouldStop = false;
+   isFlashing = false;
+ 
+-  constructor(slaveId: number, callbacks: FlasherCallbacks) {
+-    this.client = new BlModbusClient(slaveId);
++  constructor(slaveId: number, callbacks: FlasherCallbacks, options: FlasherOptions = {}) {
++    this.client = new BlModbusClient(slaveId, options.responseTimeoutMs);
+     this.cb = callbacks;
+   }
+ 
+diff --git a/src/lib/oscRequest.ts b/src/lib/oscRequest.ts
+index 111f95b..c2713f8 100644
+--- a/src/lib/oscRequest.ts
++++ b/src/lib/oscRequest.ts
+@@ -32,7 +32,13 @@ function matchesResponse(request: Uint8Array, response: Uint8Array): boolean {
+   if (response[1] !== functionCode || !verifyCrc(response)) return false;
+ 
+   if (functionCode === 0x04) return response.length === 7 && response[2] === 0x02;
+-  if (functionCode === 0x75) return response.length === 8 && response[2] === request[2];
++  if (functionCode === 0x75) {
++    return response.length === 8
++      && response[2] === request[2]
++      && response[3] === request[3]
++      && response[4] === request[4]
++      && response[5] === request[5];
++  }
+   return true;
+ }
+ 
+diff --git a/src/lib/oscilloscope.ts b/src/lib/oscilloscope.ts
+index 9691320..a251fc2 100644
+--- a/src/lib/oscilloscope.ts
++++ b/src/lib/oscilloscope.ts
+@@ -1,4 +1,9 @@
+ import { appendCrc, crc16, verifyCrc } from './crc16';
++import {
++  decodeOscChannelValue,
++  getOscChannelType,
++  type OscChannelDescriptor,
++} from './oscChannelTypes';
+ 
+ const SLAVE = 0xff;
+ 
+@@ -48,9 +53,6 @@ export interface ParseOscDataFrameOptions {
+   requireCrc?: boolean;
+ }
+ 
+-// float32 解析的 paramType 集合：0x03=float32, 0x07=double→float(4B)
+-const FLOAT32_TYPES = new Set([0x03, 0x07]);
+-
+ /** 解析示波数据帧，返回各通道按采样点排列的原始值数组
+  *
+  * 帧结构（frameLen 字节，不含尾部附加 Modbus）：
+@@ -62,7 +64,7 @@ const FLOAT32_TYPES = new Set([0x03, 0x07]);
+  */
+ export function parseOscDataFrame(
+   data: Uint8Array,
+-  channels: { byteWidth: number; paramType: number }[],
++  channels: OscChannelDescriptor[],
+   options: ParseOscDataFrameOptions = {},
+ ): OscFrame | null {
+   const MAGIC = [0xff, 0x77, 0xaa, 0x55];
+@@ -91,7 +93,10 @@ export function parseOscDataFrame(
+   if (!headerValid && !footerValid) return null;
+   if (!crcValid && (options.requireCrc || !headerValid || !footerValid)) return null;
+ 
+-  const stridePerSample = channels.reduce((a, c) => a + c.byteWidth, 0);
++  const stridePerSample = channels.reduce(
++    (total, channel) => total + getOscChannelType(channel.typeKey).byteWidth,
++    0,
++  );
+   if (stridePerSample === 0) return null;
+   const sampleCount = Math.floor(payload.length / stridePerSample);
+   const channelData: number[][] = channels.map(() => []);
+@@ -99,21 +104,10 @@ export function parseOscDataFrame(
+ 
+   for (let s = 0; s < sampleCount; s++) {
+     let offset = s * stridePerSample;
+-    channels.forEach(({ byteWidth: w, paramType }, ci) => {
+-      let val: number;
+-      if (w === 2) {
+-        val = paramType === 0x01
+-          ? view.getUint16(offset, false)
+-          : view.getInt16(offset, false);
+-      } else if (w === 4) {
+-        val = FLOAT32_TYPES.has(paramType)
+-          ? view.getFloat32(offset, false)
+-          : view.getInt32(offset, false);
+-      } else {
+-        val = view.getFloat64(offset, false);
+-      }
+-      channelData[ci].push(val);
+-      offset += w;
++    channels.forEach((channel, ci) => {
++      const definition = getOscChannelType(channel.typeKey);
++      channelData[ci].push(decodeOscChannelValue(view, offset, channel));
++      offset += definition.byteWidth;
+     });
+   }
+   return { channels: channelData, rawData: payload };
+diff --git a/src/lib/paramParser.ts b/src/lib/paramParser.ts
+index 6fb7fe4..b87d606 100644
+--- a/src/lib/paramParser.ts
++++ b/src/lib/paramParser.ts
+@@ -108,7 +108,7 @@ export async function parseParameterTable(
+       try {
+         const data = new Uint8Array(e.target!.result as ArrayBuffer);
+         const wb = XLSX.read(data, { type: 'array' });
+-        const skipSheets = new Set(['Settings', 'BASE']);
++        const skipSheets = new Set(['Settings']);
+         const pages = wb.SheetNames.filter((s) => !skipSheets.has(s));
+         const params = pages.flatMap((s) => parseSheet(XLSX, wb, s));
+         resolve({ params, pages });
+@@ -119,4 +119,4 @@ export async function parseParameterTable(
+     reader.onerror = () => reject(reader.error);
+     reader.readAsArrayBuffer(file);
+   });
+-}
+\ No newline at end of file
++}
+diff --git a/src/lib/parameterSourcePolicy.ts b/src/lib/parameterSourcePolicy.ts
+index 90bc778..f628a00 100644
+--- a/src/lib/parameterSourcePolicy.ts
++++ b/src/lib/parameterSourcePolicy.ts
+@@ -4,7 +4,6 @@ export interface ParameterSourcePolicy {
+   showLocalFilePicker: boolean;
+   allowRemoteUpload: boolean;
+   allowRemoteDelete: boolean;
+-  autoLoadSingleRemoteFile: boolean;
+   remoteButtonLabel: string;
+   remoteDialogTitle: string;
+   emptyMessage: string;
+@@ -16,7 +15,6 @@ export function parameterSourcePolicy(kind: ParameterSourceKind): ParameterSourc
+     showLocalFilePicker: true,
+     allowRemoteUpload: true,
+     allowRemoteDelete: true,
+-    autoLoadSingleRemoteFile: cloud,
+     remoteButtonLabel: cloud ? '服务器参数表' : '设备参数表',
+     remoteDialogTitle: cloud ? '服务器参数表' : '设备参数表',
+     emptyMessage: cloud ? '服务器暂无参数表，请联系管理员部署' : '设备暂无参数表，请先上传',
+diff --git a/src/store/modbusOscStore.ts b/src/store/modbusOscStore.ts
+index e83ce5d..ace9768 100644
+--- a/src/store/modbusOscStore.ts
++++ b/src/store/modbusOscStore.ts
+@@ -70,7 +70,8 @@ function channelNosForAliases(aliases: string[]): number[] {
+ 
+ function normalizeWindow(seconds: number): number {
+   if (!Number.isFinite(seconds) || seconds <= 0) return OSC_DEFAULT_VIEW_WINDOW_SECONDS;
+-  return Math.max(1, seconds);
++  // 视口允许亚秒值；图表层按采样间隔保证至少能看到一个样本。
++  return seconds;
+ }
+ 
+ function normalizeRetention(seconds: number): number {
+diff --git a/src/store/oscStore.ts b/src/store/oscStore.ts
+index 9c90c20..f7c1f9d 100644
+--- a/src/store/oscStore.ts
++++ b/src/store/oscStore.ts
+@@ -1,5 +1,6 @@
+ import { create } from 'zustand';
+ import { oscHistory, OscHistoryStats } from '../lib/oscHistory';
++import type { OscChannelTypeKey } from '../lib/oscChannelTypes';
+ 
+ export const OSC_VIEW_WINDOW_OPTIONS = [5, 10, 30, 60];
+ export const OSC_HISTORY_RETENTION_OPTIONS = [60, 300, 600, 1800];
+@@ -9,19 +10,18 @@ export const OSC_DEFAULT_RETENTION_SECONDS = 300;
+ export interface ChannelConfig {
+   channelNo: number;  // 1-based
+   varAddr: number;    // 变量地址
+-  paramType: number;  // 0x00-0x04
++  typeKey: OscChannelTypeKey;
+   label: string;
+-  byteWidth: number;  // 2/4/8
+ }
+ 
+ export interface ChannelRowState {
+   varAddrHex: string;
+-  paramType: number;
++  typeKey: OscChannelTypeKey;
+   label: string;
+ }
+ 
+ export function defaultRow(channelNo: number): ChannelRowState {
+-  return { varAddrHex: '0000', paramType: 0x00, label: `CH${channelNo}` };
++  return { varAddrHex: '0000', typeKey: 'default-int16', label: `CH${channelNo}` };
+ }
+ 
+ interface OscState {
+@@ -62,7 +62,8 @@ interface OscState {
+ 
+ function normalizeWindow(seconds: number): number {
+   if (!Number.isFinite(seconds) || seconds <= 0) return OSC_DEFAULT_VIEW_WINDOW_SECONDS;
+-  return Math.max(1, seconds);
++  // 视口允许亚秒值；图表层按采样间隔保证至少能看到一个样本。
++  return seconds;
+ }
+ 
+ function normalizeRetention(seconds: number): number {

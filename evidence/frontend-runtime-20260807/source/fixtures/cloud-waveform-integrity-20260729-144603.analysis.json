@@ -1,0 +1,378 @@
+{
+  "mode": "cloud",
+  "target": "ws://127.0.0.1:18089/ws/device/wd-ac276eab7c9c",
+  "device_id": "wd-ac276eab7c9c",
+  "requested_duration_seconds": 120.0,
+  "wall_time_seconds": 122.19,
+  "metrics": {
+    "frames": 2662,
+    "bytes": 3942799,
+    "bytes_per_second": 32857,
+    "interval_ms": {
+      "mean": 44.64,
+      "median": 0.45,
+      "p95": 190.04,
+      "max": 7196.91
+    },
+    "gaps_over_50_ms": 396,
+    "gaps_over_100_ms": 214,
+    "gaps_over_250_ms": 97
+  },
+  "stream_integrity": {
+    "raw_bytes": 3942799,
+    "logical_frames": 15745,
+    "header_anchored_frames": 7878,
+    "footer_anchored_frames": 7867,
+    "dual_anchored_frames": 0,
+    "invalid_crc_candidates": 48,
+    "discarded_bytes": 6549,
+    "samples": 472350,
+    "checked_transitions": 472349,
+    "first_value": -1946,
+    "last_value": -31505,
+    "discontinuity_count": 25,
+    "implied_missing_samples": 22380,
+    "first_discontinuities": [
+      {
+        "sample_index": 257550,
+        "previous": -6541,
+        "actual": -3240,
+        "modulo_step": 3301,
+        "implied_missing_samples": 3300,
+        "stream_offset": 2146783
+      },
+      {
+        "sample_index": 344010,
+        "previous": 17683,
+        "actual": 18554,
+        "modulo_step": 871,
+        "implied_missing_samples": 870,
+        "stream_offset": 2867492
+      },
+      {
+        "sample_index": 345060,
+        "previous": 19603,
+        "actual": 19784,
+        "modulo_step": 181,
+        "implied_missing_samples": 180,
+        "stream_offset": 2876344
+      },
+      {
+        "sample_index": 392970,
+        "previous": 2157,
+        "actual": 2458,
+        "modulo_step": 301,
+        "implied_missing_samples": 300,
+        "stream_offset": 3275854
+      },
+      {
+        "sample_index": 451320,
+        "previous": -4729,
+        "actual": -4158,
+        "modulo_step": 571,
+        "implied_missing_samples": 570,
+        "stream_offset": 3762286
+      },
+      {
+        "sample_index": 470490,
+        "previous": 15011,
+        "actual": 19122,
+        "modulo_step": 4111,
+        "implied_missing_samples": 4110,
+        "stream_offset": 3922054
+      },
+      {
+        "sample_index": 470580,
+        "previous": 19211,
+        "actual": 31722,
+        "modulo_step": 12511,
+        "implied_missing_samples": 12510,
+        "stream_offset": 3922871
+      },
+      {
+        "sample_index": 471300,
+        "previous": 32441,
+        "actual": 32472,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3929129
+      },
+      {
+        "sample_index": 471330,
+        "previous": 32501,
+        "actual": 32532,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3929645
+      },
+      {
+        "sample_index": 471540,
+        "previous": 32741,
+        "actual": -32764,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3931661
+      },
+      {
+        "sample_index": 471570,
+        "previous": -32735,
+        "actual": -32704,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3932177
+      },
+      {
+        "sample_index": 471600,
+        "previous": -32675,
+        "actual": -32644,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3932685
+      },
+      {
+        "sample_index": 471630,
+        "previous": -32615,
+        "actual": -32584,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3933193
+      },
+      {
+        "sample_index": 471750,
+        "previous": -32465,
+        "actual": -32434,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3934467
+      },
+      {
+        "sample_index": 471840,
+        "previous": -32345,
+        "actual": -32314,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3935475
+      },
+      {
+        "sample_index": 471870,
+        "previous": -32285,
+        "actual": -32254,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3935983
+      },
+      {
+        "sample_index": 471960,
+        "previous": -32165,
+        "actual": -32134,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3936991
+      },
+      {
+        "sample_index": 471990,
+        "previous": -32105,
+        "actual": -32074,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3937507
+      },
+      {
+        "sample_index": 472080,
+        "previous": -31985,
+        "actual": -31954,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3938515
+      },
+      {
+        "sample_index": 472110,
+        "previous": -31925,
+        "actual": -31894,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3939023
+      },
+      {
+        "sample_index": 472200,
+        "previous": -31805,
+        "actual": -31774,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3940031
+      },
+      {
+        "sample_index": 472230,
+        "previous": -31745,
+        "actual": -31714,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3940539
+      },
+      {
+        "sample_index": 472260,
+        "previous": -31685,
+        "actual": -31654,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3941047
+      },
+      {
+        "sample_index": 472290,
+        "previous": -31625,
+        "actual": -31594,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3941555
+      },
+      {
+        "sample_index": 472320,
+        "previous": -31565,
+        "actual": -31534,
+        "modulo_step": 31,
+        "implied_missing_samples": 30,
+        "stream_offset": 3942063
+      }
+    ]
+  },
+  "raw_capture": {
+    "path": "/tmp/cloud-waveform-integrity-20260729-144603.bin.gz",
+    "bytes": 3942799,
+    "sha256": "adba1391321719d9005c8c762345973541d20303d371be45334a49b395aa0ec3"
+  },
+  "counter_deltas": {
+    "uart_rx_frames": 10071,
+    "uart_rx_bytes": 4217311,
+    "uart_overflows": 1,
+    "wifi_pool_exhausted": 2867,
+    "wifi_queue_full": 0,
+    "route_partial_drops": 2867,
+    "uplink_queued_frames": 12789,
+    "uplink_sent_frames": 11752,
+    "uplink_sent_bytes": 3956793,
+    "uplink_queue_pending_frames": 0,
+    "uplink_queue_full": 522,
+    "uplink_overload_dropped_frames": 522,
+    "uplink_send_failures": 1,
+    "uplink_fallback_frames": 253,
+    "uplink_queued_fallback_frames": 515,
+    "uplink_fallback_failures": 0,
+    "uplink_stop_dropped_frames": 0,
+    "uplink_compression_calls": 2924,
+    "uplink_compressed_frames": 2859,
+    "uplink_raw_envelope_frames": 65,
+    "uplink_compression_failures": 0,
+    "uplink_raw_bytes": 3956793,
+    "uplink_wire_bytes": 1427190,
+    "uplink_compression_total_us": 13401632,
+    "uplink_send_calls": 2924,
+    "uplink_send_total_us": 33933283
+  },
+  "fallback_injection": {
+    "requested": false,
+    "completed": false,
+    "at_seconds": null,
+    "browser_frames": 0,
+    "browser_waveform_frames": 0,
+    "browser_bytes": 0,
+    "heartbeat": {
+      "count": 106,
+      "p95_ms": 12536.82,
+      "max_ms": 14384.61
+    }
+  },
+  "heartbeat": {
+    "count": 106,
+    "p95_ms": 12536.82,
+    "max_ms": 14384.61
+  },
+  "cloud_health_deltas": {
+    "browser_drop_delta": 0,
+    "codec": {
+      "wire_bytes": 1414547,
+      "decoded_raw_bytes": 3922534,
+      "activations": 1,
+      "compressed_messages": 2823,
+      "raw_envelope_messages": 65,
+      "legacy_raw_messages": 0,
+      "decode_total_us": 142605,
+      "decode_failures": 0,
+      "decode_max_us": 5414
+    }
+  },
+  "mqtt_fallback_cloud_frames": 40,
+  "uplink_after": {
+    "closed_events": 0,
+    "compressed_frames": 11680,
+    "compression_active": true,
+    "compression_calls": 11954,
+    "compression_capable": true,
+    "compression_failures": 0,
+    "compression_max_us": 124347,
+    "compression_total_us": 67896981,
+    "connect_events": 4,
+    "connected": true,
+    "disconnect_events": 3,
+    "downlink_bytes": 5016,
+    "downlink_failures": 0,
+    "downlink_frames": 627,
+    "error_events": 3,
+    "fallback_failures": 0,
+    "fallback_frames": 253,
+    "last_event_id": 4,
+    "overload_dropped_frames": 1050,
+    "queue_full": 1050,
+    "queue_in_psram": true,
+    "queue_pending_frames": 0,
+    "queued_fallback_frames": 515,
+    "queued_frames": 70897,
+    "raw_bytes": 25045988,
+    "raw_envelope_frames": 274,
+    "schema_version": 6,
+    "send_calls": 11955,
+    "send_failures": 1,
+    "send_max_us": 5024415,
+    "send_total_us": 234880251,
+    "sender_stack_min_free": 28,
+    "sent_bytes": 25045988,
+    "sent_frames": 68554,
+    "stop_dropped_frames": 778,
+    "wire_bytes": 8905076
+  },
+  "verdict": {
+    "passed": false,
+    "checks": {
+      "received_waveform": true,
+      "minimum_throughput": true,
+      "p95_latency": true,
+      "maximum_gap": true,
+      "uart_no_overflow": false,
+      "uplink_schema_current": true,
+      "binary_uplink_queued": true,
+      "binary_uplink_sent": true,
+      "binary_uplink_bytes": true,
+      "uplink_overload_accounted": true,
+      "uplink_frames_accounted": true,
+      "mqtt_fallback_no_failures": true,
+      "compression_negotiated": true,
+      "compression_calls_observed": true,
+      "compression_frames_accounted": true,
+      "compression_no_failures": true,
+      "wire_ratio_below_20_percent": false,
+      "compression_average_us": true,
+      "compression_max_us": false,
+      "cloud_decode_messages": true,
+      "cloud_decode_average_us": true,
+      "cloud_decode_no_failure": true,
+      "browser_pump_no_drop": true,
+      "heartbeat_observed": true,
+      "heartbeat_p95_ms": false,
+      "heartbeat_max_ms": false,
+      "internal_min_free_heap": false,
+      "uplink_queue_not_full": false,
+      "uplink_no_overload_eviction": false,
+      "uplink_no_send_failure": false,
+      "queue_in_psram": true
+    }
+  }
+}

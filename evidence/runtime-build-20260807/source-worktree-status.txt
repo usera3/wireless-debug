@@ -1,0 +1,18 @@
+## wifi-provisioning-fix-20260803...midea/wifi-provisioning-fix-20260803
+ M dist/orig/a.css
+ M dist/orig/a.css.gz
+ M dist/orig/a.js
+ M dist/orig/a.js.gz
+?? .claude/
+?? AGENTS.md
+?? CLAUDE.md
+?? artifacts/ap-http-diagnostic-20260731/
+?? artifacts/base-param-page-20260806-preflash/
+?? artifacts/bootloader-timeout-20260806-predeploy/
+?? artifacts/cloud-osc-postflash-20260730/
+?? artifacts/local-pacing-web-20260730/
+?? artifacts/oled-smooth-ui-20260730/
+?? artifacts/type-inference-preflash-20260806-161038/
+?? artifacts/wifi-connect-recovery-20260731/
+?? build-apsta-reconnect/
+?? build-wifi-status/

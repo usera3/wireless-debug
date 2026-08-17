@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "uptime_ms": 868273883,
+  "heap": {
+    "free": 7761076,
+    "min_free": 7651664,
+    "largest": 7602176,
+    "internal_free": 62279,
+    "internal_min_free": 10299
+  },
+  "restart_reason": 1
+}

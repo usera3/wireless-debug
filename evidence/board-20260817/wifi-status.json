@@ -1,0 +1,10 @@
+{
+  "mode": "APSTA",
+  "ap_ssid": "ESP32-S3_AP_7C9D",
+  "ap_ip": "192.168.4.1",
+  "sta_ssid": "vivo X300",
+  "sta_configured": true,
+  "sta_connecting": false,
+  "sta_connected": false,
+  "sta_ip": "-"
+}

@@ -1,0 +1,824 @@
+{
+  "capturePath": "fixtures/osc-c52c-local-30s-cdp-20260727.json.gz",
+  "raw": {
+    "websocketMessages": 6988,
+    "websocketBytes": 2516850,
+    "sha256": "1da0a621e5ad49202ac839d12a0a1b96802b2912b30b0770d41c983d36d00651",
+    "hashMatchesCapture": true
+  },
+  "routing": {
+    "logicalFrames": 10065,
+    "headerAnchoredFrames": 5033,
+    "footerAnchoredFrames": 5032,
+    "dualAnchoredFrames": 0,
+    "parseFailures": 0,
+    "expectedSamplesFromFrames": 301950,
+    "sampleCounts": [
+      301950,
+      301950,
+      301950,
+      301950
+    ]
+  },
+  "timing": {
+    "sampleRateHz": 10000,
+    "adjacentSampleSeconds": 0.0001,
+    "runningWallSeconds": 30.208,
+    "sampleSeconds": 30.195,
+    "sampleToWallRatio": 0.9995696504237289
+  },
+  "formula": {
+    "expression": "value[n] = int16(value[0] + n) = (((value[0] + n + 32768) mod 65536) - 32768)",
+    "firstValue": 32618,
+    "lastValue": 6887,
+    "minimum": -32768,
+    "maximum": 32767,
+    "totalSamples": 301950,
+    "checkedTransitions": 301949,
+    "formulaMismatchCount": 0,
+    "formulaMismatches": [],
+    "nonPlusOneModuloTransitions": 0,
+    "stepMismatches": [],
+    "signedWrapCount": 5,
+    "wrapIndices": [
+      150,
+      65686,
+      131222,
+      196758,
+      262294
+    ],
+    "wrapTimesSeconds": [
+      0.015,
+      6.5686,
+      13.1222,
+      19.6758,
+      26.2294
+    ],
+    "topRawDeltas": [
+      {
+        "delta": 1,
+        "count": 301944
+      },
+      {
+        "delta": -65535,
+        "count": 5
+      }
+    ],
+    "firstValues": [
+      32618,
+      32619,
+      32620,
+      32621,
+      32622,
+      32623,
+      32624,
+      32625,
+      32626,
+      32627,
+      32628,
+      32629,
+      32630,
+      32631,
+      32632,
+      32633
+    ],
+    "lastValues": [
+      6872,
+      6873,
+      6874,
+      6875,
+      6876,
+      6877,
+      6878,
+      6879,
+      6880,
+      6881,
+      6882,
+      6883,
+      6884,
+      6885,
+      6886,
+      6887
+    ],
+    "wrapNeighborhoods": [
+      {
+        "index": 150,
+        "values": [
+          32764,
+          32765,
+          32766,
+          32767,
+          -32768,
+          -32767,
+          -32766,
+          -32765
+        ]
+      },
+      {
+        "index": 65686,
+        "values": [
+          32764,
+          32765,
+          32766,
+          32767,
+          -32768,
+          -32767,
+          -32766,
+          -32765
+        ]
+      },
+      {
+        "index": 131222,
+        "values": [
+          32764,
+          32765,
+          32766,
+          32767,
+          -32768,
+          -32767,
+          -32766,
+          -32765
+        ]
+      },
+      {
+        "index": 196758,
+        "values": [
+          32764,
+          32765,
+          32766,
+          32767,
+          -32768,
+          -32767,
+          -32766,
+          -32765
+        ]
+      },
+      {
+        "index": 262294,
+        "values": [
+          32764,
+          32765,
+          32766,
+          32767,
+          -32768,
+          -32767,
+          -32766,
+          -32765
+        ]
+      }
+    ]
+  },
+  "csv": {
+    "path": "fixtures/osc_20260727_180715.csv",
+    "rows": 364410,
+    "headers": [
+      "time_s",
+      "CH1",
+      "CH2",
+      "CH3",
+      "CH4"
+    ],
+    "sampleIntervalSeconds": 0.0001,
+    "blankValueCount": 0,
+    "valueMismatchCount": 551790,
+    "firstValueMismatches": [
+      {
+        "row": 0,
+        "channel": 1,
+        "expected": 32618,
+        "actual": 24594
+      },
+      {
+        "row": 1,
+        "channel": 1,
+        "expected": 32619,
+        "actual": 24595
+      },
+      {
+        "row": 2,
+        "channel": 1,
+        "expected": 32620,
+        "actual": 24596
+      },
+      {
+        "row": 3,
+        "channel": 1,
+        "expected": 32621,
+        "actual": 24597
+      },
+      {
+        "row": 4,
+        "channel": 1,
+        "expected": 32622,
+        "actual": 24598
+      },
+      {
+        "row": 5,
+        "channel": 1,
+        "expected": 32623,
+        "actual": 24599
+      },
+      {
+        "row": 6,
+        "channel": 1,
+        "expected": 32624,
+        "actual": 24600
+      },
+      {
+        "row": 7,
+        "channel": 1,
+        "expected": 32625,
+        "actual": 24601
+      },
+      {
+        "row": 8,
+        "channel": 1,
+        "expected": 32626,
+        "actual": 24602
+      },
+      {
+        "row": 9,
+        "channel": 1,
+        "expected": 32627,
+        "actual": 24603
+      },
+      {
+        "row": 10,
+        "channel": 1,
+        "expected": 32628,
+        "actual": 24604
+      },
+      {
+        "row": 11,
+        "channel": 1,
+        "expected": 32629,
+        "actual": 24605
+      },
+      {
+        "row": 12,
+        "channel": 1,
+        "expected": 32630,
+        "actual": 24606
+      },
+      {
+        "row": 13,
+        "channel": 1,
+        "expected": 32631,
+        "actual": 24607
+      },
+      {
+        "row": 14,
+        "channel": 1,
+        "expected": 32632,
+        "actual": 24608
+      },
+      {
+        "row": 15,
+        "channel": 1,
+        "expected": 32633,
+        "actual": 24609
+      },
+      {
+        "row": 16,
+        "channel": 1,
+        "expected": 32634,
+        "actual": 24610
+      },
+      {
+        "row": 17,
+        "channel": 1,
+        "expected": 32635,
+        "actual": 24611
+      },
+      {
+        "row": 18,
+        "channel": 1,
+        "expected": 32636,
+        "actual": 24612
+      },
+      {
+        "row": 19,
+        "channel": 1,
+        "expected": 32637,
+        "actual": 24613
+      },
+      {
+        "row": 20,
+        "channel": 1,
+        "expected": 32638,
+        "actual": 24614
+      },
+      {
+        "row": 21,
+        "channel": 1,
+        "expected": 32639,
+        "actual": 24615
+      },
+      {
+        "row": 22,
+        "channel": 1,
+        "expected": 32640,
+        "actual": 24616
+      },
+      {
+        "row": 23,
+        "channel": 1,
+        "expected": 32641,
+        "actual": 24617
+      },
+      {
+        "row": 24,
+        "channel": 1,
+        "expected": 32642,
+        "actual": 24618
+      },
+      {
+        "row": 25,
+        "channel": 1,
+        "expected": 32643,
+        "actual": 24619
+      },
+      {
+        "row": 26,
+        "channel": 1,
+        "expected": 32644,
+        "actual": 24620
+      },
+      {
+        "row": 27,
+        "channel": 1,
+        "expected": 32645,
+        "actual": 24621
+      },
+      {
+        "row": 28,
+        "channel": 1,
+        "expected": 32646,
+        "actual": 24622
+      },
+      {
+        "row": 29,
+        "channel": 1,
+        "expected": 32647,
+        "actual": 24623
+      },
+      {
+        "row": 30,
+        "channel": 1,
+        "expected": 32648,
+        "actual": 24624
+      },
+      {
+        "row": 31,
+        "channel": 1,
+        "expected": 32649,
+        "actual": 24625
+      },
+      {
+        "row": 32,
+        "channel": 1,
+        "expected": 32650,
+        "actual": 24626
+      },
+      {
+        "row": 33,
+        "channel": 1,
+        "expected": 32651,
+        "actual": 24627
+      },
+      {
+        "row": 34,
+        "channel": 1,
+        "expected": 32652,
+        "actual": 24628
+      },
+      {
+        "row": 35,
+        "channel": 1,
+        "expected": 32653,
+        "actual": 24629
+      },
+      {
+        "row": 36,
+        "channel": 1,
+        "expected": 32654,
+        "actual": 24630
+      },
+      {
+        "row": 37,
+        "channel": 1,
+        "expected": 32655,
+        "actual": 24631
+      },
+      {
+        "row": 38,
+        "channel": 1,
+        "expected": 32656,
+        "actual": 24632
+      },
+      {
+        "row": 39,
+        "channel": 1,
+        "expected": 32657,
+        "actual": 24633
+      },
+      {
+        "row": 40,
+        "channel": 1,
+        "expected": 32658,
+        "actual": 24634
+      },
+      {
+        "row": 41,
+        "channel": 1,
+        "expected": 32659,
+        "actual": 24635
+      },
+      {
+        "row": 42,
+        "channel": 1,
+        "expected": 32660,
+        "actual": 24636
+      },
+      {
+        "row": 43,
+        "channel": 1,
+        "expected": 32661,
+        "actual": 24637
+      },
+      {
+        "row": 44,
+        "channel": 1,
+        "expected": 32662,
+        "actual": 24638
+      },
+      {
+        "row": 45,
+        "channel": 1,
+        "expected": 32663,
+        "actual": 24639
+      },
+      {
+        "row": 46,
+        "channel": 1,
+        "expected": 32664,
+        "actual": 24640
+      },
+      {
+        "row": 47,
+        "channel": 1,
+        "expected": 32665,
+        "actual": 24641
+      },
+      {
+        "row": 48,
+        "channel": 1,
+        "expected": 32666,
+        "actual": 24642
+      },
+      {
+        "row": 49,
+        "channel": 1,
+        "expected": 32667,
+        "actual": 24643
+      },
+      {
+        "row": 50,
+        "channel": 1,
+        "expected": 32668,
+        "actual": 24644
+      },
+      {
+        "row": 51,
+        "channel": 1,
+        "expected": 32669,
+        "actual": 24645
+      },
+      {
+        "row": 52,
+        "channel": 1,
+        "expected": 32670,
+        "actual": 24646
+      },
+      {
+        "row": 53,
+        "channel": 1,
+        "expected": 32671,
+        "actual": 24647
+      },
+      {
+        "row": 54,
+        "channel": 1,
+        "expected": 32672,
+        "actual": 24648
+      },
+      {
+        "row": 55,
+        "channel": 1,
+        "expected": 32673,
+        "actual": 24649
+      },
+      {
+        "row": 56,
+        "channel": 1,
+        "expected": 32674,
+        "actual": 24650
+      },
+      {
+        "row": 57,
+        "channel": 1,
+        "expected": 32675,
+        "actual": 24651
+      },
+      {
+        "row": 58,
+        "channel": 1,
+        "expected": 32676,
+        "actual": 24652
+      },
+      {
+        "row": 59,
+        "channel": 1,
+        "expected": 32677,
+        "actual": 24653
+      },
+      {
+        "row": 60,
+        "channel": 1,
+        "expected": 32678,
+        "actual": 24654
+      },
+      {
+        "row": 61,
+        "channel": 1,
+        "expected": 32679,
+        "actual": 24655
+      },
+      {
+        "row": 62,
+        "channel": 1,
+        "expected": 32680,
+        "actual": 24656
+      },
+      {
+        "row": 63,
+        "channel": 1,
+        "expected": 32681,
+        "actual": 24657
+      },
+      {
+        "row": 64,
+        "channel": 1,
+        "expected": 32682,
+        "actual": 24658
+      },
+      {
+        "row": 65,
+        "channel": 1,
+        "expected": 32683,
+        "actual": 24659
+      },
+      {
+        "row": 66,
+        "channel": 1,
+        "expected": 32684,
+        "actual": 24660
+      },
+      {
+        "row": 67,
+        "channel": 1,
+        "expected": 32685,
+        "actual": 24661
+      },
+      {
+        "row": 68,
+        "channel": 1,
+        "expected": 32686,
+        "actual": 24662
+      },
+      {
+        "row": 69,
+        "channel": 1,
+        "expected": 32687,
+        "actual": 24663
+      },
+      {
+        "row": 70,
+        "channel": 1,
+        "expected": 32688,
+        "actual": 24664
+      },
+      {
+        "row": 71,
+        "channel": 1,
+        "expected": 32689,
+        "actual": 24665
+      },
+      {
+        "row": 72,
+        "channel": 1,
+        "expected": 32690,
+        "actual": 24666
+      },
+      {
+        "row": 73,
+        "channel": 1,
+        "expected": 32691,
+        "actual": 24667
+      },
+      {
+        "row": 74,
+        "channel": 1,
+        "expected": 32692,
+        "actual": 24668
+      },
+      {
+        "row": 75,
+        "channel": 1,
+        "expected": 32693,
+        "actual": 24669
+      },
+      {
+        "row": 76,
+        "channel": 1,
+        "expected": 32694,
+        "actual": 24670
+      },
+      {
+        "row": 77,
+        "channel": 1,
+        "expected": 32695,
+        "actual": 24671
+      },
+      {
+        "row": 78,
+        "channel": 1,
+        "expected": 32696,
+        "actual": 24672
+      },
+      {
+        "row": 79,
+        "channel": 1,
+        "expected": 32697,
+        "actual": 24673
+      },
+      {
+        "row": 80,
+        "channel": 1,
+        "expected": 32698,
+        "actual": 24674
+      },
+      {
+        "row": 81,
+        "channel": 1,
+        "expected": 32699,
+        "actual": 24675
+      },
+      {
+        "row": 82,
+        "channel": 1,
+        "expected": 32700,
+        "actual": 24676
+      },
+      {
+        "row": 83,
+        "channel": 1,
+        "expected": 32701,
+        "actual": 24677
+      },
+      {
+        "row": 84,
+        "channel": 1,
+        "expected": 32702,
+        "actual": 24678
+      },
+      {
+        "row": 85,
+        "channel": 1,
+        "expected": 32703,
+        "actual": 24679
+      },
+      {
+        "row": 86,
+        "channel": 1,
+        "expected": 32704,
+        "actual": 24680
+      },
+      {
+        "row": 87,
+        "channel": 1,
+        "expected": 32705,
+        "actual": 24681
+      },
+      {
+        "row": 88,
+        "channel": 1,
+        "expected": 32706,
+        "actual": 24682
+      },
+      {
+        "row": 89,
+        "channel": 1,
+        "expected": 32707,
+        "actual": 24683
+      },
+      {
+        "row": 90,
+        "channel": 1,
+        "expected": 32708,
+        "actual": 24684
+      },
+      {
+        "row": 91,
+        "channel": 1,
+        "expected": 32709,
+        "actual": 24685
+      },
+      {
+        "row": 92,
+        "channel": 1,
+        "expected": 32710,
+        "actual": 24686
+      },
+      {
+        "row": 93,
+        "channel": 1,
+        "expected": 32711,
+        "actual": 24687
+      },
+      {
+        "row": 94,
+        "channel": 1,
+        "expected": 32712,
+        "actual": 24688
+      },
+      {
+        "row": 95,
+        "channel": 1,
+        "expected": 32713,
+        "actual": 24689
+      },
+      {
+        "row": 96,
+        "channel": 1,
+        "expected": 32714,
+        "actual": 24690
+      },
+      {
+        "row": 97,
+        "channel": 1,
+        "expected": 32715,
+        "actual": 24691
+      },
+      {
+        "row": 98,
+        "channel": 1,
+        "expected": 32716,
+        "actual": 24692
+      },
+      {
+        "row": 99,
+        "channel": 1,
+        "expected": 32717,
+        "actual": 24693
+      }
+    ],
+    "exactMatch": false
+  },
+  "browser": {
+    "before": {
+      "connected": true,
+      "status": "运行中",
+      "sampleRate": 10000,
+      "frameLen": 250,
+      "cacheDuration": "0.0s",
+      "cacheMemory": "0.0 MB",
+      "hasAddressPage": true,
+      "canvasCount": 1
+    },
+    "after": {
+      "connected": true,
+      "status": "运行中",
+      "sampleRate": 10000,
+      "frameLen": 250,
+      "cacheDuration": "30s",
+      "cacheMemory": "9.2 MB",
+      "hasAddressPage": true,
+      "canvasCount": 1
+    },
+    "final": {
+      "connected": true,
+      "status": "已停止",
+      "sampleRate": 10000,
+      "frameLen": 250,
+      "cacheDuration": "30s",
+      "cacheMemory": "9.2 MB",
+      "hasAddressPage": true,
+      "canvasCount": 1
+    },
+    "errors": [
+      "Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    ]
+  }
+}

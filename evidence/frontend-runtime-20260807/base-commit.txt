@@ -1,0 +1,4 @@
+a60c85f883820478a2fab4c4a292258dc455ac16
+2026-07-30T14:01:16+08:00
+HEAD -> fix/cloud-osc-reliability-web-20260724, tag: stable-osc-pacing-20260730
+fix: stabilize local and cloud waveform playback

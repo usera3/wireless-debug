@@ -1,0 +1,238 @@
+{
+  "ok": true,
+  "profile": "wireless-debug-device-v1",
+  "domain": "motor wireless diagnostics",
+  "limits": {
+    "display_text": 512,
+    "uart_baud_min": 1200,
+    "uart_baud_max": 5000000
+  },
+  "actions": [
+    "wifi_ap",
+    "wifi_sta",
+    "wifi_apsta",
+    "wifi_scan",
+    "wifi_connect",
+    "ble_start",
+    "set_comm_mode",
+    "set_uart_baud",
+    "query_status",
+    "uart_tx_text",
+    "uart_tx_hex",
+    "ble_tx_text",
+    "ble_tx_hex",
+    "display_text",
+    "display_scroll",
+    "read_comm_stats",
+    "reset_comm_stats",
+    "motor_diag_read",
+    "motor_diag_write",
+    "motor_osc_query",
+    "motor_osc_channel",
+    "motor_osc_start",
+    "motor_osc_stop",
+    "motor_osc_heartbeat",
+    "motor_osc_rate",
+    "motor_param_register",
+    "motor_param_read",
+    "motor_param_write"
+  ],
+  "guardrails": [
+    "motor_diag_write_requires_explicit_address_type_value",
+    "motor_param_write_checks_read_only_and_range",
+    "waveform_record_requires_channel_address_mapping"
+  ],
+  "uart_commands": [
+    "AT+HELP",
+    "AT+WIFI?",
+    "AT+WIFI=STA",
+    "AT+WIFI=APSTA",
+    "AT+WIFI=AP"
+  ],
+  "websocket": {
+    "path": "/ws",
+    "role": "uart_tunnel"
+  },
+  "http": [
+    {
+      "method": "GET",
+      "path": "/api/device/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/device/capabilities"
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/health"
+    },
+    {
+      "method": "GET",
+      "path": "/api/comm/mode"
+    },
+    {
+      "method": "POST",
+      "path": "/api/comm/mode",
+      "body": "{mode:auto|wifi|ble}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/comm/stats"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/comm/stats"
+    },
+    {
+      "method": "GET",
+      "path": "/api/input/keys"
+    },
+    {
+      "method": "POST",
+      "path": "/api/input/key",
+      "body": "{key}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/uart/baud"
+    },
+    {
+      "method": "POST",
+      "path": "/api/uart/baud",
+      "body": "{baud}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/uart/tx",
+      "body": "{hex? text?}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/display/text"
+    },
+    {
+      "method": "POST",
+      "path": "/api/display/scroll",
+      "body": "{title?,text,footer?}"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/display/text"
+    },
+    {
+      "method": "GET",
+      "path": "/api/motor/diag/capabilities"
+    },
+    {
+      "method": "POST",
+      "path": "/api/motor/diag/read"
+    },
+    {
+      "method": "POST",
+      "path": "/api/motor/diag/write"
+    },
+    {
+      "method": "GET",
+      "path": "/api/motor/osc/capabilities"
+    },
+    {
+      "method": "POST",
+      "path": "/api/motor/osc/query"
+    },
+    {
+      "method": "POST",
+      "path": "/api/motor/osc/channel"
+    },
+    {
+      "method": "POST",
+      "path": "/api/motor/osc/start"
+    },
+    {
+      "method": "POST",
+      "path": "/api/motor/osc/stop"
+    },
+    {
+      "method": "POST",
+      "path": "/api/motor/osc/heartbeat"
+    },
+    {
+      "method": "POST",
+      "path": "/api/motor/osc/rate"
+    },
+    {
+      "method": "GET",
+      "path": "/api/motor/params"
+    },
+    {
+      "method": "POST",
+      "path": "/api/motor/params"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/motor/params"
+    },
+    {
+      "method": "POST",
+      "path": "/api/motor/params/read"
+    },
+    {
+      "method": "POST",
+      "path": "/api/motor/params/write"
+    },
+    {
+      "method": "GET",
+      "path": "/api/wifi/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/wifi/scan"
+    },
+    {
+      "method": "POST",
+      "path": "/api/wifi/connect",
+      "body": "{ssid,password,save?,target_mode?}"
+    },
+    {
+      "method": "POST",
+      "path": "/api/wifi/sta"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/wifi/sta"
+    },
+    {
+      "method": "POST",
+      "path": "/api/wifi/mode",
+      "body": "{mode:ap|sta|apsta}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ws/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/ble/status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ble/start"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ble/tx",
+      "body": "{hex? text?}"
+    },
+    {
+      "method": "GET",
+      "path": "/api/excel/list"
+    },
+    {
+      "method": "POST",
+      "path": "/api/excel/upload"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/excel/delete?name=..."
+    }
+  ]
+}
