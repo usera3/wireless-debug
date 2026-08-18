@@ -47,6 +47,8 @@ const closedView = displayUi.match(/static void update_closed_view[\s\S]*?\n}\n\
 assert.ok(closedView, 'display_ui.c must contain update_closed_view');
 const apBlock = closedView[0].match(/case SYSTEM_NET_AP:[\s\S]*?break;/);
 assert.ok(apBlock, 'display_ui.c must contain an isolated AP home branch');
+const apstaBlock = closedView[0].match(/case SYSTEM_NET_APSTA:[\s\S]*?break;/);
+assert.ok(apstaBlock, 'display_ui.c must contain an isolated APSTA home branch');
 
 assert.ok(displayUi.includes('#define HOME_ROW_COUNT  6'),
   'OLED home must define six rows');
@@ -63,7 +65,11 @@ assert.ok(
 assert.ok(closedView[0].includes('wifi_sta_status'),
   'OLED home must show STA connection status');
 assert.ok(
-  /home_row\(1\)[\s\S]*?wifi_ap_ssid[\s\S]*?home_row\(2\)[\s\S]*?state->wifi_ap_ip[\s\S]*?home_row\(3\), "UART:%s"[\s\S]*?home_row\(4\), "BLE:%s"/.test(apBlock[0]),
+  /static void format_ap_ssid_label\([^)]*\)[\s\S]*?"ESP32-S3_"[\s\S]*?== '_' \? '-'/.test(displayUi),
+  'OLED must remove the common prefix and replace invisible underscore separators',
+);
+assert.ok(
+  /format_ap_ssid_label\(ap_ssid, sizeof\(ap_ssid\), state->wifi_ap_ssid\)[\s\S]*?home_row\(1\)[\s\S]*?home_row\(2\)[\s\S]*?state->wifi_ap_ip[\s\S]*?home_row\(3\), "UART:%s"[\s\S]*?home_row\(4\), "BLE:%s"/.test(apBlock[0]),
   'AP home must render the AP label, dynamic SSID, address, UART, and BLE',
 );
 assert.ok(
@@ -71,17 +77,21 @@ assert.ok(
   'STA home must render STA label, address, UART, and BLE on separate rows',
 );
 assert.ok(
-  /case SYSTEM_NET_APSTA:[\s\S]*?home_row\(1\)[\s\S]*?wifi_ap_ssid[\s\S]*?home_row\(2\)[\s\S]*?state->wifi_ap_ip[\s\S]*?home_row\(3\), "STA:"[\s\S]*?home_row\(4\)[\s\S]*?state->wifi_sta_ip[\s\S]*?home_row\(5\), "U:%s BLE:%s"/.test(closedView[0]),
+  /case SYSTEM_NET_APSTA:[\s\S]*?format_ap_ssid_label\(ap_ssid, sizeof\(ap_ssid\), state->wifi_ap_ssid\)[\s\S]*?home_row\(1\)[\s\S]*?home_row\(2\)[\s\S]*?state->wifi_ap_ip[\s\S]*?home_row\(3\), "STA:"[\s\S]*?home_row\(4\)[\s\S]*?state->wifi_sta_ip[\s\S]*?home_row\(5\), "U:%s BLE:%s"/.test(closedView[0]),
   'APSTA home must render the dynamic AP SSID, both addresses, and the footer status',
 );
 assert.ok(
-  /lv_label_set_text_fmt\(home_row\(1\), "AP:%s"[\s\S]*?wifi_ap_ssid/.test(apBlock[0]),
+  /lv_label_set_text_fmt\(home_row\(1\), "AP:%s"[\s\S]*?ap_ssid/.test(apBlock[0]),
   'AP home must render the runtime AP SSID after the AP label',
 );
+assert.ok(apBlock[0].includes('format_ap_ssid_label(ap_ssid, sizeof(ap_ssid), state->wifi_ap_ssid)'),
+  'AP home must use the OLED-safe runtime AP SSID');
 assert.ok(
-  /case SYSTEM_NET_APSTA:[\s\S]*?lv_label_set_text_fmt\(home_row\(1\), "AP:%s"[\s\S]*?wifi_ap_ssid/.test(closedView[0]),
+  /case SYSTEM_NET_APSTA:[\s\S]*?lv_label_set_text_fmt\(home_row\(1\), "AP:%s"[\s\S]*?ap_ssid/.test(closedView[0]),
   'APSTA home must render the runtime AP SSID after the AP label',
 );
+assert.ok(apstaBlock[0].includes('format_ap_ssid_label(ap_ssid, sizeof(ap_ssid), state->wifi_ap_ssid)'),
+  'APSTA home must use the OLED-safe runtime AP SSID');
 assert.ok(!displayUi.includes('ESP32-S3_AP_'),
   'OLED UI must not hard-code a board-specific AP SSID');
 const staBlock = closedView[0].match(/case SYSTEM_NET_STA:[\s\S]*?break;/);
@@ -91,7 +101,5 @@ assert.ok(!staBlock[0].includes('192.168.4.1') && !staBlock[0].includes('wifi_ap
 assert.ok(/case SYSTEM_NET_STA:[\s\S]*?lv_label_set_text\(home_row\(2\),[\s\S]*?state->wifi_sta_ip[\s\S]*?\);/.test(closedView[0]),
   'STA home view must render the raw STA IPv4 string on its own row');
 
-const apstaBlock = closedView[0].match(/case SYSTEM_NET_APSTA:[\s\S]*?break;/);
-assert.ok(apstaBlock, 'display_ui.c must contain an APSTA home branch');
 assert.ok(/case SYSTEM_NET_APSTA:[\s\S]*?lv_label_set_text\(home_row\(4\),[\s\S]*?state->wifi_sta_ip[\s\S]*?\);/.test(closedView[0]),
   'APSTA home view must render the raw STA IPv4 string on its own row');

@@ -324,6 +324,29 @@ static const char *wifi_sta_status(const display_ui_state_t *state)
     return "OFF";
 }
 
+static void format_ap_ssid_label(char *out, size_t out_size, const char *ssid)
+{
+    static const char prefix[] = "ESP32-S3_";
+    const char *start = ssid;
+    size_t i = 0;
+
+    if (out == NULL || out_size == 0) {
+        return;
+    }
+    if (ssid == NULL || ssid[0] == '\0') {
+        snprintf(out, out_size, "-");
+        return;
+    }
+    if (strncmp(ssid, prefix, sizeof(prefix) - 1) == 0 &&
+        ssid[sizeof(prefix) - 1] != '\0') {
+        start = ssid + sizeof(prefix) - 1;
+    }
+    for (; start[i] != '\0' && i + 1 < out_size; i++) {
+        out[i] = start[i] == '_' ? '-' : start[i];
+    }
+    out[i] = '\0';
+}
+
 static void clear_status_bar(void)
 {
     lv_label_set_text(s_status_left, " ");
@@ -335,6 +358,7 @@ static void update_closed_view(const display_ui_state_t *state)
 {
     const system_menu_snapshot_t *menu = &state->menu;
     char baud[12];
+    char ap_ssid[33];
 
     set_home_layout();
 
@@ -346,9 +370,10 @@ static void update_closed_view(const display_ui_state_t *state)
     }
     switch (menu->net_mode) {
     case SYSTEM_NET_AP:
+        format_ap_ssid_label(ap_ssid, sizeof(ap_ssid), state->wifi_ap_ssid);
         lv_label_set_text(home_row(0), "WiFi:AP");
         lv_label_set_text_fmt(home_row(1), "AP:%s",
-                              state->wifi_ap_ssid[0] ? state->wifi_ap_ssid : "-");
+                              ap_ssid);
         lv_label_set_text(home_row(2),
                           is_ipv4_label(state->wifi_ap_ip) ? state->wifi_ap_ip : "192.168.4.1");
         lv_label_set_text_fmt(home_row(3), "UART:%s", baud);
@@ -366,9 +391,10 @@ static void update_closed_view(const display_ui_state_t *state)
         break;
     case SYSTEM_NET_APSTA:
     default:
+        format_ap_ssid_label(ap_ssid, sizeof(ap_ssid), state->wifi_ap_ssid);
         lv_label_set_text_fmt(home_row(0), "WiFi:APSTA %s", wifi_sta_status(state));
         lv_label_set_text_fmt(home_row(1), "AP:%s",
-                              state->wifi_ap_ssid[0] ? state->wifi_ap_ssid : "-");
+                              ap_ssid);
         lv_label_set_text(home_row(2),
                           is_ipv4_label(state->wifi_ap_ip) ? state->wifi_ap_ip : "192.168.4.1");
         lv_label_set_text(home_row(3), "STA:");
