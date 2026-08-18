@@ -38,6 +38,7 @@ static display_ui_state_t s_state = {
     .status = "boot",
     .firmware = "v?",
     .ssid = "-",
+    .wifi_ap_ssid = "-",
     .wifi_ap_ip = "192.168.4.1",
     .wifi_sta_ip = "-",
     .wifi_sta_connecting = false,
@@ -641,12 +642,14 @@ void display_lvgl_set_wifi_ssid(const char *ssid)
     }
 }
 
-void display_lvgl_set_wifi_state(system_net_mode_t mode, const char *ap_ip,
-                                 const char *sta_ip, bool sta_connecting,
-                                 bool sta_connected)
+void display_lvgl_set_wifi_state(system_net_mode_t mode, const char *ap_ssid,
+                                 const char *ap_ip, const char *sta_ip,
+                                 bool sta_connecting, bool sta_connected)
 {
     if (s_state_mutex != NULL && xSemaphoreTake(s_state_mutex, pdMS_TO_TICKS(2)) == pdTRUE) {
         system_menu_set_net_mode(mode);
+        state_update_string(s_state.wifi_ap_ssid, sizeof(s_state.wifi_ap_ssid),
+                            ap_ssid != NULL && ap_ssid[0] != '\0' ? ap_ssid : "-");
         state_update_string(s_state.wifi_ap_ip, sizeof(s_state.wifi_ap_ip),
                             ap_ip != NULL && ap_ip[0] != '\0' ? ap_ip : "192.168.4.1");
         state_update_string(s_state.wifi_sta_ip, sizeof(s_state.wifi_sta_ip),

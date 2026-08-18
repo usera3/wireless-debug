@@ -20,6 +20,7 @@ typedef struct {
     char status[32];
     char firmware[24];
     char ssid[32];
+    char wifi_ap_ssid[33];
     char wifi_ap_ip[16];
     char wifi_sta_ip[16];
     bool wifi_sta_connecting;

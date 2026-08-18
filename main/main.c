@@ -876,6 +876,7 @@ static void wifi_manager_wifi_state_changed(const wifi_manager_status_t *status,
         return;
     }
     display_lvgl_set_wifi_state(status->mode,
+                                status->ap_ssid,
                                 status->ap_ip,
                                 status->sta_ip,
                                 status->sta_connecting,
