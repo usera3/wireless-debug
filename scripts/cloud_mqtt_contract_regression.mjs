@@ -85,22 +85,45 @@ assert.match(manifest, /espressif\/mqtt:\s*\^1\.0\.0/, 'main manifest must add e
 assert.match(manifest, /espressif\/cjson:/, 'main manifest must add espressif/cjson dependency for cJSON.h');
 
 const kconfig = readFileSync(resolve(root, 'main/Kconfig.projbuild'), 'utf8');
+const loadBalancerMqttUri = 'mqtt://39.108.83.25:1883';
+const loadBalancerWsUri = 'ws://39.108.83.25:18089';
+const legacyMqttUri = 'mqtt://43.153.137.20:1883';
+const legacyWsUri = 'ws://43.153.137.20:18089';
 assert.ok(kconfig.includes('config CLOUD_MQTT_ENABLE'), 'missing CLOUD_MQTT_ENABLE');
 assert.ok(kconfig.includes('config CLOUD_MQTT_DEVICE_ID'), 'missing CLOUD_MQTT_DEVICE_ID');
 assert.ok(kconfig.includes('config CLOUD_MQTT_URI'), 'missing CLOUD_MQTT_URI');
 assert.ok(kconfig.includes('default "auto"'), 'default device ID must auto-generate from MAC for multi-device fleets');
-assert.ok(kconfig.includes('default "mqtt://43.153.137.20:1883"'),
-  'default MQTT URI must target the shared cloud broker');
-assert.ok(kconfig.includes('default "ws://43.153.137.20:18089"'),
-  'default binary WebSocket URI must target the shared cloud uplink');
+assert.ok(kconfig.includes(`default "${loadBalancerMqttUri}"`),
+  'default MQTT URI must target the public load balancer');
+assert.ok(kconfig.includes(`default "${loadBalancerWsUri}"`),
+  'default binary WebSocket URI must target the public load balancer');
+assert.ok(!kconfig.includes(legacyMqttUri), 'Kconfig must not retain the legacy MQTT endpoint');
+assert.ok(!kconfig.includes(legacyWsUri), 'Kconfig must not retain the legacy WebSocket endpoint');
 
 const sdkconfig = readFileSync(resolve(root, 'sdkconfig'), 'utf8');
 assert.ok(sdkconfig.includes('CONFIG_CLOUD_MQTT_DEVICE_ID="auto"'),
   'sdkconfig device ID must auto-generate from MAC for this fleet build');
-assert.ok(sdkconfig.includes('CONFIG_CLOUD_MQTT_URI="mqtt://43.153.137.20:1883"'),
-  'sdkconfig MQTT URI must target the shared cloud broker for this fleet build');
-assert.ok(sdkconfig.includes('CONFIG_CLOUD_WS_UPLINK_URI="ws://43.153.137.20:18089"'),
-  'sdkconfig binary WebSocket URI must target the shared cloud uplink');
+assert.ok(sdkconfig.includes(`CONFIG_CLOUD_MQTT_URI="${loadBalancerMqttUri}"`),
+  'sdkconfig MQTT URI must target the public load balancer for this fleet build');
+assert.ok(sdkconfig.includes(`CONFIG_CLOUD_WS_UPLINK_URI="${loadBalancerWsUri}"`),
+  'sdkconfig binary WebSocket URI must target the public load balancer for this fleet build');
+assert.ok(!sdkconfig.includes(legacyMqttUri), 'sdkconfig must not retain the legacy MQTT endpoint');
+assert.ok(!sdkconfig.includes(legacyWsUri), 'sdkconfig must not retain the legacy WebSocket endpoint');
+
+const hardwareAcceptance = readFileSync(
+  resolve(root, 'scripts/cloud_osc_hardware_acceptance.py'),
+  'utf8',
+);
+assert.ok(
+  hardwareAcceptance.includes('parser.add_argument("--cloud-http", default="http://39.108.83.25:18088")'),
+  'hardware acceptance HTTP default must target the public load balancer',
+);
+assert.ok(
+  hardwareAcceptance.includes('parser.add_argument("--cloud-ws", default="ws://39.108.83.25:18089")'),
+  'hardware acceptance WebSocket default must target the public load balancer',
+);
+assert.ok(!hardwareAcceptance.includes('43.153.137.20'),
+  'hardware acceptance defaults must not retain the legacy cloud host');
 
 for (const token of [
   'parse_net_mode',
