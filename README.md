@@ -41,6 +41,15 @@ When the board starts in AP mode:
 
 The root path redirects to `/orig/i.html`.
 
+## Firmware Flash Files
+
+The current ESP32-S3 binary files are archived under
+[`evidence/runtime-snapshot-20260820/firmware-flash/`](evidence/runtime-snapshot-20260820/firmware-flash/).
+For a quick entry point, open [`FLASHING.md`](FLASHING.md). The recommended
+full-flash image is
+[`full_flash_0x0.bin`](evidence/runtime-snapshot-20260820/firmware-flash/full_flash_0x0.bin);
+write it at offset `0x0`.
+
 ## Current Runtime Snapshot
 
 The firmware and 183 cloud files used for the 2026-08-20 runtime are archived

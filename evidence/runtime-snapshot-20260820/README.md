@@ -14,7 +14,8 @@ the cloud runtime currently deployed on private host 183.
   - WebSocket uplink: `ws://39.108.83.25:18089`
 
 The four partition images and a complete 8 MB image are under
-`firmware-flash/`. For a complete restore, flash
+[`firmware-flash/`](firmware-flash/). From the repository root, the same
+package is linked by [`FLASHING.md`](../../FLASHING.md). For a complete restore, flash
 `firmware-flash/full_flash_0x0.bin` at offset `0x0`. The split image layout is
 documented in `firmware-flash/README.md`.
 

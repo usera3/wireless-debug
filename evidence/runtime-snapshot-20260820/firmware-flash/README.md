@@ -2,6 +2,9 @@
 
 Target: ESP32-S3 with 8 MB flash.
 
+From the repository root, open [`FLASHING.md`](../../../FLASHING.md) for a
+direct entry point. This directory is also linked from the root `README.md`.
+
 ## Complete flash
 
 Put the board into download mode and flash this one file at offset `0x0`:
