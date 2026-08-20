@@ -41,6 +41,15 @@ When the board starts in AP mode:
 
 The root path redirects to `/orig/i.html`.
 
+## Current Runtime Snapshot
+
+The firmware and 183 cloud files used for the 2026-08-20 runtime are archived
+in [`evidence/runtime-snapshot-20260820`](evidence/runtime-snapshot-20260820/).
+The complete ESP32-S3 flash image is
+[`full_flash_0x0.bin`](evidence/runtime-snapshot-20260820/firmware-flash/full_flash_0x0.bin)
+and must be written at offset `0x0`. Its source is commit `6cb4de2`, tagged
+`firmware-oled-ap-ssid-visible-20260818`.
+
 ## WiFi Scan Stability
 
 The WiFi provisioning page scans nearby APs while the PC is connected to the ESP32 SoftAP.

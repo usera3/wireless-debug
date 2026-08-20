@@ -1,0 +1,2409 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>无线调试云端观测台</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f3f6fa;
+        --surface: #ffffff;
+        --surface-soft: #f8fafc;
+        --line: #d7e0ea;
+        --line-strong: #bfccda;
+        --text: #142033;
+        --muted: #647286;
+        --blue: #1f6feb;
+        --blue-soft: #e9f2ff;
+        --green: #148a4d;
+        --amber: #b7791f;
+        --red: #c0392b;
+        --ink: #26364f;
+        --shadow: 0 16px 42px rgba(31, 43, 62, 0.1);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family: Inter, "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+        letter-spacing: 0;
+      }
+
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+
+      button {
+        border: 0;
+        cursor: pointer;
+      }
+
+      .topbar {
+        min-height: 76px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 16px 28px;
+        background: var(--surface);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .brand h1 {
+        margin: 0;
+        font-size: 21px;
+        line-height: 1.25;
+      }
+
+      .brand p {
+        margin: 5px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .actions,
+      .filters,
+      .tabs {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 28px;
+        padding: 0 10px;
+        border-radius: 999px;
+        background: #eef3fb;
+        color: #334b68;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .button {
+        min-height: 36px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 7px;
+        padding: 0 13px;
+        border-radius: 7px;
+        background: var(--blue);
+        color: #fff;
+        font-weight: 700;
+        transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+      }
+
+      .button.secondary {
+        background: #eef3fb;
+        color: #26425f;
+        border: 1px solid #d6e1ef;
+      }
+
+      .button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 18px rgba(31, 111, 235, 0.18);
+      }
+
+      .button.secondary:hover {
+        background: #e3edf9;
+        border-color: #bfd0e4;
+      }
+
+      .button.console-button {
+        min-height: 30px;
+        padding: 0 10px;
+        font-size: 12px;
+      }
+
+      .button:focus-visible,
+      .tab:focus-visible,
+      input:focus,
+      select:focus,
+      textarea:focus {
+        outline: 2px solid rgba(31, 111, 235, 0.45);
+        outline-offset: 2px;
+      }
+
+      .button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+        transform: none;
+        box-shadow: none;
+      }
+
+      .tabs-wrap {
+        padding: 12px 28px 0;
+        background: var(--surface);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .tabs {
+        overflow-x: auto;
+      }
+
+      .tab {
+        min-height: 38px;
+        padding: 0 16px;
+        border-radius: 7px 7px 0 0;
+        background: transparent;
+        color: var(--muted);
+        font-weight: 800;
+        border-bottom: 3px solid transparent;
+        transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+      }
+
+      .tab:hover {
+        background: #f3f7fc;
+        color: var(--ink);
+      }
+
+      .tab[data-active="true"] {
+        color: var(--blue);
+        border-bottom-color: var(--blue);
+        background: #f8fbff;
+      }
+
+      .main {
+        padding: 22px 28px 28px;
+      }
+
+      .tab-panel {
+        display: none;
+      }
+
+      .tab-panel[data-active="true"] {
+        display: block;
+      }
+
+      .grid {
+        display: grid;
+        gap: 16px;
+      }
+
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(138px, 1fr));
+        gap: 12px;
+      }
+
+      .metric,
+      .panel,
+      .kv-card {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+
+      .metric,
+      .panel {
+        box-shadow: var(--shadow);
+      }
+
+      .metric {
+        min-height: 86px;
+        padding: 14px 16px;
+        transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      .metric:hover,
+      .panel:hover {
+        border-color: var(--line-strong);
+        box-shadow: 0 18px 46px rgba(31, 43, 62, 0.13);
+      }
+
+      .metric:hover {
+        transform: translateY(-2px);
+      }
+
+      .metric span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 7px;
+        font-size: 25px;
+      }
+
+      .panel {
+        overflow: hidden;
+      }
+
+      .panel-head {
+        min-height: 58px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .panel-head h2 {
+        margin: 0;
+        font-size: 16px;
+      }
+
+      .panel-head p {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .filters {
+        min-width: 390px;
+      }
+
+      .filters input,
+      .filters select,
+      textarea {
+        width: 100%;
+        min-height: 36px;
+        border: 1px solid #ccd6e3;
+        border-radius: 7px;
+        padding: 8px 10px;
+        color: var(--text);
+        background: var(--surface);
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      .filters input:hover,
+      .filters select:hover,
+      textarea:hover {
+        border-color: #aebdd0;
+      }
+
+      .table-wrap {
+        overflow-x: auto;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        height: 48px;
+        padding: 0 14px;
+        border-bottom: 1px solid #edf1f5;
+        text-align: left;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+
+      th {
+        color: var(--muted);
+        font-size: 12px;
+        background: #f8fafc;
+      }
+
+      .device-row {
+        cursor: pointer;
+        transition: background 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      .device-row:hover {
+        background: #f3f8ff;
+        box-shadow: inset 3px 0 0 var(--blue);
+      }
+
+      tr[data-selected="true"] {
+        background: #eaf4ff;
+        box-shadow: inset 3px 0 0 var(--blue);
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-weight: 800;
+      }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--muted);
+      }
+
+      .online .dot {
+        background: var(--green);
+      }
+
+      .offline .dot {
+        background: var(--red);
+      }
+
+      .unknown .dot {
+        background: var(--muted);
+      }
+
+      .device-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 380px;
+        gap: 16px;
+      }
+
+      .detail-body {
+        padding: 16px;
+        display: grid;
+        gap: 14px;
+      }
+
+      .kv {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .kv-card {
+        min-height: 62px;
+        padding: 10px;
+        background: #fbfdff;
+        transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+      }
+
+      .kv-card:hover {
+        transform: translateY(-1px);
+        border-color: var(--line-strong);
+        background: #f7fbff;
+      }
+
+      .kv-card span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .kv-card strong {
+        display: block;
+        margin-top: 5px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 13px;
+      }
+
+      .connection-grid,
+      .capability-grid {
+        display: grid;
+        gap: 12px;
+        padding: 16px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .connection-card,
+      .capability-card {
+        min-height: 110px;
+        padding: 14px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fbfdff;
+        transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+      }
+
+      .connection-card:hover,
+      .capability-card:hover {
+        transform: translateY(-2px);
+        border-color: var(--line-strong);
+        background: #f7fbff;
+        box-shadow: 0 12px 28px rgba(31, 43, 62, 0.09);
+      }
+
+      .connection-card span,
+      .capability-card span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .connection-card strong,
+      .capability-card strong {
+        display: block;
+        margin-top: 8px;
+        font-size: 20px;
+        line-height: 1.2;
+      }
+
+      .connection-card p,
+      .capability-card p {
+        margin: 10px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.55;
+      }
+
+      .value-pill {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        margin-top: 10px;
+        padding: 0 8px;
+        border-radius: 999px;
+        background: #eef3fb;
+        color: #334b68;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .value-pill.ok {
+        background: #e9f8ef;
+        color: var(--green);
+      }
+
+      .value-pill.warn {
+        background: #fff7e6;
+        color: var(--amber);
+      }
+
+      .value-pill.bad {
+        background: #fdeeee;
+        color: var(--red);
+      }
+
+      .payload-box {
+        margin: 16px;
+        padding: 14px;
+        max-height: 280px;
+        overflow: auto;
+        border: 1px solid #dce5ef;
+        border-radius: 8px;
+        background: #0f172a;
+        color: #d8e6f5;
+        font-size: 12px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+      }
+
+      .trend-snapshot {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        padding: 16px;
+      }
+
+      .trend-snapshot .connection-card {
+        min-height: 96px;
+      }
+
+      .section-title {
+        margin: 2px 0 8px;
+        font-size: 13px;
+        color: #334155;
+      }
+
+      .muted {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .note-form {
+        display: grid;
+        gap: 8px;
+      }
+
+      .bus-form {
+        padding: 16px;
+        display: grid;
+        gap: 10px;
+      }
+
+      .note-form input {
+        width: 100%;
+        min-height: 36px;
+        border: 1px solid #ccd6e3;
+        border-radius: 7px;
+        padding: 8px 10px;
+      }
+
+      .bus-form select,
+      .bus-form textarea {
+        width: 100%;
+        min-height: 38px;
+        border: 1px solid #ccd6e3;
+        border-radius: 7px;
+        padding: 8px 10px;
+        background: var(--surface);
+      }
+
+      .form-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 148px;
+        gap: 10px;
+      }
+
+      .stream {
+        max-height: 360px;
+        overflow: auto;
+        border: 1px solid #e2e8f0;
+        border-radius: 7px;
+      }
+
+      .stream-row {
+        display: grid;
+        grid-template-columns: 92px 90px minmax(0, 1fr);
+        gap: 8px;
+        padding: 10px;
+        border-bottom: 1px solid #eef1f5;
+        font-size: 12px;
+        transition: background 0.15s ease;
+      }
+
+      .stream-row:hover {
+        background: #f8fbff;
+      }
+
+      .stream-row:last-child {
+        border-bottom: 0;
+      }
+
+      .stream-row code {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #475569;
+      }
+
+      .history-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1.25fr) minmax(340px, 0.75fr);
+        gap: 16px;
+      }
+
+      .empty {
+        padding: 26px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      .policy {
+        margin-top: 12px;
+        padding: 12px 16px;
+        border: 1px solid #f2d38a;
+        border-radius: 8px;
+        background: #fff8e8;
+        color: #684500;
+        font-size: 12px;
+      }
+
+      .error {
+        color: var(--red);
+        font-weight: 700;
+      }
+
+      @media (max-width: 1180px) {
+        .device-layout,
+        .history-layout {
+          grid-template-columns: 1fr;
+        }
+
+        .summary,
+        .kv,
+        .trend-snapshot,
+        .connection-grid,
+        .capability-grid {
+          grid-template-columns: repeat(2, minmax(138px, 1fr));
+        }
+      }
+
+      @media (max-width: 760px) {
+        .topbar,
+        .tabs-wrap,
+        .main {
+          padding-left: 14px;
+          padding-right: 14px;
+        }
+
+        .topbar,
+        .panel-head {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .actions,
+        .filters {
+          width: 100%;
+        }
+
+        .filters,
+        .form-row,
+        .trend-snapshot,
+        .connection-grid,
+        .capability-grid,
+        .history-layout {
+          min-width: 0;
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* Sub2API-inspired admin shell. Keep selectors used by the existing JS stable. */
+      :root {
+        --bg: #f6f8fb;
+        --surface: #ffffff;
+        --surface-soft: #f8fafc;
+        --line: #e5ebf2;
+        --line-strong: #d5dee9;
+        --text: #172033;
+        --muted: #69778b;
+        --blue: #14b8a6;
+        --blue-soft: #e9fbf7;
+        --green: #10b981;
+        --amber: #d97706;
+        --red: #e11d48;
+        --ink: #0f172a;
+        --shadow: 0 20px 54px rgba(15, 23, 42, 0.08);
+      }
+
+      body {
+        background:
+          radial-gradient(circle at 18% 4%, rgba(20, 184, 166, 0.13), transparent 26%),
+          radial-gradient(circle at 82% 0%, rgba(59, 130, 246, 0.10), transparent 24%),
+          var(--bg);
+      }
+
+      .app-shell {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 252px minmax(0, 1fr);
+      }
+
+      .sidebar {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(18px);
+        box-shadow: 10px 0 32px rgba(15, 23, 42, 0.03);
+        z-index: 2;
+      }
+
+      .sidebar-brand {
+        min-height: 102px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 20px 20px 18px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .brand-mark {
+        width: 38px;
+        height: 38px;
+        display: grid;
+        place-items: center;
+        border-radius: 8px;
+        background: linear-gradient(145deg, #172554, #14b8a6);
+        color: #ecfeff;
+        font-weight: 900;
+        font-size: 13px;
+        box-shadow: 0 12px 26px rgba(20, 184, 166, 0.18);
+      }
+
+      .brand-title {
+        margin: 0;
+        font-size: 20px;
+        line-height: 1.1;
+        font-weight: 900;
+        color: #0f172a;
+      }
+
+      .brand-version {
+        display: inline-flex;
+        margin-top: 7px;
+        min-height: 22px;
+        align-items: center;
+        padding: 0 8px;
+        border-radius: 7px;
+        background: #eef2f7;
+        color: #64748b;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .tabs-wrap {
+        flex: 1;
+        padding: 18px 12px;
+        border: 0;
+        background: transparent;
+        overflow-y: auto;
+      }
+
+      .tabs {
+        display: grid;
+        gap: 6px;
+        overflow: visible;
+      }
+
+      .nav-section {
+        margin: 18px 12px 8px;
+        color: #94a3b8;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .tab {
+        width: 100%;
+        min-height: 40px;
+        justify-content: flex-start;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 14px;
+        border-radius: 8px;
+        border-bottom: 0;
+        background: transparent;
+        color: #475569;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .tab::before {
+        content: attr(data-icon);
+        width: 22px;
+        height: 22px;
+        display: inline-grid;
+        place-items: center;
+        border-radius: 6px;
+        color: #64748b;
+        background: transparent;
+        font-size: 12px;
+        font-weight: 900;
+      }
+
+      .tab:hover {
+        background: #f1fbf8;
+        color: #0f766e;
+      }
+
+      .tab[data-active="true"] {
+        color: #0f766e;
+        border-bottom: 0;
+        background: #e9fbf7;
+      }
+
+      .tab[data-active="true"]::before {
+        color: #0f766e;
+        background: rgba(20, 184, 166, 0.12);
+      }
+
+      .sidebar-footer {
+        padding: 14px 12px 18px;
+        border-top: 1px solid var(--line);
+      }
+
+      .sidebar-footer .tab {
+        cursor: default;
+        color: #64748b;
+      }
+
+      .workspace {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .topbar {
+        min-height: 102px;
+        padding: 22px 38px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.82);
+        backdrop-filter: blur(18px);
+      }
+
+      .brand h1 {
+        font-size: 21px;
+        font-weight: 900;
+        color: #0f172a;
+      }
+
+      .brand p {
+        font-size: 13px;
+        color: #64748b;
+      }
+
+      .actions {
+        gap: 12px;
+      }
+
+      .user-menu {
+        position: relative;
+      }
+
+      .user-chip {
+        min-height: 38px;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #fff;
+        color: #334155;
+        font-size: 13px;
+        font-weight: 800;
+        box-shadow: 0 10px 22px rgba(15, 23, 42, 0.05);
+        transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+      }
+
+      .user-chip:hover,
+      .user-menu[data-open="true"] .user-chip {
+        border-color: #cbd5e1;
+        box-shadow: 0 14px 28px rgba(15, 23, 42, 0.09);
+        transform: translateY(-1px);
+      }
+
+      .avatar {
+        width: 26px;
+        height: 26px;
+        display: grid;
+        place-items: center;
+        border-radius: 50%;
+        background: linear-gradient(145deg, #ccfbf1, #bfdbfe);
+        color: #0f766e;
+        font-size: 12px;
+      }
+
+      .chevron {
+        color: #94a3b8;
+        font-size: 12px;
+      }
+
+      .user-dropdown {
+        position: absolute;
+        right: 0;
+        top: calc(100% + 10px);
+        width: 224px;
+        display: none;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fff;
+        box-shadow: 0 22px 48px rgba(15, 23, 42, 0.14);
+        z-index: 10;
+      }
+
+      .user-menu[data-open="true"] .user-dropdown {
+        display: block;
+      }
+
+      .user-card {
+        padding: 16px 18px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .user-card strong,
+      .user-card span {
+        display: block;
+      }
+
+      .user-card strong {
+        color: #0f172a;
+        font-size: 14px;
+      }
+
+      .user-card span {
+        margin-top: 4px;
+        color: #64748b;
+        font-size: 12px;
+      }
+
+      .user-menu-item {
+        min-height: 42px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 18px;
+        color: #334155;
+        text-decoration: none;
+        font-size: 14px;
+        transition: background 0.15s ease, color 0.15s ease;
+      }
+
+      .user-menu-item:hover {
+        background: #f8fafc;
+        color: #0f766e;
+      }
+
+      .user-menu-item.danger {
+        color: #e11d48;
+        border-top: 1px solid var(--line);
+      }
+
+      .user-menu-item.danger:hover {
+        background: #fff1f2;
+        color: #be123c;
+      }
+
+      .badge {
+        min-height: 30px;
+        border-radius: 999px;
+        background: #ecfdf5;
+        color: #047857;
+        border: 1px solid #c7f3df;
+      }
+
+      .main {
+        flex: 1;
+        padding: 34px;
+        background:
+          linear-gradient(90deg, rgba(20, 184, 166, 0.08), rgba(59, 130, 246, 0.06) 46%, transparent 72%),
+          var(--bg);
+      }
+
+      .page-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 24px;
+      }
+
+      .toolbar-title h2 {
+        margin: 0;
+        font-size: 22px;
+        line-height: 1.25;
+      }
+
+      .toolbar-title p {
+        margin: 6px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .summary {
+        grid-template-columns: repeat(4, minmax(160px, 1fr));
+        margin-bottom: 16px;
+      }
+
+      .metric,
+      .panel,
+      .kv-card {
+        border-color: var(--line);
+        border-radius: 12px;
+      }
+
+      .metric {
+        min-height: 94px;
+        padding: 18px;
+        box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+      }
+
+      .metric span {
+        color: #64748b;
+        font-weight: 700;
+      }
+
+      .metric strong {
+        font-size: 28px;
+        color: #0f172a;
+      }
+
+      .panel {
+        border-radius: 14px;
+        box-shadow: 0 18px 46px rgba(15, 23, 42, 0.07);
+      }
+
+      .panel-head {
+        min-height: 68px;
+        padding: 16px 20px;
+      }
+
+      .panel-head h2 {
+        font-size: 17px;
+        font-weight: 900;
+      }
+
+      .filters {
+        min-width: min(520px, 50vw);
+      }
+
+      .filters input,
+      .filters select,
+      textarea,
+      .note-form input,
+      .bus-form select,
+      .bus-form textarea {
+        border-radius: 10px;
+        border-color: #dce4ee;
+        background: #fff;
+      }
+
+      .filters input {
+        min-width: 260px;
+      }
+
+      .button {
+        min-height: 40px;
+        border-radius: 10px;
+        background: linear-gradient(90deg, #14b8a6, #0f9f8f);
+        box-shadow: 0 12px 22px rgba(20, 184, 166, 0.18);
+      }
+
+      .button.secondary {
+        background: #fff;
+        color: #334155;
+        border: 1px solid var(--line);
+        box-shadow: 0 10px 22px rgba(15, 23, 42, 0.06);
+      }
+
+      .button.secondary:hover {
+        background: #f8fafc;
+        border-color: #cbd5e1;
+      }
+
+      .table-wrap {
+        padding: 0 20px 18px;
+      }
+
+      table {
+        border-collapse: separate;
+        border-spacing: 0;
+      }
+
+      th {
+        height: 52px;
+        background: #fff;
+        color: #64748b;
+        font-weight: 800;
+      }
+
+      td {
+        height: 58px;
+        border-bottom-color: #edf2f7;
+      }
+
+      .device-row:hover {
+        background: #f2fffb;
+        box-shadow: inset 3px 0 0 #14b8a6;
+      }
+
+      tr[data-selected="true"] {
+        background: #eefcf8;
+        box-shadow: inset 3px 0 0 #14b8a6;
+      }
+
+      .status {
+        min-height: 24px;
+        padding: 0 8px;
+        border-radius: 999px;
+        background: #f1f5f9;
+        font-size: 12px;
+      }
+
+      .status.online {
+        background: #ecfdf5;
+        color: #047857;
+      }
+
+      .status.offline {
+        background: #fff1f2;
+        color: #be123c;
+      }
+
+      .device-layout,
+      .history-layout {
+        align-items: start;
+      }
+
+      @media (max-width: 1500px) {
+        #tab-overview th:nth-child(4),
+        #tab-overview td:nth-child(4),
+        #tab-overview th:nth-child(10),
+        #tab-overview td:nth-child(10),
+        #tab-overview th:nth-child(13),
+        #tab-overview td:nth-child(13),
+        #tab-overview th:nth-child(14),
+        #tab-overview td:nth-child(14) {
+          display: none;
+        }
+      }
+
+      .connection-card,
+      .capability-card,
+      .kv-card {
+        border-radius: 12px;
+        background: #fff;
+      }
+
+      .payload-box {
+        border-radius: 12px;
+      }
+
+      @media (max-width: 980px) {
+        .app-shell {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          position: static;
+          height: auto;
+        }
+
+        .sidebar-brand,
+        .sidebar-footer {
+          display: none;
+        }
+
+        .tabs-wrap {
+          padding: 10px 14px;
+        }
+
+        .tabs {
+          display: flex;
+          overflow-x: auto;
+        }
+
+        .tab {
+          flex: 0 0 auto;
+          width: auto;
+        }
+
+        .topbar,
+        .main {
+          padding-left: 18px;
+          padding-right: 18px;
+        }
+      }
+
+      @media (max-width: 760px) {
+        .app-shell,
+        .workspace,
+        .sidebar,
+        .tabs-wrap,
+        .topbar,
+        .main {
+          width: 100%;
+          min-width: 0;
+        }
+
+        .sidebar {
+          overflow: hidden;
+        }
+
+        .tabs-wrap {
+          padding: 10px 18px;
+        }
+
+        .tabs {
+          max-width: 100%;
+          overflow-x: auto;
+          scrollbar-width: thin;
+        }
+
+        .nav-section {
+          margin-left: 0;
+          margin-right: 0;
+        }
+
+        .topbar {
+          min-height: 0;
+          align-items: stretch;
+          flex-direction: column;
+          gap: 16px;
+          padding-top: 20px;
+          padding-bottom: 16px;
+        }
+
+        .brand h1 {
+          font-size: 20px;
+        }
+
+        .actions {
+          width: 100%;
+          flex-wrap: wrap;
+          justify-content: flex-start;
+        }
+
+        .actions .user-menu {
+          margin-left: auto;
+        }
+
+        .user-dropdown {
+          max-width: calc(100vw - 36px);
+        }
+
+        .main {
+          padding-top: 24px;
+          padding-bottom: 24px;
+        }
+
+        .page-toolbar,
+        .panel-head {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .summary {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .metric {
+          min-width: 0;
+          padding: 16px;
+        }
+
+        .filters {
+          width: 100%;
+          min-width: 0;
+          flex-direction: column;
+        }
+
+        .filters input,
+        .filters select {
+          width: 100%;
+          min-width: 0;
+        }
+
+        .table-wrap {
+          padding: 0 12px 14px;
+          overflow-x: auto;
+        }
+
+        table {
+          min-width: 680px;
+        }
+      }
+
+      @media (max-width: 360px) {
+        .summary {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="sidebar-brand">
+          <div class="brand-mark">WD</div>
+          <div>
+            <h1 class="brand-title">Wireless Debug</h1>
+            <span class="brand-version">Cloud Console</span>
+          </div>
+        </div>
+        <nav class="tabs-wrap" aria-label="云端控制台视图">
+          <div class="nav-section">控制台</div>
+          <div class="tabs">
+            <button class="tab" type="button" data-icon="OV" data-tab="overview" data-active="true">仪表盘</button>
+            <button class="tab" type="button" data-icon="DV" data-tab="device">设备管理</button>
+            <button class="tab" type="button" data-icon="CN" data-tab="connectivity">连接管理</button>
+            <button class="tab" type="button" data-icon="HS" data-tab="history">连接历史</button>
+            <button class="tab" type="button" data-icon="MS" data-tab="messages">消息中心</button>
+            <button class="tab" type="button" data-icon="CP" data-tab="capabilities">能力清单</button>
+            <button class="tab" type="button" data-icon="EV" data-tab="events">事件记录</button>
+          </div>
+        </nav>
+        <div class="sidebar-footer">
+          <div class="nav-section">系统</div>
+          <button class="tab" type="button" data-icon="ST">系统设置</button>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div class="brand">
+            <h1>无线调试云端观测台</h1>
+            <p>多设备状态、历史事件、诊断回执集中查看</p>
+          </div>
+          <div class="actions">
+            <span class="badge" id="brokerState">MQTT 未知</span>
+            <span class="badge" id="lastSync">未同步</span>
+            <button class="button secondary" id="refreshBtn" type="button">刷新</button>
+            <div class="user-menu" id="userMenu">
+              <button class="user-chip" id="userMenuButton" type="button" aria-haspopup="menu" aria-expanded="false">
+                <span class="avatar">AD</span>
+                <span>Admin</span>
+                <span class="chevron">⌄</span>
+              </button>
+              <div class="user-dropdown" role="menu" aria-label="用户菜单">
+                <div class="user-card">
+                  <strong>Admin</strong>
+                  <span>admin@admin.com</span>
+                </div>
+                <a class="user-menu-item" href="#" role="menuitem" aria-disabled="true">个人资料</a>
+                <a class="user-menu-item" href="#" role="menuitem" aria-disabled="true">API 密钥</a>
+                <a class="user-menu-item" href="#" role="menuitem" aria-disabled="true">查看新手引导</a>
+                <a class="user-menu-item danger" href="/logout" role="menuitem">退出登录</a>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main class="main">
+          <div class="page-toolbar">
+            <div class="toolbar-title">
+              <h2 id="pageTitle">仪表盘</h2>
+              <p id="pageSubtitle">按设备名、网络状态和实时心跳集中管理 ESP32 无线调试终端</p>
+            </div>
+          </div>
+      <section class="tab-panel" id="tab-overview" data-active="true">
+        <div class="grid">
+          <div class="grid">
+            <div class="summary">
+              <div class="metric"><span>设备总数</span><strong id="totalCount">0</strong></div>
+              <div class="metric"><span>在线</span><strong id="onlineCount">0</strong></div>
+              <div class="metric"><span>离线</span><strong id="offlineCount">0</strong></div>
+              <div class="metric"><span>未知</span><strong id="unknownCount">0</strong></div>
+            </div>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>设备总览</h2>
+                  <p id="tableHint">等待设备上报</p>
+                </div>
+                <div class="filters">
+                  <input id="searchInput" placeholder="搜索设备 ID / MAC / 备注 / IP" />
+                  <select id="stateFilter">
+                    <option value="all">全部</option>
+                    <option value="online">在线</option>
+                    <option value="offline">离线</option>
+                    <option value="unknown">未知</option>
+                  </select>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>设备名</th>
+                      <th>控制台</th>
+                      <th>设备 ID</th>
+                      <th>硬件 MAC</th>
+                      <th>状态</th>
+                      <th>健康</th>
+                      <th>网络</th>
+                      <th>STA IP</th>
+                      <th>AP IP</th>
+                      <th>通信</th>
+                      <th>BLE</th>
+                      <th>WS</th>
+                      <th>UART</th>
+                      <th>固件</th>
+                      <th>最后心跳</th>
+                    </tr>
+                  </thead>
+                  <tbody id="deviceRows">
+                    <tr><td colspan="15" class="empty">暂无数据</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section class="tab-panel" id="tab-device">
+        <div class="device-layout">
+          <div class="grid">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>诊断摘要</h2>
+                  <p id="diagnosticTitle">未选择设备</p>
+                </div>
+              </div>
+              <div class="connection-grid" id="diagnosticGrid">
+                <div class="empty">从总览选择设备</div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>系统资源</h2>
+                  <p>来自固件 MQTT status 的 heap、通信和 OLED 指标</p>
+                </div>
+              </div>
+              <div class="connection-grid" id="systemGrid">
+                <div class="empty">等待扩展状态上报</div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>设备详情</h2>
+                  <p id="detailTitle">未选择设备</p>
+                </div>
+                <button class="button" id="queryBtn" type="button" disabled>刷新状态</button>
+              </div>
+              <div class="detail-body" id="detailBody">
+                <div class="empty">从总览选择设备</div>
+              </div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>备注</h2>
+                <p>记录样机位置、用途和现场信息</p>
+              </div>
+            </div>
+            <div class="detail-body" id="noteBody">
+              <div class="empty">从总览选择设备</div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="tab-panel" id="tab-connectivity">
+        <div class="history-layout">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>连接状态</h2>
+                <p id="connectionTitle">选择设备后显示网络、BLE 和 WebSocket 状态</p>
+              </div>
+            </div>
+            <div class="connection-grid" id="connectionGrid">
+              <div class="empty">从总览选择设备</div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>最近状态包</h2>
+                <p>MQTT status 原始上报，便于现场核对</p>
+              </div>
+            </div>
+            <pre class="payload-box" id="mqttPayload">从总览选择设备</pre>
+          </section>
+        </div>
+      </section>
+
+      <section class="tab-panel" id="tab-history">
+        <section class="panel" style="margin-bottom:16px;">
+          <div class="panel-head">
+            <div>
+              <h2>最近状态摘要</h2>
+              <p>先看结论，再看下方历史变化</p>
+            </div>
+          </div>
+          <div class="trend-snapshot" id="trendSnapshot">
+            <div class="empty">从总览选择设备</div>
+          </div>
+        </section>
+
+        <section class="panel" style="margin-top:16px;">
+          <div class="panel-head">
+            <div>
+              <h2>命令响应</h2>
+              <p>最近 query_status 的 ACK 情况</p>
+            </div>
+          </div>
+          <div class="stream" id="latencyRows">
+            <div class="empty">暂无命令</div>
+          </div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="tab-messages">
+        <div class="history-layout">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>云端发送</h2>
+                <p>通过 MQTT inbox 给设备发送 notify 消息，设备本地决定如何显示</p>
+              </div>
+            </div>
+            <form class="bus-form" id="busMessageForm">
+              <label class="section-title" for="busTargetDevice">目标设备</label>
+              <select id="busTargetDevice"></select>
+              <div class="form-row">
+                <div>
+                  <label class="section-title" for="busChannel">通道</label>
+                  <select id="busChannel">
+                    <option value="notify">notify / OLED 通知</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="section-title">当前目标</label>
+                  <div class="badge" id="busTargetState">未选择</div>
+                </div>
+              </div>
+              <label class="section-title" for="busPayload">消息内容</label>
+              <textarea id="busPayload" rows="8" maxlength="256" placeholder="输入要显示在目标设备上的消息"></textarea>
+              <button class="button" id="sendBusMessage" type="submit">发送消息</button>
+              <div class="muted" id="busSendMessage">当前只开放 notify，避免把云端做成危险控制入口。</div>
+            </form>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>消息流水</h2>
+                <p>cloud / device 作为参与者的发布、转发和 ACK</p>
+              </div>
+              <button class="button secondary" id="refreshBusBtn" type="button">刷新流水</button>
+            </div>
+            <div class="stream" id="busMessageRows">
+              <div class="empty">暂无消息</div>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="tab-panel" id="tab-capabilities">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>能力清单</h2>
+              <p>依据 ESP32 固件本地 HTTP、WebSocket、BLE 和 MQTT 命令面整理</p>
+            </div>
+          </div>
+          <div class="capability-grid" id="capabilityGrid">
+            <div class="empty">正在整理能力</div>
+          </div>
+          <div class="policy">云端当前只开放安全查询。会改变现场网络、写电机参数、启动示波、OTA、重启等动作应保留在局域网现场入口。</div>
+        </section>
+      </section>
+
+      <section class="tab-panel" id="tab-events">
+        <div class="history-layout">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>最近事件</h2>
+                <p>status / availability / ack 原始记录</p>
+              </div>
+            </div>
+            <div class="stream" id="eventRows">
+              <div class="empty">暂无事件</div>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h2>最近命令</h2>
+                <p>云端安全诊断命令记录</p>
+              </div>
+            </div>
+            <div class="stream" id="commandRows">
+              <div class="empty">暂无命令</div>
+            </div>
+          </section>
+        </div>
+      </section>
+        </main>
+      </section>
+    </div>
+
+    <script>
+      const state = {
+        devices: [],
+        selectedId: '',
+        detail: null,
+        history: null,
+        busMessages: [],
+        filter: 'all',
+        query: '',
+        activeTab: 'overview',
+      };
+
+      const els = {
+        total: document.getElementById('totalCount'),
+        online: document.getElementById('onlineCount'),
+        offline: document.getElementById('offlineCount'),
+        unknown: document.getElementById('unknownCount'),
+        rows: document.getElementById('deviceRows'),
+        lastSync: document.getElementById('lastSync'),
+        brokerState: document.getElementById('brokerState'),
+        tableHint: document.getElementById('tableHint'),
+        diagnosticTitle: document.getElementById('diagnosticTitle'),
+        diagnosticGrid: document.getElementById('diagnosticGrid'),
+        systemGrid: document.getElementById('systemGrid'),
+        detailTitle: document.getElementById('detailTitle'),
+        detailBody: document.getElementById('detailBody'),
+        noteBody: document.getElementById('noteBody'),
+        queryBtn: document.getElementById('queryBtn'),
+        refreshBtn: document.getElementById('refreshBtn'),
+        searchInput: document.getElementById('searchInput'),
+        stateFilter: document.getElementById('stateFilter'),
+        connectionTitle: document.getElementById('connectionTitle'),
+        connectionGrid: document.getElementById('connectionGrid'),
+        mqttPayload: document.getElementById('mqttPayload'),
+        trendSnapshot: document.getElementById('trendSnapshot'),
+        latencyRows: document.getElementById('latencyRows'),
+        busMessageForm: document.getElementById('busMessageForm'),
+        busTargetDevice: document.getElementById('busTargetDevice'),
+        busChannel: document.getElementById('busChannel'),
+        busPayload: document.getElementById('busPayload'),
+        busTargetState: document.getElementById('busTargetState'),
+        busSendMessage: document.getElementById('busSendMessage'),
+        sendBusMessage: document.getElementById('sendBusMessage'),
+        refreshBusBtn: document.getElementById('refreshBusBtn'),
+        busMessageRows: document.getElementById('busMessageRows'),
+        capabilityGrid: document.getElementById('capabilityGrid'),
+        eventRows: document.getElementById('eventRows'),
+        commandRows: document.getElementById('commandRows'),
+        pageTitle: document.getElementById('pageTitle'),
+        pageSubtitle: document.getElementById('pageSubtitle'),
+        userMenu: document.getElementById('userMenu'),
+        userMenuButton: document.getElementById('userMenuButton'),
+      };
+
+      function text(value) {
+        return value === null || value === undefined || value === '' ? '-' : String(value);
+      }
+
+      function escapeHtml(value) {
+        return text(value).replace(/[&<>"']/g, (char) => ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#039;',
+        }[char]));
+      }
+
+      function relativeTime(value) {
+        if (!value) return '-';
+        const delta = Date.now() - new Date(value).getTime();
+        if (Number.isNaN(delta)) return '-';
+        if (delta < 5000) return '刚刚';
+        if (delta < 60000) return `${Math.floor(delta / 1000)} 秒前`;
+        if (delta < 3600000) return `${Math.floor(delta / 60000)} 分钟前`;
+        if (delta < 86400000) return `${Math.floor(delta / 3600000)} 小时前`;
+        return `${Math.floor(delta / 86400000)} 天前`;
+      }
+
+      function stateLabel(value) {
+        return {
+          online: '在线',
+          offline: '离线',
+          unknown: '未知',
+        }[value] || '未知';
+      }
+
+      function commandLatency(command) {
+        if (command.latency_ms !== undefined && command.latency_ms !== null) {
+          if (command.latency_ms < 1000) return `${command.latency_ms} ms`;
+          return `${(command.latency_ms / 1000).toFixed(1)} s`;
+        }
+        if (!command.created_at || !command.ack_at) return '-';
+        const delta = new Date(command.ack_at).getTime() - new Date(command.created_at).getTime();
+        if (!Number.isFinite(delta) || delta < 0) return '-';
+        if (delta < 1000) return `${delta} ms`;
+        return `${(delta / 1000).toFixed(1)} s`;
+      }
+
+      function formatUptime(ms) {
+        const value = Number(ms);
+        if (!Number.isFinite(value) || value <= 0) return '-';
+        const seconds = Math.floor(value / 1000);
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        if (days > 0) return `${days} 天 ${hours} 小时`;
+        if (hours > 0) return `${hours} 小时 ${minutes} 分`;
+        return `${minutes} 分钟`;
+      }
+
+      function formatBytes(value) {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return '-';
+        if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+        if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+        return `${n} B`;
+      }
+
+      function boolText(value, yes = '是', no = '否') {
+        return value ? yes : no;
+      }
+
+      function isDeviceOnline(device) {
+        return device && device.cloud_state === 'online';
+      }
+
+      function currentText(device, value, unknown = '-') {
+        if (!isDeviceOnline(device)) return unknown;
+        return text(value);
+      }
+
+      function currentBoolText(device, value, yes, no) {
+        if (!isDeviceOnline(device)) return '未知';
+        if (value === null || value === undefined) return '未知';
+        return boolText(value, yes, no);
+      }
+
+      function currentHealth(device, value) {
+        if (!isDeviceOnline(device) || value === null || value === undefined) return null;
+        return value === true;
+      }
+
+      function boolStatus(cloudState, value, yes, no) {
+        if (cloudState !== 'online') return '<span class="muted">-</span>';
+        const active = value === true;
+        const tone = active ? 'online' : 'offline';
+        return `<span class="status ${tone}"><i class="dot"></i>${escapeHtml(active ? yes : no)}</span>`;
+      }
+
+      function pillClass(value) {
+        if (value === true) return 'ok';
+        if (value === false) return 'bad';
+        return 'warn';
+      }
+
+      function diagnosticLevelText(level) {
+        return {
+          normal: '正常',
+          attention: '关注',
+          warning: '检查',
+          offline: '离线',
+          unknown: '未知',
+        }[level] || '未知';
+      }
+
+      function diagnosticTone(level) {
+        if (level === 'normal') return 'ok';
+        if (level === 'attention') return 'warn';
+        if (level === 'warning' || level === 'offline') return 'bad';
+        return 'warn';
+      }
+
+      function deviceLabel(deviceId) {
+        const device = state.devices.find((item) => item.device_id === deviceId);
+        return device ? (device.display_name || device.device_id) : deviceId;
+      }
+
+      function busStateLabel(value) {
+        return {
+          PENDING: '待发布',
+          PUBLISHED: '已发布',
+          ACKED: '已确认',
+          FAILED: '失败',
+        }[value] || value || '未知';
+      }
+
+      function actorLabel(type, id, displayName) {
+        if (type === 'cloud') return '云平台';
+        return displayName || deviceLabel(id) || id || '-';
+      }
+
+      function openRemoteConsole(deviceId) {
+        const device = state.devices.find((item) => item.device_id === deviceId) || { device_id: deviceId };
+        window.open(`/remote/${encodeURIComponent(device.device_id)}/orig/i.html`, '_blank', 'noopener');
+      }
+
+      function latestStatusPayload() {
+        const detailPayload = state.detail && state.detail.device ? state.detail.device.last_status_json : null;
+        if (detailPayload && typeof detailPayload === 'object') return detailPayload;
+        const points = state.history && state.history.status_points ? state.history.status_points : [];
+        return points.length ? points[points.length - 1] : {};
+      }
+
+      function transitionCount(points, field) {
+        let count = 0;
+        for (let i = 1; i < points.length; i += 1) {
+          if (points[i][field] !== points[i - 1][field]) count += 1;
+        }
+        return count;
+      }
+
+      async function api(path, options = {}) {
+        const response = await fetch(path, {
+          ...options,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(options.headers || {}),
+          },
+        });
+        if (!response.ok) {
+          const body = await response.text();
+          let message = body || `HTTP ${response.status}`;
+          try {
+            message = JSON.parse(body).message || message;
+          } catch (_) {
+            // Keep plain-text response body.
+          }
+          throw new Error(message);
+        }
+        return response.json();
+      }
+
+      function setActiveTab(tabName) {
+        const validTabs = new Set(['overview', 'device', 'connectivity', 'history', 'messages', 'capabilities', 'events']);
+        if (!validTabs.has(tabName)) tabName = 'overview';
+        state.activeTab = tabName;
+        const pageMeta = {
+          overview: ['仪表盘', '按设备名、网络状态和实时心跳集中管理 ESP32 无线调试终端'],
+          device: ['设备管理', '查看设备诊断、系统资源、基础信息和备注'],
+          connectivity: ['连接管理', '核对 AP / STA / BLE / WebSocket / UART 的实时状态'],
+          history: ['连接历史', '查看状态变化和云端命令 ACK 响应'],
+          messages: ['消息中心', '通过云平台向设备发送 notify，并查看消息流水'],
+          capabilities: ['能力清单', '整理云端、本地网页和固件已经暴露的能力边界'],
+          events: ['事件记录', '查看设备 status、availability 和命令回执原始记录'],
+        };
+        const [title, subtitle] = pageMeta[tabName];
+        els.pageTitle.textContent = title;
+        els.pageSubtitle.textContent = subtitle;
+        for (const tab of document.querySelectorAll('.tab')) {
+          tab.dataset.active = String(tab.dataset.tab === tabName);
+        }
+        for (const panel of document.querySelectorAll('.tab-panel')) {
+          panel.dataset.active = String(panel.id === `tab-${tabName}`);
+        }
+        if (window.location.hash !== `#${tabName}`) {
+          window.history.replaceState(null, '', `#${tabName}`);
+        }
+      }
+
+      function filteredDevices() {
+        const q = state.query.trim().toLowerCase();
+        return state.devices.filter((device) => {
+          if (state.filter !== 'all' && device.cloud_state !== state.filter) return false;
+          if (!q) return true;
+          return [device.device_id, device.device_mac, device.note, device.display_name, device.sta_ip, device.ap_ip]
+            .some((value) => text(value).toLowerCase().includes(q));
+        });
+      }
+
+      function renderSummary(summary) {
+        els.total.textContent = summary.total || 0;
+        els.online.textContent = summary.online || 0;
+        els.offline.textContent = summary.offline || 0;
+        els.unknown.textContent = summary.unknown || 0;
+      }
+
+      function renderRows() {
+        const rows = filteredDevices();
+        els.tableHint.textContent = rows.length ? `${rows.length} 台设备` : '没有匹配设备';
+        if (!rows.length) {
+          els.rows.innerHTML = '<tr><td colspan="15" class="empty">暂无数据</td></tr>';
+          return;
+        }
+        els.rows.innerHTML = rows.map((device) => `
+          <tr class="device-row" data-id="${escapeHtml(device.device_id)}" data-selected="${device.device_id === state.selectedId}">
+            <td><strong>${escapeHtml(device.display_name || device.device_id)}</strong></td>
+            <td><button class="button secondary console-button" type="button" data-console-id="${escapeHtml(device.device_id)}">控制台</button></td>
+            <td><strong>${escapeHtml(device.device_id)}</strong></td>
+            <td>${escapeHtml(device.device_mac || '-')}</td>
+            <td><span class="status ${escapeHtml(device.cloud_state)}"><i class="dot"></i>${escapeHtml(stateLabel(device.cloud_state))}</span></td>
+            <td>${escapeHtml(device.health_score ?? '-')}${device.health_score === null || device.health_score === undefined ? '' : ' 分'}</td>
+            <td>${escapeHtml(device.net_mode)}</td>
+            <td>${escapeHtml(device.sta_ip)}</td>
+            <td>${escapeHtml(device.ap_ip)}</td>
+            <td>${escapeHtml(device.comm_mode)}</td>
+            <td>${boolStatus(device.cloud_state, device.ble_ready, '就绪', '关闭')}</td>
+            <td>${boolStatus(device.cloud_state, device.wifi_ws_client, '已接入', '未接入')}</td>
+            <td>${escapeHtml(device.uart_baud)}</td>
+            <td>${escapeHtml(device.fw_version)}</td>
+            <td>${escapeHtml(relativeTime(device.last_seen_at))}</td>
+          </tr>
+        `).join('');
+        for (const row of els.rows.querySelectorAll('.device-row')) {
+          row.addEventListener('click', () => selectDevice(row.dataset.id));
+        }
+        for (const button of els.rows.querySelectorAll('.console-button')) {
+          button.addEventListener('click', (event) => {
+            event.stopPropagation();
+            openRemoteConsole(button.dataset.consoleId);
+          });
+        }
+      }
+
+      function renderDeviceTab() {
+        const detail = state.detail;
+        els.queryBtn.disabled = !state.selectedId;
+        if (!detail || !detail.device) {
+          els.detailTitle.textContent = state.selectedId || '未选择设备';
+          els.detailBody.innerHTML = '<div class="empty">从总览选择设备</div>';
+          els.noteBody.innerHTML = '<div class="empty">从总览选择设备</div>';
+          return;
+        }
+        const device = detail.device;
+        const payload = latestStatusPayload();
+        els.detailTitle.textContent = device.device_id;
+        els.detailBody.innerHTML = `
+          <form class="note-form" id="displayNameForm">
+            <label class="section-title" for="displayNameInput">设备名</label>
+            <input id="displayNameInput" maxlength="128" value="${escapeHtml(device.display_name || '')}" placeholder="ESP32-001" />
+            <button class="button secondary" type="submit">保存设备名</button>
+            <div class="muted" id="displayNameMessage">设备名不能重复；未填写时系统会自动分配 ESP32-001 这种名称。</div>
+          </form>
+          <div class="kv">
+            <div class="kv-card"><span>设备名</span><strong>${escapeHtml(device.display_name || device.device_id)}</strong></div>
+            <div class="kv-card"><span>设备标识</span><strong>${escapeHtml(device.device_id)}</strong></div>
+            <div class="kv-card"><span>硬件 MAC</span><strong>${escapeHtml(device.device_mac || payload.device_mac || '-')}</strong></div>
+            <div class="kv-card"><span>云端状态</span><strong>${escapeHtml(stateLabel(device.cloud_state))}</strong></div>
+            <div class="kv-card"><span>最后心跳</span><strong>${escapeHtml(relativeTime(device.last_seen_at))}</strong></div>
+            <div class="kv-card"><span>网络模式</span><strong>${escapeHtml(currentText(device, payload.net_mode || device.net_mode, '未知'))}</strong></div>
+            <div class="kv-card"><span>STA 连接</span><strong>${currentBoolText(device, payload.sta_connected ?? device.sta_connected, '已连接', '未连接')}</strong></div>
+            <div class="kv-card"><span>STA 配置</span><strong>${currentBoolText(device, payload.sta_configured, '已保存', '未保存')}</strong></div>
+            <div class="kv-card"><span>STA 正在连接</span><strong>${currentBoolText(device, payload.sta_connecting, '连接中', '空闲')}</strong></div>
+            <div class="kv-card"><span>STA IP</span><strong>${escapeHtml(currentText(device, payload.sta_ip || device.sta_ip))}</strong></div>
+            <div class="kv-card"><span>AP IP</span><strong>${escapeHtml(currentText(device, payload.ap_ip || device.ap_ip))}</strong></div>
+            <div class="kv-card"><span>通信模式</span><strong>${escapeHtml(currentText(device, payload.comm_mode || device.comm_mode, '未知'))}</strong></div>
+            <div class="kv-card"><span>UART</span><strong>${escapeHtml(currentText(device, payload.uart_baud || device.uart_baud))}</strong></div>
+            <div class="kv-card"><span>BLE</span><strong>${currentBoolText(device, payload.ble_ready, '已启动', '未启动')}</strong></div>
+            <div class="kv-card"><span>WebSocket</span><strong>${currentBoolText(device, payload.wifi_ws_client, '有客户端', '无客户端')}</strong></div>
+            <div class="kv-card"><span>运行时长</span><strong>${escapeHtml(isDeviceOnline(device) ? formatUptime(payload.uptime_ms || device.uptime_ms) : '-')}</strong></div>
+            <div class="kv-card"><span>固件</span><strong>${escapeHtml(device.fw_version)}</strong></div>
+          </div>
+          <div class="policy">云端只保留安全诊断操作。网络模式、配网和固件升级仍由现场入口处理。</div>
+        `;
+        const latestNote = detail.notes && detail.notes[0] ? detail.notes[0].note : device.note || '';
+        els.noteBody.innerHTML = `
+          <form class="note-form" id="noteForm">
+            <textarea id="noteInput" rows="8" maxlength="500">${escapeHtml(latestNote)}</textarea>
+            <button class="button secondary" type="submit">保存备注</button>
+          </form>
+        `;
+        document.getElementById('displayNameForm').addEventListener('submit', saveDisplayName);
+        document.getElementById('noteForm').addEventListener('submit', saveNote);
+      }
+
+      function renderDiagnostics() {
+        const detail = state.detail;
+        if (!detail || !detail.device) {
+          els.diagnosticTitle.textContent = '未选择设备';
+          els.diagnosticGrid.innerHTML = '<div class="empty">从总览选择设备</div>';
+          return;
+        }
+
+        const device = detail.device;
+        const reasons = Array.isArray(device.diagnostic_reasons) ? device.diagnostic_reasons : [];
+        const summary = state.history && state.history.summary ? state.history.summary : {};
+        const cards = [
+          ['健康评分', `${device.health_score ?? 0} 分`, device.diagnostic_text || diagnosticLevelText(device.diagnostic_level), device.diagnostic_level],
+          ['诊断级别', diagnosticLevelText(device.diagnostic_level), reasons[0] || '暂无诊断原因', device.diagnostic_level],
+          ['心跳年龄', device.status_age_seconds === null || device.status_age_seconds === undefined ? '-' : `${device.status_age_seconds} 秒`, `最后心跳 ${relativeTime(device.last_seen_at)}`, device.status_age_seconds !== null && device.status_age_seconds !== undefined && device.status_age_seconds <= 20 ? 'normal' : 'attention'],
+          ['命令质量', `${summary.acked_count || 0}/${summary.command_count || 0} ACK`, `平均延迟 ${summary.avg_latency_ms === null || summary.avg_latency_ms === undefined ? '-' : `${summary.avg_latency_ms} ms`}`, summary.failed_count ? 'warning' : 'normal'],
+          ['关注事项', `${reasons.length} 项`, reasons.slice(0, 3).join('；') || '暂无', device.diagnostic_level],
+          ['安全边界', '只读云端', '配网、写参数、OTA、重启保留在现场入口', 'normal'],
+        ];
+        els.diagnosticTitle.textContent = `${device.display_name || device.device_id} 当前诊断`;
+        els.diagnosticGrid.innerHTML = cards.map(([label, value, hint, level]) => `
+          <div class="connection-card">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+            <p>${escapeHtml(hint)}</p>
+            <em class="value-pill ${diagnosticTone(level)}">${escapeHtml(diagnosticLevelText(level))}</em>
+          </div>
+        `).join('');
+      }
+
+      function renderSystemMetrics() {
+        const detail = state.detail;
+        if (!detail || !detail.device) {
+          els.systemGrid.innerHTML = '<div class="empty">从总览选择设备</div>';
+          return;
+        }
+
+        const device = detail.device;
+        const hasExtendedStatus = [
+          device.heap_free,
+          device.restart_reason,
+          device.display_status,
+          device.motor_param_count,
+        ].some((value) => value !== null && value !== undefined && value !== '');
+        if (!hasExtendedStatus) {
+          els.systemGrid.innerHTML = '<div class="empty">等待扩展状态上报</div>';
+          return;
+        }
+
+        const cards = [
+          ['可用堆内存', formatBytes(device.heap_free), `最低 ${formatBytes(device.heap_min_free)}，最大块 ${formatBytes(device.heap_largest)}`, device.heap_internal_free === null || device.heap_internal_free === undefined || device.heap_internal_free >= 32000 ? 'normal' : 'attention'],
+          ['内部堆内存', formatBytes(device.heap_internal_free), `内部最低 ${formatBytes(device.heap_internal_min_free)}`, device.heap_internal_free === null || device.heap_internal_free === undefined || device.heap_internal_free >= 32000 ? 'normal' : 'warning'],
+          ['重启原因', device.restart_reason ?? '-', 'ESP-IDF reset reason code', device.restart_reason === null || device.restart_reason === undefined || device.restart_reason === 1 ? 'normal' : 'attention'],
+          ['通信错误', `${device.comm_error_total ?? 0}`, 'UART/BLE/WiFi/router 错误与丢弃累计', (device.comm_error_total || 0) === 0 ? 'normal' : 'warning'],
+          ['OLED 状态', device.display_status || '-', device.display_backend || 'display backend', device.display_enabled === false ? 'warning' : 'normal'],
+          ['参数数量', `${device.motor_param_count ?? '-'}/${device.motor_param_capacity ?? '-'}`, '电机参数表注册容量', 'normal'],
+        ];
+        els.systemGrid.innerHTML = cards.map(([label, value, hint, level]) => `
+          <div class="connection-card">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+            <p>${escapeHtml(hint)}</p>
+            <em class="value-pill ${diagnosticTone(level)}">${escapeHtml(diagnosticLevelText(level))}</em>
+          </div>
+        `).join('');
+      }
+
+      function renderTrendSnapshot(detail, statusPoints, commands, summary) {
+        const device = detail.device;
+        const latestPoint = statusPoints.length ? statusPoints[statusPoints.length - 1] : latestStatusPayload();
+        const commandWithLatency = commands.find((command) => command.latency_ms !== null && command.latency_ms !== undefined);
+        const staKnown = device.cloud_state === 'online' && latestPoint.sta_connected !== null && latestPoint.sta_connected !== undefined;
+        const changes = transitionCount(statusPoints, 'sta_connected');
+        const avgLatency = summary.avg_latency_ms === null || summary.avg_latency_ms === undefined ? '-' : `${summary.avg_latency_ms} ms`;
+        const cards = [
+          ['云端状态', stateLabel(device.cloud_state), `最后心跳 ${relativeTime(device.last_seen_at)}`, device.cloud_state === 'online'],
+          ['STA 当前', staKnown ? boolText(latestPoint.sta_connected, '已连接', '未连接') : '未知', staKnown ? (latestPoint.sta_ip || device.sta_ip || '无 STA IP') : '设备不在线时当前状态不可判断', staKnown ? latestPoint.sta_connected : null],
+          ['连接变化', `${changes} 次`, `${summary.status_count || statusPoints.length} 条状态上报`, changes === 0 ? true : null],
+          ['ACK 延迟', commandWithLatency ? commandLatency(commandWithLatency) : '-', `平均 ${avgLatency}，ACK ${summary.acked_count || 0}/${summary.command_count || commands.length}`, summary.failed_count ? false : true],
+        ];
+        els.trendSnapshot.innerHTML = cards.map(([label, value, hint, health]) => `
+          <div class="connection-card">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+            <p>${escapeHtml(hint)}</p>
+            <em class="value-pill ${pillClass(health)}">${health === null ? '参考' : (health ? '正常' : '注意')}</em>
+          </div>
+        `).join('');
+      }
+
+      function renderChart() {
+        const detail = state.detail;
+        if (!detail || !detail.device) {
+          els.trendSnapshot.innerHTML = '<div class="empty">从总览选择设备</div>';
+          els.latencyRows.innerHTML = '<div class="empty">暂无命令</div>';
+          return;
+        }
+
+        const statusPoints = state.history && state.history.status_points ? state.history.status_points : [];
+        const commands = state.history && state.history.commands ? state.history.commands : (detail.commands || []);
+        const summary = state.history && state.history.summary ? state.history.summary : {};
+        renderTrendSnapshot(detail, statusPoints, commands, summary);
+
+        els.latencyRows.innerHTML = commands.slice(0, 18).map((command) => `
+          <div class="stream-row">
+            <span>${escapeHtml(relativeTime(command.created_at))}</span>
+            <strong>${escapeHtml(commandLatency(command))}</strong>
+            <code>${escapeHtml(`${command.state} ${command.ack_message || command.command_id}`)}</code>
+          </div>
+        `).join('') || '<div class="empty">暂无命令</div>';
+      }
+
+      function renderConnectivityTab() {
+        const detail = state.detail;
+        if (!detail || !detail.device) {
+          els.connectionTitle.textContent = '选择设备后显示网络、BLE 和 WebSocket 状态';
+          els.connectionGrid.innerHTML = '<div class="empty">从总览选择设备</div>';
+          els.mqttPayload.textContent = '从总览选择设备';
+          return;
+        }
+
+        const device = detail.device;
+        const payload = latestStatusPayload();
+        const offlineHint = '设备不在线，当前状态不可判断';
+        const staConnected = payload.sta_connected ?? device.sta_connected;
+        els.connectionTitle.textContent = `${device.display_name || device.device_id} 当前连接状态`;
+        const cards = [
+          ['云端', stateLabel(device.cloud_state), relativeTime(device.last_seen_at), device.cloud_state === 'online'],
+          ['网络模式', currentText(device, payload.net_mode || device.net_mode, '未知'), isDeviceOnline(device) ? 'AP / STA / APSTA 来自固件真实状态' : offlineHint, null],
+          ['STA 连接', currentBoolText(device, payload.sta_connected ?? device.sta_connected, '已连接', '未连接'), isDeviceOnline(device) ? (payload.sta_ip || device.sta_ip || '无 STA IP') : offlineHint, currentHealth(device, staConnected)],
+          ['STA 配置', currentBoolText(device, payload.sta_configured, '已保存', '未保存'), isDeviceOnline(device) ? (payload.sta_connecting ? '正在尝试连接' : '当前未处于连接中') : offlineHint, currentHealth(device, payload.sta_configured)],
+          ['AP 地址', currentText(device, payload.ap_ip || device.ap_ip), isDeviceOnline(device) ? '仅 AP/APSTA 下有效' : offlineHint, null],
+          ['通信模式', currentText(device, payload.comm_mode || device.comm_mode || '-', '未知'), isDeviceOnline(device) ? `UART ${text(payload.uart_baud || device.uart_baud)}` : offlineHint, null],
+          ['BLE', currentBoolText(device, payload.ble_ready, '已启动', '未启动'), isDeviceOnline(device) ? boolText(payload.ble_subscribed, '有订阅者', '无订阅者') : offlineHint, currentHealth(device, payload.ble_ready)],
+          ['WebSocket', currentBoolText(device, payload.wifi_ws_client, '有客户端', '无客户端'), isDeviceOnline(device) ? '局域网页面 UART 隧道连接状态' : offlineHint, currentHealth(device, payload.wifi_ws_client)],
+          ['运行时长', isDeviceOnline(device) ? formatUptime(payload.uptime_ms || device.uptime_ms) : '-', isDeviceOnline(device) ? '来自 MQTT status uptime_ms' : offlineHint, null],
+        ];
+        els.connectionGrid.innerHTML = cards.map(([label, value, hint, health]) => `
+          <div class="connection-card">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value)}</strong>
+            <p>${escapeHtml(hint)}</p>
+            <em class="value-pill ${pillClass(health)}">${health === null ? '状态' : (health ? '正常' : '注意')}</em>
+          </div>
+        `).join('');
+        els.mqttPayload.textContent = JSON.stringify(payload, null, 2);
+      }
+
+      function renderMessageCenter() {
+        const selectedTarget = els.busTargetDevice.value || state.selectedId || (state.devices[0] && state.devices[0].device_id) || '';
+        els.busTargetDevice.innerHTML = state.devices.map((device) => `
+          <option value="${escapeHtml(device.device_id)}"${device.device_id === selectedTarget ? ' selected' : ''}>
+            ${escapeHtml(device.display_name || device.device_id)} / ${escapeHtml(stateLabel(device.cloud_state))}
+          </option>
+        `).join('');
+        const targetId = els.busTargetDevice.value || selectedTarget;
+        const target = state.devices.find((device) => device.device_id === targetId);
+        els.busTargetState.textContent = target ? `${target.display_name || target.device_id} · ${stateLabel(target.cloud_state)}` : '未选择';
+        els.sendBusMessage.disabled = !targetId;
+
+        if (!state.busMessages.length) {
+          els.busMessageRows.innerHTML = '<div class="empty">暂无消息</div>';
+          return;
+        }
+        els.busMessageRows.innerHTML = state.busMessages.map((message) => {
+          const source = actorLabel(message.source_type, message.source_id, message.source_display_name);
+          const targetName = actorLabel(message.target_type, message.target_id, message.target_display_name);
+          const tone = message.state === 'ACKED' ? 'ok' : (message.state === 'FAILED' ? 'bad' : 'warn');
+          const ack = message.ack_message ? ` · ${message.ack_message}` : '';
+          return `
+            <div class="stream-row">
+              <span>${escapeHtml(relativeTime(message.created_at))}</span>
+              <strong>${escapeHtml(busStateLabel(message.state))}</strong>
+              <code>${escapeHtml(`${source} -> ${targetName} / ${message.channel}: ${message.payload_text}${ack}`)}</code>
+            </div>
+          `;
+        }).join('');
+      }
+
+      function renderCapabilitiesTab() {
+        const groups = [
+          {
+            title: '云端已开放',
+            value: 'MQTT 状态、query_status、消息中心',
+            hint: '设备在线、AP/STA IP、BLE、WebSocket、ACK 历史；消息中心支持 cloud/device 参与者和 notify inbox。',
+            pill: '安全',
+            tone: 'ok',
+          },
+          {
+            title: '本地只读状态',
+            value: 'health / stats / display / menu',
+            hint: 'ESP32 本地 HTTP 已有 heap、restart_reason、通信计数、OLED、菜单状态；需要扩展 MQTT 才能云端稳定展示。',
+            pill: '可扩展',
+            tone: 'warn',
+          },
+          {
+            title: '本地通信调试',
+            value: 'UART / BLE / WebSocket',
+            hint: '本地支持 UART 文本/HEX、BLE notify/write、/ws UART 隧道；云端不直接接管实时隧道。',
+            pill: '现场',
+            tone: 'warn',
+          },
+          {
+            title: '网络与配网',
+            value: 'AP / STA / APSTA / scan / connect',
+            hint: '本地支持扫描、网页配网、模式切换、保存/清除 STA。云端切网络容易让设备失联，暂不开放。',
+            pill: '高风险',
+            tone: 'bad',
+          },
+          {
+            title: '电机诊断',
+            value: 'diag / osc / params',
+            hint: '本地支持读写寄存器、示波配置、参数表注册和读写。写操作会影响现场设备，云端先只做能力提示。',
+            pill: '高风险',
+            tone: 'bad',
+          },
+          {
+            title: '文件与参数表',
+            value: 'Excel list / upload / delete',
+            hint: 'ESP32 SPIFFS 可保存参数表。后续可考虑云端托管参数表，再由现场页面同步。',
+            pill: '后续',
+            tone: 'warn',
+          },
+        ];
+        els.capabilityGrid.innerHTML = groups.map((group) => `
+          <div class="capability-card">
+            <span>${escapeHtml(group.title)}</span>
+            <strong>${escapeHtml(group.value)}</strong>
+            <p>${escapeHtml(group.hint)}</p>
+            <em class="value-pill ${group.tone}">${escapeHtml(group.pill)}</em>
+          </div>
+        `).join('');
+      }
+
+      function renderEventsTab() {
+        const detail = state.detail;
+        if (!detail || !detail.device) {
+          els.eventRows.innerHTML = '<div class="empty">从总览选择设备</div>';
+          els.commandRows.innerHTML = '<div class="empty">从总览选择设备</div>';
+          return;
+        }
+        els.eventRows.innerHTML = (detail.events || []).slice(0, 80).map((event) => `
+          <div class="stream-row">
+            <span>${escapeHtml(relativeTime(event.created_at))}</span>
+            <strong>${escapeHtml(event.event_type)}</strong>
+            <code>${escapeHtml(JSON.stringify(event.payload_json))}</code>
+          </div>
+        `).join('') || '<div class="empty">暂无事件</div>';
+        els.commandRows.innerHTML = (detail.commands || []).slice(0, 50).map((command) => `
+          <div class="stream-row">
+            <span>${escapeHtml(relativeTime(command.created_at))}</span>
+            <strong>${escapeHtml(command.state)}</strong>
+            <code>${escapeHtml(`${command.command_type} ${command.command_id} ${command.ack_message || ''}`)}</code>
+          </div>
+        `).join('') || '<div class="empty">暂无命令</div>';
+      }
+
+      function renderAll() {
+        renderRows();
+        renderDiagnostics();
+        renderSystemMetrics();
+        renderDeviceTab();
+        renderConnectivityTab();
+        renderChart();
+        renderMessageCenter();
+        renderCapabilitiesTab();
+        renderEventsTab();
+      }
+
+      async function loadBusMessages() {
+        const data = await api('/api/bus/messages?limit=80');
+        state.busMessages = data.messages || [];
+        renderMessageCenter();
+      }
+
+      async function loadDevices() {
+        try {
+          const data = await api('/api/devices');
+          state.devices = data.devices || [];
+          renderSummary(data.summary || {});
+          renderRows();
+          renderMessageCenter();
+          els.brokerState.textContent = data.mqtt_connected ? 'MQTT 已连接' : 'MQTT 未连接';
+          els.lastSync.textContent = `同步 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`;
+          if (!state.selectedId && state.devices.length) {
+            state.selectedId = state.devices[0].device_id;
+          }
+          if (state.selectedId) {
+            await loadDetail(state.selectedId, false);
+          } else {
+            renderAll();
+          }
+          await loadBusMessages();
+        } catch (err) {
+          els.tableHint.innerHTML = `<span class="error">${escapeHtml(err.message)}</span>`;
+        }
+      }
+
+      async function loadDetail(deviceId, rerenderRows = true) {
+        const encoded = encodeURIComponent(deviceId);
+        const [detail, history] = await Promise.all([
+          api(`/api/devices/${encoded}`),
+          api(`/api/devices/${encoded}/history`),
+        ]);
+        state.detail = detail;
+        state.history = history;
+        if (rerenderRows) renderRows();
+        renderDiagnostics();
+        renderSystemMetrics();
+        renderDeviceTab();
+        renderConnectivityTab();
+        renderChart();
+        renderMessageCenter();
+        renderEventsTab();
+      }
+
+      async function selectDevice(deviceId) {
+        state.selectedId = deviceId;
+        els.busTargetDevice.value = deviceId;
+        await loadDetail(deviceId);
+        setActiveTab('device');
+      }
+
+      async function sendQueryStatus() {
+        if (!state.selectedId) return;
+        els.queryBtn.disabled = true;
+        try {
+          await api(`/api/devices/${encodeURIComponent(state.selectedId)}/query-status`, { method: 'POST' });
+          await loadDetail(state.selectedId);
+        } finally {
+          els.queryBtn.disabled = false;
+        }
+      }
+
+      async function saveNote(event) {
+        event.preventDefault();
+        if (!state.selectedId) return;
+        const note = document.getElementById('noteInput').value;
+        await api(`/api/devices/${encodeURIComponent(state.selectedId)}/note`, {
+          method: 'POST',
+          body: JSON.stringify({ note }),
+        });
+        await loadDevices();
+      }
+
+      async function saveDisplayName(event) {
+        event.preventDefault();
+        if (!state.selectedId) return;
+        const input = document.getElementById('displayNameInput');
+        const message = document.getElementById('displayNameMessage');
+        try {
+          const result = await api(`/api/devices/${encodeURIComponent(state.selectedId)}/display-name`, {
+            method: 'POST',
+            body: JSON.stringify({ display_name: input.value }),
+          });
+          if (message) message.textContent = `已保存为 ${result.display_name}`;
+          await loadDevices();
+        } catch (err) {
+          if (message) message.textContent = err.message || '设备名保存失败';
+        }
+      }
+
+      async function sendBusMessage(event) {
+        event.preventDefault();
+        const targetDeviceId = els.busTargetDevice.value;
+        const payload = els.busPayload.value.trim();
+        if (!targetDeviceId || !payload) {
+          els.busSendMessage.textContent = '请选择目标设备并填写消息内容';
+          return;
+        }
+        els.sendBusMessage.disabled = true;
+        els.busSendMessage.textContent = '正在发布到设备 inbox...';
+        try {
+          const result = await api('/api/bus/send', {
+            method: 'POST',
+            body: JSON.stringify({
+              target_device_id: targetDeviceId,
+              channel: els.busChannel.value,
+              payload_text: payload,
+            }),
+          });
+          els.busSendMessage.textContent = result.ok ? '已发布，等待设备 ACK' : (result.message || '发布失败');
+          els.busPayload.value = '';
+          await loadBusMessages();
+        } catch (err) {
+          els.busSendMessage.textContent = err.message || '发布失败';
+        } finally {
+          els.sendBusMessage.disabled = false;
+        }
+      }
+
+      els.refreshBtn.addEventListener('click', loadDevices);
+      els.queryBtn.addEventListener('click', sendQueryStatus);
+      els.busMessageForm.addEventListener('submit', sendBusMessage);
+      els.refreshBusBtn.addEventListener('click', loadBusMessages);
+      els.busTargetDevice.addEventListener('change', renderMessageCenter);
+      els.userMenuButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const nextOpen = els.userMenu.dataset.open !== 'true';
+        els.userMenu.dataset.open = String(nextOpen);
+        els.userMenuButton.setAttribute('aria-expanded', String(nextOpen));
+      });
+      document.addEventListener('click', (event) => {
+        if (!els.userMenu.contains(event.target)) {
+          els.userMenu.dataset.open = 'false';
+          els.userMenuButton.setAttribute('aria-expanded', 'false');
+        }
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          els.userMenu.dataset.open = 'false';
+          els.userMenuButton.setAttribute('aria-expanded', 'false');
+        }
+      });
+      els.searchInput.addEventListener('input', (event) => {
+        state.query = event.target.value;
+        renderRows();
+      });
+      els.stateFilter.addEventListener('change', (event) => {
+        state.filter = event.target.value;
+        renderRows();
+      });
+      for (const tab of document.querySelectorAll('.tab')) {
+        tab.addEventListener('click', () => setActiveTab(tab.dataset.tab));
+      }
+
+      setActiveTab(window.location.hash.slice(1) || 'overview');
+      loadDevices();
+      setInterval(loadDevices, 5000);
+    </script>
+  </body>
+</html>
