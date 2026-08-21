@@ -8,10 +8,21 @@ assert.match(source, /selectOscStartupMode/);
 assert.match(source, /oscCapabilityCache/);
 assert.match(source, /frameRouter\.onOscFrame[\s\S]*wsClient\.send\(buildStartOsc\(\)\)/,
   'waveform handler must be registered before the start command');
-assert.doesNotMatch(source, /cloud-cached[\s\S]{0,1800}await sendAndWait\(buildSetChannel/,
-  'warm cloud startup must not wait for every channel ACK');
-assert.match(source, /cloud-cached[\s\S]{0,3200}const request = buildSetChannel[\s\S]{0,300}wsClient\.send\(request\)/,
-  'warm cloud startup must still send every channel configuration');
+assert.match(
+  source,
+  /const channelRequests = channels\.map\([\s\S]*?buildSetChannel\([\s\S]*?await configureOscChannels\([\s\S]*?target\.kind === 'cloud' \? 'parallel' : 'serial'/,
+  'cloud channel configuration must await all ACKs in parallel while local mode stays serial',
+);
+assert.doesNotMatch(
+  source,
+  /configureOscChannels\([\s\S]{0,300}sendAndWaitWithRetry/,
+  'non-idempotent channel configuration must not use the retrying query helper',
+);
+assert.match(
+  source,
+  /configureOscChannels\([\s\S]{0,300}\(request\) => sendAndWaitOnce\(request\)/,
+  'channel configuration must use the non-retrying ACK waiter',
+);
 assert.match(
   source,
   /const stop = useCallback\(\(\) => \{[\s\S]*?oscPlaybackBuffer\.drainAll\(\)[\s\S]*?appendSamples\(playbackTail\.batch\)[\s\S]*?oscPlaybackBuffer\.clear\(\)/,

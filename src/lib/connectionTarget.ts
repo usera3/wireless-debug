@@ -52,16 +52,15 @@ function parseCloudDevicePath(pathname: string): string | null {
   return null;
 }
 
-function urlOriginWithPort(url: URL, port: string): string {
-  const next = new URL(url.toString());
-  next.pathname = '/';
-  next.search = '';
-  next.hash = '';
-  next.port = port;
-  return normalizeBase(next.origin);
+function cloudApiBase(fallbackUrl: URL, deviceId: string, cloudApiOrigin?: string): string {
+  const apiUrl = cloudApiOrigin ? new URL(cloudApiOrigin) : fallbackUrl;
+  if (apiUrl.protocol !== 'http:' && apiUrl.protocol !== 'https:') {
+    throw new Error('cloud API origin must use HTTP');
+  }
+  return `${normalizeBase(apiUrl.origin)}/remote/${encodeURIComponent(deviceId)}`;
 }
 
-function resolveCloudFromWs(url: URL, deviceId: string): ConnectionTarget {
+function resolveCloudFromWs(url: URL, deviceId: string, cloudApiOrigin?: string): ConnectionTarget {
   const httpProtocol = httpProtocolFromWs(url.protocol);
   if (!httpProtocol) {
     return {
@@ -80,11 +79,11 @@ function resolveCloudFromWs(url: URL, deviceId: string): ConnectionTarget {
     label: '云端通道',
     deviceId,
     wsUrl: url.toString(),
-    apiBase: `${urlOriginWithPort(apiUrl, apiUrl.port)}/remote/${encodeURIComponent(deviceId)}`,
+    apiBase: cloudApiBase(apiUrl, deviceId, cloudApiOrigin),
   };
 }
 
-function resolveCloudFromHttp(url: URL, deviceId: string): ConnectionTarget {
+function resolveCloudFromHttp(url: URL, deviceId: string, cloudApiOrigin?: string): ConnectionTarget {
   const wsProtocol = wsProtocolFromHttp(url.protocol);
   if (!wsProtocol) {
     return {
@@ -106,7 +105,7 @@ function resolveCloudFromHttp(url: URL, deviceId: string): ConnectionTarget {
     label: '云端通道',
     deviceId,
     wsUrl: wsUrl.toString(),
-    apiBase: `${urlOriginWithPort(url, url.port)}/remote/${encodeURIComponent(deviceId)}`,
+    apiBase: cloudApiBase(url, deviceId, cloudApiOrigin),
   };
 }
 
@@ -158,7 +157,11 @@ function resolveLocalFromHttp(url: URL): ConnectionTarget {
   };
 }
 
-export function resolveConnectionTarget(input: string, pageOrigin?: string): ConnectionTarget {
+export function resolveConnectionTarget(
+  input: string,
+  pageOrigin?: string,
+  cloudApiOrigin?: string,
+): ConnectionTarget {
   const trimmed = input.trim();
   if (!trimmed) {
     return {
@@ -179,10 +182,10 @@ export function resolveConnectionTarget(input: string, pageOrigin?: string): Con
     const url = new URL(trimmed, pageOrigin);
     const cloudDeviceId = parseCloudDevicePath(url.pathname);
     if ((url.protocol === 'ws:' || url.protocol === 'wss:') && cloudDeviceId) {
-      return resolveCloudFromWs(url, cloudDeviceId);
+      return resolveCloudFromWs(url, cloudDeviceId, cloudApiOrigin);
     }
     if ((url.protocol === 'http:' || url.protocol === 'https:') && cloudDeviceId) {
-      return resolveCloudFromHttp(url, cloudDeviceId);
+      return resolveCloudFromHttp(url, cloudDeviceId, cloudApiOrigin);
     }
     if (url.protocol === 'ws:' || url.protocol === 'wss:') return resolveLocalFromWs(url);
     if (url.protocol === 'http:' || url.protocol === 'https:') return resolveLocalFromHttp(url);

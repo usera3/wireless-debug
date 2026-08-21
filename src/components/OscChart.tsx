@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
+import { getPlotRelativePosition, zoomRange } from '../lib/oscZoom';
+import { formatOscAxisValue, formatOscHoverTime, formatOscValue } from '../lib/oscDisplay';
 
 const CHANNEL_COLORS = [
   '#4ade80', '#60a5fa', '#f97316', '#e879f9',
@@ -236,6 +238,7 @@ export function OscChart({
   labels,
 }: OscChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const hoverTooltipRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const channelOrderRef = useRef<number[]>([]);
@@ -244,7 +247,7 @@ export function OscChart({
   const xModeRef = useRef<'following' | 'manual'>('following');
   const yModeRef = useRef<'auto' | 'manual'>('auto');
   const syncingScalesRef = useRef(false);
-  const xSpanRef = useRef(1); // 当前显示窗口宽度（秒），默认1s
+  const xSpanRef = useRef(1); // 未提供窗口时的回退值，实际下限由采样间隔决定
   const windowSecondsRef = useRef(windowSeconds);
   const defaultYRangeRef = useRef({ min: -5000, max: 5000 });
   // 自动模式下已应用的 Y 范围。图例隐藏/恢复后要按当前可见曲线重新计算。
@@ -282,6 +285,68 @@ export function OscChart({
   // 始终持有最新的 labels，供图表构建时读取，避免 labels 引用变化触发图表重建
   const labelsRef = useRef(labels);
   labelsRef.current = labels;
+
+  const updateHoverTooltip = (plot: uPlot) => {
+    const tooltip = hoverTooltipRef.current;
+    const container = containerRef.current;
+    if (!tooltip || !container) return;
+
+    const idx = plot.cursor.idx;
+    const xValue = idx == null ? null : plot.data[0]?.[idx];
+    if (idx == null || typeof xValue !== 'number' || !Number.isFinite(xValue)) {
+      tooltip.hidden = true;
+      return;
+    }
+
+    const rows: HTMLDivElement[] = [];
+    for (let seriesIdx = 1; seriesIdx < plot.series.length; seriesIdx++) {
+      if (plot.series[seriesIdx].show === false) continue;
+      const dataIdx = plot.cursor.idxs?.[seriesIdx] ?? idx;
+      if (dataIdx == null) continue;
+      const rawValue = plot.data[seriesIdx]?.[dataIdx];
+      if (typeof rawValue !== 'number' || !Number.isFinite(rawValue)) continue;
+
+      const row = document.createElement('div');
+      row.className = 'flex items-center gap-2 whitespace-nowrap';
+
+      const marker = document.createElement('span');
+      marker.className = 'inline-block h-2 w-2 shrink-0 rounded-full';
+      marker.style.backgroundColor = CHANNEL_COLORS[(seriesIdx - 1) % CHANNEL_COLORS.length];
+
+      const label = document.createElement('span');
+      label.className = 'text-slate-300';
+      label.textContent = `${String(plot.series[seriesIdx].label ?? `CH${seriesIdx}`)}:`;
+
+      const value = document.createElement('span');
+      value.className = 'font-semibold text-white';
+      value.textContent = formatOscValue(rawValue);
+
+      row.append(marker, label, value);
+      rows.push(row);
+    }
+
+    if (rows.length === 0) {
+      tooltip.hidden = true;
+      return;
+    }
+
+    const header = document.createElement('div');
+    header.className = 'mb-1 border-b border-slate-700 pb-1 font-semibold text-slate-100';
+    header.textContent = `Time: ${formatOscHoverTime(xValue, sampleInterval)}`;
+    tooltip.replaceChildren(header, ...rows);
+    tooltip.hidden = false;
+
+    const plotLeft = plot.bbox.left / uPlot.pxRatio;
+    const plotTop = plot.bbox.top / uPlot.pxRatio;
+    const cursorLeft = plot.cursor.left ?? -1;
+    const cursorTop = plot.cursor.top ?? -1;
+    const preferredLeft = plotLeft + cursorLeft + 12;
+    const preferredTop = plotTop + cursorTop + 12;
+    const maxLeft = Math.max(8, container.clientWidth - tooltip.offsetWidth - 8);
+    const maxTop = Math.max(8, container.clientHeight - tooltip.offsetHeight - 8);
+    tooltip.style.left = `${Math.max(8, Math.min(preferredLeft, maxLeft))}px`;
+    tooltip.style.top = `${Math.max(8, Math.min(preferredTop, maxTop))}px`;
+  };
 
   const getLatestX = () => alignedDataRef.current[0][alignedDataRef.current[0].length - 1] ?? 0;
 
@@ -410,16 +475,6 @@ export function OscChart({
     return null;
   };
 
-  const zoomRange = (min: number, max: number, anchor: number, scaleFactor: number) => {
-    const span = Math.max(max - min, sampleInterval);
-    const nextSpan = Math.max(span * scaleFactor, sampleInterval);
-    const ratio = span === 0 ? 0.5 : (anchor - min) / span;
-    return {
-      min: anchor - nextSpan * ratio,
-      max: anchor + nextSpan * (1 - ratio),
-    };
-  };
-
   const handleWheelZoom = (event: WheelEvent) => {
     const plot = plotRef.current;
     if (!plot) return;
@@ -437,19 +492,15 @@ export function OscChart({
       applyStoredSeriesVisibility(plot);
 
       if (axis === 'x') {
-        xSpanRef.current = Math.max(xSpanRef.current * scaleFactor, sampleInterval);
-        if (xModeRef.current === 'following') {
-          nextXRange = computeXView();
+        const { min, max } = plot.scales.x;
+        if (min != null && max != null) {
+          // plot.rect 是 uPlot 绘图区 overlay 的矩形，posToVal() 需要其内部坐标。
+          const position = getPlotRelativePosition(event.clientX, event.clientY, plot.rect);
+          const anchor = plot.posToVal(position.x, 'x');
+          nextXRange = zoomRange(min, max, anchor, scaleFactor, sampleInterval);
+          xSpanRef.current = Math.max(nextXRange.max - nextXRange.min, sampleInterval);
+          xModeRef.current = 'manual';
           plot.setScale('x', nextXRange);
-        } else {
-          // manual 模式：以鼠标在 X 轴的位置为锚点缩放当前视口
-          const { min, max } = plot.scales.x;
-          if (min != null && max != null) {
-            const plotLeft = plot.bbox.left / uPlot.pxRatio;
-            const anchor = plot.posToVal(event.clientX - plot.rect.left - plotLeft, 'x');
-            nextXRange = zoomRange(min, max, anchor, scaleFactor);
-            plot.setScale('x', nextXRange);
-          }
         }
 
         if (yModeRef.current === 'auto') {
@@ -461,9 +512,9 @@ export function OscChart({
         const { min, max } = plot.scales.y;
         if (min == null || max == null) return;
 
-        const plotTop = plot.bbox.top / uPlot.pxRatio;
-        const anchor = plot.posToVal(event.clientY - plot.rect.top - plotTop, 'y');
-        const next = zoomRange(min, max, anchor, scaleFactor);
+        const position = getPlotRelativePosition(event.clientX, event.clientY, plot.rect);
+        const anchor = plot.posToVal(position.y, 'y');
+        const next = zoomRange(min, max, anchor, scaleFactor, sampleInterval);
         plot.setScale('y', next);
         yModeRef.current = 'manual';
       }
@@ -710,22 +761,22 @@ export function OscChart({
       if (startDist === 0) return;
 
       const scaleFactor = startDist / currentDist; // >1 缩小，<1 放大
-      const plotLeft = plot.bbox.left / uPlot.pxRatio;
-      const plotTop = plot.bbox.top / uPlot.pxRatio;
-      const rect = plot.root.getBoundingClientRect();
+      const plotRect = plot.rect;
 
       syncingScalesRef.current = true;
       plot.batch(() => {
         if (zone === 'plot' || zone === 'x') {
-          const anchorX = plot.posToVal(startMidX - rect.left - plotLeft, 'x');
-          const next = zoomRange(startXMin, startXMax, anchorX, scaleFactor);
+          const startPosition = getPlotRelativePosition(startMidX, startMidY, plotRect);
+          const anchorX = plot.posToVal(startPosition.x, 'x');
+          const next = zoomRange(startXMin, startXMax, anchorX, scaleFactor, sampleInterval);
           xSpanRef.current = Math.max(next.max - next.min, sampleInterval);
           xModeRef.current = 'manual';
           plot.setScale('x', next);
         }
         if (zone === 'plot' || zone === 'y') {
-          const anchorY = plot.posToVal(startMidY - rect.top - plotTop, 'y');
-          const next = zoomRange(startYMin, startYMax, anchorY, scaleFactor);
+          const startPosition = getPlotRelativePosition(startMidX, startMidY, plotRect);
+          const anchorY = plot.posToVal(startPosition.y, 'y');
+          const next = zoomRange(startYMin, startYMax, anchorY, scaleFactor, sampleInterval);
           yModeRef.current = 'manual';
           plot.setScale('y', next);
         }
@@ -773,6 +824,7 @@ export function OscChart({
 
   useEffect(() => {
     const container = containerRef.current;
+    const hoverTooltip = hoverTooltipRef.current;
     const effectiveChannels = effectiveChannelsRef.current;
     const externalData = alignedInputRef.current;
     const externalSeries = seriesInputRef.current;
@@ -863,6 +915,9 @@ export function OscChart({
             grid: { stroke: 'rgba(148, 163, 184, 0.12)' },
             ticks: { stroke: '#475569' },
             label: 'Time (s)',
+            values: (_self, splits, _axisIdx, _foundSpace, foundIncr) => (
+              splits.map((value) => formatOscAxisValue(value, foundIncr))
+            ),
           },
           {
             stroke: '#94a3b8',
@@ -913,6 +968,9 @@ export function OscChart({
               });
             },
           ],
+          setCursor: [
+            (self) => updateHoverTooltip(self),
+          ],
           ready: [
             (self) => {
               syncingScalesRef.current = true;
@@ -955,6 +1013,7 @@ export function OscChart({
               // 将 wrapper 挂到 root 上，供 cleanup 取用
               (self.root as HTMLElement & { _touchHandlers?: { onTouchStart: (e: TouchEvent) => void; onTouchMove: (e: TouchEvent) => void; onTouchEnd: (e: TouchEvent) => void } })._touchHandlers = { onTouchStart, onTouchMove, onTouchEnd };
               (self.root as HTMLElement & { _legendClickHandler?: (e: MouseEvent) => void })._legendClickHandler = onLegendClick;
+              if (hoverTooltip) hoverTooltip.hidden = true;
             },
           ],
         },
@@ -992,6 +1051,7 @@ export function OscChart({
       }
       resizeObserver.disconnect();
       resizeObserverRef.current = null;
+      if (hoverTooltip) hoverTooltip.hidden = true;
       plot.destroy();
       if (plotRef.current === plot) {
         plotRef.current = null;
@@ -1065,7 +1125,14 @@ export function OscChart({
 
   return (
     <div className="border border-slate-700 rounded bg-slate-900 h-full relative overflow-hidden">
-      <div ref={containerRef} className="w-full h-full" />
+      <div ref={containerRef} className="relative w-full h-full">
+        <div
+          ref={hoverTooltipRef}
+          data-testid="osc-hover-tooltip"
+          hidden
+          className="pointer-events-none absolute z-20 min-w-[150px] rounded border border-slate-600 bg-slate-950/95 px-2.5 py-2 text-xs shadow-lg"
+        />
+      </div>
     </div>
   );
 }

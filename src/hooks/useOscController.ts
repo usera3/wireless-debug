@@ -13,7 +13,9 @@ import {
 } from '../lib/oscilloscope';
 import { useOscStore, ChannelConfig } from '../store/oscStore';
 import { frameRouter } from '../lib/frameRouter';
-import { waitForOscResponseWithRetry } from '../lib/oscRequest';
+import { waitForOscResponse, waitForOscResponseWithRetry } from '../lib/oscRequest';
+import { configureOscChannels } from '../lib/oscChannelHandshake';
+import { getOscChannelType, validateOscChannelConfigs } from '../lib/oscChannelTypes';
 import { OscJitterBuffer } from '../lib/oscJitterBuffer';
 import {
   OscStopBarrierSequence,
@@ -88,7 +90,7 @@ export function useOscController() {
     setStartError,
   } = useOscStore();
 
-  /** 依次查询设备信息，再设置通道，最后开始采样 */
+  /** 查询设备能力、确认通道配置，最后开始采样。 */
   const start = useCallback(async (channels: ChannelConfig[]) => {
     if (stopPromise) await stopPromise;
     else if (lastStopBarrierPromise) await lastStopBarrierPromise;
@@ -109,8 +111,21 @@ export function useOscController() {
     setStartError(null);
     frameRouter.reset();
 
-    // 单请求-响应辅助：只接受与当前请求匹配的完整 Modbus 响应。
-    function sendAndWait(
+    // 能力查询允许重试；通道配置会改变设备累计槽位，不能重复发送。
+    function sendAndWaitOnce(
+      frame: Uint8Array,
+      acceptResponse?: (response: Uint8Array) => boolean,
+    ): Promise<Uint8Array> {
+      return waitForOscResponse({
+        request: frame,
+        timeoutMs: OSC_HANDSHAKE_TIMEOUT_MS,
+        subscribe: (handler) => frameRouter.subscribeModbusFrame(handler),
+        send: (request) => wsClient.send(request),
+        acceptResponse,
+      });
+    }
+
+    function sendAndWaitWithRetry(
       frame: Uint8Array,
       acceptResponse?: (response: Uint8Array) => boolean,
     ): Promise<Uint8Array> {
@@ -134,7 +149,7 @@ export function useOscController() {
         return value != null && acceptValue(value);
       };
 
-      return sendAndWait(frame, acceptResponse);
+      return sendAndWaitWithRetry(frame, acceptResponse);
     }
 
     async function stopAndDrainPreviousRun(waitForAck = true) {
@@ -148,17 +163,36 @@ export function useOscController() {
     }
 
     function registerOscHandler() {
-      const channelDescs = channels.map((c) => ({ byteWidth: c.byteWidth, paramType: c.paramType }));
+      const channelDescs = channels.map((channel) => ({ typeKey: channel.typeKey }));
+      let decodeFailed = false;
       frameRouter.onOscFrame((frame) => {
-        const osc = parseOscDataFrame(frame, channelDescs);
-        if (!osc) return;
+        if (decodeFailed) return;
+        try {
+          const osc = parseOscDataFrame(frame, channelDescs);
+          if (!osc) return;
 
-        const batch = new Map<number, number[]>();
-        osc.channels.forEach((samples, idx) => {
-          const channel = channels[idx];
-          if (channel) batch.set(channel.channelNo, samples);
-        });
-        oscPlaybackBuffer.appendBatch(batch);
+          const batch = new Map<number, number[]>();
+          osc.channels.forEach((samples, idx) => {
+            const channel = channels[idx];
+            if (channel) batch.set(channel.channelNo, samples);
+          });
+          oscPlaybackBuffer.appendBatch(batch);
+        } catch (error) {
+          decodeFailed = true;
+          if (heartbeatTimer) {
+            clearInterval(heartbeatTimer);
+            heartbeatTimer = null;
+          }
+          stopStoreFlushTimer();
+          oscPlaybackBuffer.clear();
+          frameRouter.onOscFrame(() => {});
+          setRunning(false);
+          setStartError(
+            `地址示波器解码失败：${error instanceof Error ? error.message : '数据类型不匹配'}`,
+          );
+          console.error('[osc] frame decode failed', error);
+          void queueOscStopBarrier();
+        }
       });
     }
 
@@ -179,7 +213,7 @@ export function useOscController() {
       if (startupMode === 'cloud-cached' && capabilities) {
         applyCapabilities(capabilities);
       } else {
-        // 冷启动只串行读取三个解析所必需的能力值；云端通道配置不再逐个等待 ACK。
+        // 冷启动只串行读取三个解析所必需的能力值。
         const flResp = await queryWithRetry(buildQueryFrameLen(), (value) => value >= 32 && value <= 512);
         const mcResp = await queryWithRetry(buildQueryMaxChannels(), (value) => value >= 1 && value <= 32);
         const srResp = await queryWithRetry(buildQuerySampleRate(), (value) => value >= 100 && value <= 100000);
@@ -192,17 +226,26 @@ export function useOscController() {
         oscCapabilityCache.write(target, capabilities);
       }
 
-      // 云端按序连续发送，局域网继续逐个确认。
-      for (const ch of channels) {
-        const request = buildSetChannel(ch.channelNo, ch.paramType, ch.varAddr);
-        if (target.kind === 'cloud') wsClient.send(request);
-        else await sendAndWait(request);
-      }
+      validateOscChannelConfigs(
+        channels.map(({ channelNo, varAddr, typeKey }) => ({ channelNo, varAddr, typeKey })),
+        capabilities.maxChannels,
+      );
+
+      const channelRequests = channels.map((channel) => buildSetChannel(
+        channel.channelNo,
+        getOscChannelType(channel.typeKey).paramType,
+        channel.varAddr,
+      ));
+      await configureOscChannels(
+        channelRequests,
+        target.kind === 'cloud' ? 'parallel' : 'serial',
+        (request) => sendAndWaitOnce(request),
+      );
 
       // 4.5 若设置了通讯速率限制，发送 0x73；部分设备不支持该功能码，允许超时/错误
       if (commRateLimit !== 0) {
         if (target.kind === 'cloud') wsClient.send(buildSetBaudRate(commRateLimit));
-        else try { await sendAndWait(buildSetBaudRate(commRateLimit)); }
+        else try { await sendAndWaitWithRetry(buildSetBaudRate(commRateLimit)); }
         catch { console.warn('[osc] 0x73 not supported by device, ignored'); }
       }
 

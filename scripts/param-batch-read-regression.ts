@@ -79,3 +79,20 @@ function param(alias: string, regAddr: number, options: Partial<ParamDef> = {}):
     ['SIGNED_C', -2],
   ]);
 }
+
+{
+  const params = Array.from({ length: 58 }, (_, index) =>
+    param(`P${index}`, 0x0700 + index),
+  );
+  const batches = buildParamReadBatches(params);
+
+  assert.deepEqual(
+    batches.map((batch) => batch.count),
+    [13, 13, 13, 13, 6],
+    'legacy controllers require read responses to fit their 32-byte TX buffer',
+  );
+  assert.ok(
+    batches.every((batch) => batch.count <= 13),
+    'no parameter read may corrupt the adjacent oscilloscope TX buffer',
+  );
+}

@@ -33,6 +33,7 @@ function formatMemory(bytes: number): string {
 
 function formatDuration(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '0s';
+  if (seconds < 1) return `${(seconds * 1000).toFixed(seconds < 0.1 ? 1 : 0)}ms`;
   if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
   return `${(seconds / 60).toFixed(seconds < 600 ? 1 : 0)}min`;
 }

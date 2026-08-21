@@ -16,7 +16,7 @@ const raw = gunzipSync(readFileSync(CAPTURE_PATH));
 assert.equal(createHash('sha256').update(raw).digest('hex'), EXPECTED_SHA256);
 
 const router = new FrameRouter();
-const descriptors = Array.from({ length: 4 }, () => ({ byteWidth: 2, paramType: 0 }));
+const descriptors = Array.from({ length: 4 }, () => ({ typeKey: 'default-int16' as const }));
 let frames = 0;
 let samples = 0;
 let discontinuities = 0;

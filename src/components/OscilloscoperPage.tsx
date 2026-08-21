@@ -14,6 +14,7 @@ import { exportCsv, importCsv } from '../lib/csvWave';
 import { resolveConnectionTarget } from '../lib/connectionTarget';
 import { describeOscTransport, shouldStopOscOnDisconnect } from '../lib/oscTransport';
 import { oscPlotPointBudget } from '../lib/oscRenderBudget';
+import { getOscChannelType } from '../lib/oscChannelTypes';
 
 function createMockOscData(): Map<number, number[]> {
   const samples = 30_000;
@@ -48,6 +49,7 @@ function formatMemory(bytes: number): string {
 
 function formatDuration(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '0s';
+  if (seconds < 1) return `${(seconds * 1000).toFixed(seconds < 0.1 ? 1 : 0)}ms`;
   if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
   return `${(seconds / 60).toFixed(seconds < 600 ? 1 : 0)}min`;
 }
@@ -111,7 +113,10 @@ export function OscilloscoperPage() {
   const selectedStartSeconds = Math.max(firstSeconds, selectedEndSeconds - viewWindowSeconds);
 
   const estimatedBytesPerSecond = useMemo(() => {
-    const sampleBytes = activeChannels.reduce((sum, channel) => sum + channel.byteWidth, 0);
+    const sampleBytes = activeChannels.reduce(
+      (sum, channel) => sum + getOscChannelType(channel.typeKey).byteWidth,
+      0,
+    );
     return sampleBytes * Math.max(sampleRate, 0);
   }, [activeChannels, sampleRate]);
 
@@ -180,9 +185,8 @@ export function OscilloscoperPage() {
     const mockChannels = Array.from({ length: 4 }, (_, index) => ({
       channelNo: index + 1,
       varAddr: 0,
-      paramType: 0x03,
+      typeKey: 'float32' as const,
       label: `SIM${index + 1}`,
-      byteWidth: 4,
     }));
     setChannels(mockChannels);
     setSampleRate(mockSampleRate);
@@ -215,9 +219,8 @@ export function OscilloscoperPage() {
       const importedChannels = labels.map((label, index) => ({
         channelNo: index + 1,
         varAddr: 0,
-        paramType: 0x03,
+        typeKey: 'float32' as const,
         label: label || `CH${index + 1}`,
-        byteWidth: 4,
       }));
       const batch = new Map<number, number[]>();
       columns.forEach((column, index) => batch.set(index + 1, column));

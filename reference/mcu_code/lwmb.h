@@ -47,8 +47,9 @@
 
 #define LWMB_OSC_HEARTBEAT_TIMEOUT 3 // 示波心跳超时时间，单位:秒
 
-#define LWMB_TX_MAX_LENGTH 32 // 最大发送长度
-#define LWMB_RX_MAX_LENGTH 20 // 最大接收长度
+#define LWMB_TX_MAX_LENGTH       255 // Modbus RTU最大响应长度
+#define LWMB_MAX_READ_REGISTERS  125 // 0x03/0x04单次最大读取寄存器数
+#define LWMB_RX_MAX_LENGTH       20  // 最大接收长度
 // 内部状态定义
 typedef enum
 {

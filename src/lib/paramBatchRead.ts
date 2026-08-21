@@ -6,7 +6,8 @@ export interface ParamReadBatch {
   params: ParamDef[];
 }
 
-const DEFAULT_MAX_REGISTERS = 60;
+// Keep 0x03 responses within the legacy controller's 32-byte Modbus payload.
+const DEFAULT_MAX_REGISTERS = 13;
 
 function registerCount(param: ParamDef): number {
   return param.isFloat ? 2 : 1;

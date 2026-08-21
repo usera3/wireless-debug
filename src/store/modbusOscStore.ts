@@ -70,7 +70,8 @@ function channelNosForAliases(aliases: string[]): number[] {
 
 function normalizeWindow(seconds: number): number {
   if (!Number.isFinite(seconds) || seconds <= 0) return OSC_DEFAULT_VIEW_WINDOW_SECONDS;
-  return Math.max(1, seconds);
+  // 视口允许亚秒值；图表层按采样间隔保证至少能看到一个样本。
+  return seconds;
 }
 
 function normalizeRetention(seconds: number): number {

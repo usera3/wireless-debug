@@ -14,7 +14,7 @@ import {
   type CloudDeviceOption,
   type ConnectionChoice,
 } from '../lib/connectionSelection';
-import { platformDeviceDirectoryUrl } from '../lib/remoteConsole';
+import { platformDeviceDirectoryUrl, remoteConsoleWsUrl } from '../lib/remoteConsole';
 
 type StatusKind = 'idle' | 'ok' | 'err' | 'ing';
 
@@ -181,7 +181,12 @@ export function ConnectionPanel() {
   const [cloudDevicesLoading, setCloudDevicesLoading] = useState(false);
   const [selectedCloudDeviceId, setSelectedCloudDeviceId] = useState(() => cloudDeviceIdFromUrl(url) || '');
 
-  const target = useMemo(() => resolveConnectionTarget(url, window.location.origin), [url]);
+  const cloudWsTemplate = remoteConsoleWsUrl() || undefined;
+  const cloudApiOrigin = cloudWsTemplate ? window.location.origin : undefined;
+  const target = useMemo(
+    () => resolveConnectionTarget(url, window.location.origin, cloudApiOrigin),
+    [cloudApiOrigin, url],
+  );
   const wifiConfigHref = target.kind === 'invalid' ? '#' : `${target.apiBase}/wifi.html`;
   const needsLocalPermission = requiresLocalNetworkPermission(target, window.location.protocol);
 
@@ -225,14 +230,14 @@ export function ConnectionPanel() {
     }
     if (choice === 'cloud') {
       const deviceId = selectedCloudDeviceId || cloudDevices[0]?.deviceId;
-      if (deviceId) setUrl(buildCloudDeviceUrl(window.location.origin, deviceId));
+      if (deviceId) setUrl(buildCloudDeviceUrl(window.location.origin, deviceId, cloudWsTemplate));
     }
   }
 
   function selectCloudDevice(deviceId: string) {
     setSelectedCloudDeviceId(deviceId);
     if (!connected && !connecting && deviceId) {
-      setUrl(buildCloudDeviceUrl(window.location.origin, deviceId));
+      setUrl(buildCloudDeviceUrl(window.location.origin, deviceId, cloudWsTemplate));
     }
   }
 

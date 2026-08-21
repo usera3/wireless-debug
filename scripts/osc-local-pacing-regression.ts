@@ -36,8 +36,7 @@ const channelNos = Array.from(
   (_, index) => index + 1,
 );
 const descriptors = channelNos.map(() => ({
-  byteWidth: 2,
-  paramType: capture.config.param_type ?? 0,
+  typeKey: 'default-int16' as const,
 }));
 const router = new FrameRouter();
 const playback = new OscJitterBuffer();

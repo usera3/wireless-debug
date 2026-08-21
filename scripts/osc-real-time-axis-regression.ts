@@ -28,9 +28,8 @@ const addressStore = useOscStore.getState();
 const addressChannel = {
   channelNo: 1,
   varAddr: 0xc52c,
-  paramType: 0,
+  typeKey: 'default-int16' as const,
   label: 'CH1',
-  byteWidth: 2,
 };
 addressStore.resetHistory([addressChannel], 1000);
 addressStore.appendSamples(

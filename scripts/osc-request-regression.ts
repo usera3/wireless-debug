@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { waitForOscResponse, waitForOscResponseWithRetry } from '../src/lib/oscRequest';
+import { buildSetChannel } from '../src/lib/oscilloscope';
 
 type Handler = (frame: Uint8Array) => void;
 
@@ -52,6 +53,22 @@ async function main() {
     [...await validated],
     matching,
     'same-function stale responses with implausible values must be ignored',
+  );
+
+  const channelRequest = buildSetChannel(1, 0x03, 0x1000);
+  const staleChannelAck = buildSetChannel(1, 0x00, 0x0000);
+  const channelPending = waitForOscResponse({
+    request: channelRequest,
+    timeoutMs: 80,
+    subscribe: (handler) => source.subscribe(handler),
+    send: () => {},
+  });
+  setTimeout(() => source.emit([...staleChannelAck]), 5);
+  setTimeout(() => source.emit([...channelRequest]), 20);
+  assert.deepEqual(
+    [...await channelPending],
+    [...channelRequest],
+    'a stale ACK for the same channel but a different type/address must be ignored',
   );
 
   await assert.rejects(

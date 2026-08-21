@@ -1,24 +1,12 @@
 import type { ChannelConfig, ChannelRowState } from '../store/oscStore';
 import { useOscStore, defaultRow } from '../store/oscStore';
 import { useParamStore } from '../store/paramStore';
-
-const PARAM_TYPES = [
-  { value: 0x00, label: '0x00 int16' },
-  { value: 0x01, label: '0x01 uint16' },
-  { value: 0x02, label: '0x02 int32' },
-  { value: 0x03, label: '0x03 float32' },
-  { value: 0x04, label: '0x04 float64' },
-  { value: 0x05, label: '0x05 float→Q14' },
-  { value: 0x06, label: '0x06 float×1000' },
-  { value: 0x07, label: '0x07 double→float' },
-  { value: 0x08, label: '0x08 double→Q14' },
-  { value: 0x09, label: '0x09 double×1000' },
-];
-
-const BYTE_WIDTH_MAP: Record<number, number> = {
-  0x00: 2, 0x01: 2, 0x02: 4, 0x03: 4, 0x04: 8,
-  0x05: 2, 0x06: 2, 0x07: 4, 0x08: 2, 0x09: 2,
-};
+import {
+  OSC_CHANNEL_TYPE_OPTIONS,
+  channelRowFromParam,
+  getOscChannelType,
+  parseOscAddressHex,
+} from '../lib/oscChannelTypes';
 
 const MAX_CHANNELS = 12;
 
@@ -37,10 +25,9 @@ const COMM_RATE_OPTIONS = [
 export function buildChannelConfigs(rows: ChannelRowState[], numChannels: number): ChannelConfig[] {
   return rows.slice(0, numChannels).map((r, i) => ({
     channelNo: i + 1,
-    varAddr: parseInt(r.varAddrHex, 16) || 0,
-    paramType: r.paramType,
+    varAddr: parseOscAddressHex(r.varAddrHex),
+    typeKey: r.typeKey,
     label: r.label,
-    byteWidth: BYTE_WIDTH_MAP[r.paramType] ?? 2,
   }));
 }
 
@@ -57,10 +44,7 @@ export function OscChannelConfig() {
   function handleAliasInput(i: number, alias: string) {
     const param = params.find((p) => p.alias === alias);
     if (param) {
-      setRow(i, {
-        varAddrHex: param.regAddr.toString(16).padStart(4, '0').toUpperCase(),
-        label: alias,
-      });
+      setRow(i, channelRowFromParam(param));
     } else {
       setRow(i, { label: alias });
     }
@@ -79,6 +63,10 @@ export function OscChannelConfig() {
   }
 
   const activeRows = configRows.slice(0, numChannels);
+  const occupiedSlots = activeRows.reduce(
+    (total, row) => total + getOscChannelType(row.typeKey).slotCount,
+    0,
+  );
 
   return (
     <div className="space-y-2">
@@ -95,6 +83,9 @@ export function OscChannelConfig() {
             <option key={n} value={n}>{n}</option>
           ))}
         </select>
+        <span className="text-slate-500 text-xs tabular-nums">
+          占用槽位 {occupiedSlots}/{maxChannels}
+        </span>
         <label className="text-slate-500 text-xs">通讯速率</label>
         <select
           value={commRateLimit}
@@ -110,7 +101,7 @@ export function OscChannelConfig() {
       {/* 手机单栏 / 桌面双栏 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
         {activeRows.map((row, i) => (
-          <div key={i} className="grid grid-cols-[1.2rem_1fr_1fr_1.5fr] gap-1 items-center">
+          <div key={i} className="grid grid-cols-[1.2rem_minmax(4rem,0.8fr)_minmax(7rem,1.4fr)_minmax(4rem,0.8fr)] gap-1 items-center">
             <span className="text-slate-500 text-xs text-right">{i + 1}</span>
             <input
               type="text"
@@ -121,12 +112,12 @@ export function OscChannelConfig() {
               maxLength={4}
             />
             <select
-              value={row.paramType}
-              onChange={(e) => setRow(i, { paramType: Number(e.target.value) })}
+              value={row.typeKey}
+              onChange={(e) => setRow(i, { typeKey: e.target.value as ChannelRowState['typeKey'] })}
               className="bg-slate-700 border border-slate-600 rounded px-1 py-0.5 text-slate-100 text-xs w-full"
             >
-              {PARAM_TYPES.map((t) => (
-                <option key={t.value} value={t.value}>{t.label}</option>
+              {OSC_CHANNEL_TYPE_OPTIONS.map((t) => (
+                <option key={t.key} value={t.key}>{t.label}</option>
               ))}
             </select>
             <input

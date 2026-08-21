@@ -4,8 +4,9 @@ import { GaugeChart } from './GaugeChart';
 import { useDashboardPoller } from '../hooks/useDashboardPoller';
 import { EspFilePicker } from './EspFilePicker';
 import { parseParameterTable } from '../lib/paramParser';
-import { currentConnectionTarget } from '../lib/apiClient';
+import { apiFetch, currentConnectionTarget } from '../lib/apiClient';
 import { parameterSourcePolicy } from '../lib/parameterSourcePolicy';
+import { buildParameterUploadRequest } from '../lib/parameterFileUpload';
 
 // 数码管风格的只读显示块
 function DigitDisplay({ label, value, unit }: { label: string; value: string; unit?: string }) {
@@ -39,7 +40,14 @@ export function DashboardPage() {
   async function loadFile(file: File) {
     setLoading(true);
     try {
-      const { params: p, pages: pg } = await parseParameterTable(file);
+      const parsed = await parseParameterTable(file);
+      if (currentConnectionTarget().kind === 'cloud') {
+        const request = await buildParameterUploadRequest('/api/excel/upload', file);
+        const { url, ...init } = request;
+        const response = await apiFetch(url, init);
+        if (!response.ok) throw new Error(`参数表上传失败：HTTP ${response.status}`);
+      }
+      const { params: p, pages: pg } = parsed;
       loadParams(p, pg);
       setActivePage(pg[0] ?? '');
     } catch (err) {

@@ -31,6 +31,23 @@ assert.equal(
   'http://127.0.0.1:18088/remote/wd-ac276eab7c9c/excel/a.xlsx',
 );
 
+const splitCloudEndpoints = resolveConnectionTarget(
+  'ws://39.108.83.25:18089/ws/device/wd-ac276eab7c9c',
+  'http://rdev.midea.com:18088',
+  'http://rdev.midea.com:18088',
+);
+assert.deepEqual(splitCloudEndpoints, {
+  kind: 'cloud',
+  label: '云端通道',
+  deviceId: 'wd-ac276eab7c9c',
+  wsUrl: 'ws://39.108.83.25:18089/ws/device/wd-ac276eab7c9c',
+  apiBase: 'http://rdev.midea.com:18088/remote/wd-ac276eab7c9c',
+});
+assert.equal(
+  targetApiUrl(splitCloudEndpoints, '/api/excel/list'),
+  'http://rdev.midea.com:18088/remote/wd-ac276eab7c9c/api/excel/list',
+);
+
 const remotePage = resolveConnectionTarget(
   'http://127.0.0.1:18088/remote/wd-ac276eab7c9c/orig/i.html',
   'http://127.0.0.1:18088',

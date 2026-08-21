@@ -84,10 +84,9 @@ function runReplay(mode: string, capture: Capture, chunks: ReplayChunk[]): Repla
   const jitter = new OscJitterBuffer();
   const channels = Array.from({ length: capture.config.channel_count }, (_, index) => ({
     channelNo: index + 1,
-    byteWidth: 2,
-    paramType: 0,
+    typeKey: 'default-int16' as const,
   }));
-  const descriptors = channels.map(({ byteWidth, paramType }) => ({ byteWidth, paramType }));
+  const descriptors = channels.map(({ typeKey }) => ({ typeKey }));
   const expectedHashes = capture.analysis.logical_frame_hashes_sha256;
   const frameHashes: string[] = [];
   const baseTimeMs = 1_000;

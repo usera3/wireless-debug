@@ -101,7 +101,7 @@ for (const splitOffset of [1, 2, 3]) {
   oscFrame.fill(0, 246, 250);
   const parsed = parseOscDataFrame(
     oscFrame,
-    [{ byteWidth: 2, paramType: 0x00 }],
+    [{ typeKey: 'default-int16' }],
     { requireCrc: true },
   );
 
@@ -111,7 +111,7 @@ for (const splitOffset of [1, 2, 3]) {
 
 {
   const oscFrame = makeOscFrame(12);
-  oscFrame[4] = 0xff;
+  oscFrame[4] = 0x00;
   oscFrame[5] = 0xfe;
   const payloadCrc = crc16(oscFrame.slice(4, 6));
   oscFrame[6] = payloadCrc & 0xff;
@@ -119,14 +119,14 @@ for (const splitOffset of [1, 2, 3]) {
 
   const parsed = parseOscDataFrame(
     oscFrame,
-    [{ byteWidth: 2, paramType: 0x01 }],
+    [{ typeKey: 'uint8' }],
     { requireCrc: true },
   );
 
   assert.deepEqual(
     parsed?.channels,
-    [[0xfffe]],
-    'unsigned 16-bit osc channels must retain values above Int16.MAX_VALUE',
+    [[0xfe]],
+    '0x01 channels carry an unsigned 8-bit value in a two-byte slot',
   );
 }
 
@@ -232,7 +232,7 @@ for (const splitOffset of [1, 2, 3]) {
 
   assert.equal(frames.length, 0, 'zero footer must not bypass an invalid CRC');
   assert.equal(
-    parseOscDataFrame(oscFrame, [{ byteWidth: 2, paramType: 0x00 }]),
+    parseOscDataFrame(oscFrame, [{ typeKey: 'default-int16' }]),
     null,
     'parser must reject a frame when both CRC and footer are invalid',
   );
@@ -252,7 +252,7 @@ for (const splitOffset of [1, 2, 3]) {
 
   assert.equal(frames.length, 2, 'alternating valid boundary blocks must both be routed');
   assert.notEqual(
-    parseOscDataFrame(footerAnchored, [{ byteWidth: 2, paramType: 0x00 }], { requireCrc: true }),
+    parseOscDataFrame(footerAnchored, [{ typeKey: 'default-int16' }], { requireCrc: true }),
     null,
     'parser must accept a CRC-valid footer-anchored block',
   );
@@ -358,7 +358,7 @@ for (const splitOffset of [1, 2, 3]) {
 
   assert.equal(frames.length, 0, 'CRC alone must not accept an unanchored block');
   assert.equal(
-    parseOscDataFrame(unanchored, [{ byteWidth: 2, paramType: 0x00 }]),
+    parseOscDataFrame(unanchored, [{ typeKey: 'default-int16' }]),
     null,
     'parser must reject a block with neither boundary',
   );

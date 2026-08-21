@@ -2,6 +2,8 @@ import { useRef, useState, useCallback, useEffect } from 'react';
 import { useBootloaderStore } from '../store/bootloaderStore';
 import { Flasher } from '../lib/flasher';
 import { loadFirmwareDocument } from '../lib/firmwareDocument';
+import { currentConnectionTarget } from '../lib/apiClient';
+import { bootloaderResponseTimeoutMs } from '../lib/blModbusClient';
 
 // ── Modals ────────────────────────────────────────────────────────────────────
 
@@ -203,11 +205,12 @@ export function BootloaderPage() {
   }, [logs]);
 
   const makeFlasher = useCallback(() => {
+    const responseTimeoutMs = bootloaderResponseTimeoutMs(currentConnectionTarget().kind);
     return new Flasher(0xff, {
       onLog: (msg, type = 'info') => addLog(msg, type),
       onStatus: (s, msg) => setStatus(s, msg),
       onProgress: (_cur, _tot, pct) => setProgress(pct, `${pct}%`),
-    });
+    }, { responseTimeoutMs });
   }, [addLog, setStatus, setProgress]);
 
   // ── Load firmware document ─────────────────────────────────────────────────
