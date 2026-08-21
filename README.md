@@ -52,12 +52,14 @@ write it at offset `0x0`.
 
 ## Current Runtime Snapshot
 
-The firmware and 183 cloud files used for the 2026-08-20 runtime are archived
-in [`evidence/runtime-snapshot-20260820`](evidence/runtime-snapshot-20260820/).
+The firmware and 183 cloud files captured on 2026-08-20, with the verified web
+runtime refresh from 2026-08-21, are archived in
+[`evidence/runtime-snapshot-20260820`](evidence/runtime-snapshot-20260820/).
 The complete ESP32-S3 flash image is
 [`full_flash_0x0.bin`](evidence/runtime-snapshot-20260820/firmware-flash/full_flash_0x0.bin)
-and must be written at offset `0x0`. Its source is commit `6cb4de2`, tagged
-`firmware-oled-ap-ssid-visible-20260818`.
+and must be written at offset `0x0`. The application firmware source is commit
+`6cb4de2`, tagged `firmware-oled-ap-ssid-visible-20260818`; the embedded web
+assets are built from web source commit `55122fb`.
 
 ## WiFi Scan Stability
 

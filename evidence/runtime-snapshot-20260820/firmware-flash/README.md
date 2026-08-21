@@ -2,6 +2,10 @@
 
 Target: ESP32-S3 with 8 MB flash.
 
+Package refresh: 2026-08-21. The bootloader, partition table, and application
+images remain the verified August 18 snapshot. `storage.bin` contains the web
+assets built from web source commit `55122fb`.
+
 From the repository root, open [`FLASHING.md`](../../../FLASHING.md) for a
 direct entry point. This directory is also linked from the root `README.md`.
 

@@ -1,15 +1,16 @@
 # Wireless Debug 183 Deployment
 
-Deployed: 2026-08-03 (Asia/Shanghai)
+Initial deployment: 2026-08-03 (Asia/Shanghai)
+Static web refresh: 2026-08-21 (Asia/Shanghai)
 
 ## Source
 
 - Firmware/cloud repository branch: `wifi-provisioning-fix-20260803`
 - Firmware/cloud repository commit: `9be8d1b`
-- Web source commit: `a60c85f`
-- `app.py` SHA-256: `1eca61826a999adfdd229d9bde034ea20b62c8c30e2a34f3ae00713f2515333e`
+- Web source commit: `55122fb`
+- `app.py` SHA-256: `8e64b783c3c4a2cf4da7f99453af1c2d0b2b327f556a7187b222905203051c65`
 - `ws_fanout.py` SHA-256: `50ada87f72696c1b86512ea9514a191eaa53bce9ef080fa83884d781055af1a3`
-- `a.js` SHA-256: `adf4da9cba75bc2e84d1c1eb5038b9f3e48b2d2eca9b8b2bfd4b20f773702598`
+- `a.js` SHA-256: `31df096059f34fae289700da0bce3da8c7f0aa6800d59dad0305a710a57b9bda`
 
 This is a fresh deployment. It does not contain a copy of the Japan PostgreSQL data.
 
@@ -67,4 +68,3 @@ Supervisor starts from the `apps` user's crontab after a server reboot. The exis
 5. Give ESP32 device traffic separate device authentication; do not apply browser MAS redirects to device WebSocket or MQTT traffic.
 6. Protect public MQTT with TLS and per-device credentials before exposing `1883` externally.
 7. Never expose PostgreSQL port `5432` publicly.
-
