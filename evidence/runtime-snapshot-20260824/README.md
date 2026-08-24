@@ -10,6 +10,7 @@ host 183 cloud application together under one date.
 - [`firmware-flash/`](firmware-flash/): verified split images and complete 8 MB image
 - [`web-source/`](web-source/): editable frontend source from `f8de108`
 - [`cloud-183/`](cloud-183/): host 183 backend, deployment record, and deployed web assets
+- [`ELF_ADDRESS_PICKER.md`](ELF_ADDRESS_PICKER.md): variable-name search and address-resolution design note
 
 ## Firmware
 
