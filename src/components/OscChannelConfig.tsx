@@ -1,3 +1,5 @@
+import { useRef, useState } from 'react';
+import type { ChangeEvent } from 'react';
 import type { ChannelConfig, ChannelRowState } from '../store/oscStore';
 import { useOscStore, defaultRow } from '../store/oscStore';
 import { useParamStore } from '../store/paramStore';
@@ -7,6 +9,12 @@ import {
   getOscChannelType,
   parseOscAddressHex,
 } from '../lib/oscChannelTypes';
+import {
+  createElfAddressParser,
+  filterElfVariableNames,
+  formatElfAddress,
+  type ElfAddressParser,
+} from '../lib/elfAddressParser';
 
 const MAX_CHANNELS = 12;
 
@@ -35,6 +43,14 @@ export function OscChannelConfig() {
   const { maxChannels, configRows, numChannels, setConfigRows, setNumChannels, commRateLimit, setCommRateLimit } = useOscStore();
   const params = useParamStore((s) => s.params);
   const count = Math.min(maxChannels, MAX_CHANNELS);
+  const elfFileRef = useRef<HTMLInputElement>(null);
+  const [elfParser, setElfParser] = useState<ElfAddressParser | null>(null);
+  const [elfVariableNames, setElfVariableNames] = useState<string[]>([]);
+  const [elfFileName, setElfFileName] = useState<string | null>(null);
+  const [elfLoading, setElfLoading] = useState(false);
+  const [elfError, setElfError] = useState<string | null>(null);
+  const [suggestionRow, setSuggestionRow] = useState<number | null>(null);
+  const [rowErrors, setRowErrors] = useState<Record<number, string>>({});
 
   function setRow(i: number, patch: Partial<ChannelRowState>) {
     const next = configRows.map((r, idx) => (idx === i ? { ...r, ...patch } : r));
@@ -47,6 +63,67 @@ export function OscChannelConfig() {
       setRow(i, channelRowFromParam(param));
     } else {
       setRow(i, { label: alias });
+    }
+  }
+
+  function handleAddressInput(i: number, value: string) {
+    setRow(i, { varAddrHex: value });
+    setRowErrors((current) => {
+      if (!current[i]) return current;
+      const next = { ...current };
+      delete next[i];
+      return next;
+    });
+    setSuggestionRow(i);
+  }
+
+  async function handleElfFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setElfLoading(true);
+    setElfError(null);
+    setElfFileName(null);
+    setElfParser(null);
+    setElfVariableNames([]);
+    setSuggestionRow(null);
+    try {
+      const parser = await createElfAddressParser(file);
+      setElfParser(parser);
+      setElfVariableNames(parser.getVariableNames());
+      setElfFileName(file.name);
+    } catch (error) {
+      setElfError(error instanceof Error ? error.message : '解析 ELF 文件失败');
+    } finally {
+      setElfLoading(false);
+    }
+  }
+
+  function handleVariableSelect(i: number, expression: string) {
+    if (!elfParser) return;
+    try {
+      const result = elfParser.resolve(expression);
+      if (result.address < 0n || result.address > 0xffffn) {
+        throw new Error(`变量地址 ${formatElfAddress(result.address)} 超出 16 位示波器地址范围`);
+      }
+      const row = configRows[i];
+      setRow(i, {
+        varAddrHex: formatElfAddress(result.address),
+        ...(row.label === `CH${i + 1}` || !row.label ? { label: expression } : {}),
+      });
+      setRowErrors((current) => {
+        if (!current[i]) return current;
+        const next = { ...current };
+        delete next[i];
+        return next;
+      });
+      setSuggestionRow(null);
+    } catch (error) {
+      setRowErrors((current) => ({
+        ...current,
+        [i]: error instanceof Error ? error.message : '变量地址解析失败',
+      }));
     }
   }
 
@@ -98,19 +175,74 @@ export function OscChannelConfig() {
         </select>
       </div>
 
+      <div className="flex items-center gap-2 flex-wrap text-xs">
+        <input
+          ref={elfFileRef}
+          type="file"
+          accept=".out,.elf,application/octet-stream"
+          className="hidden"
+          onChange={handleElfFileChange}
+        />
+        <button
+          type="button"
+          onClick={() => elfFileRef.current?.click()}
+          disabled={elfLoading}
+          className="px-2 py-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-slate-100 border border-slate-600 rounded"
+        >
+          {elfLoading ? '解析中...' : '加载 .out / .elf'}
+        </button>
+        {elfFileName && (
+          <span className="text-emerald-400 truncate max-w-[24rem]" title={elfFileName}>
+            已解析 {elfFileName} · {elfVariableNames.length} 个变量
+          </span>
+        )}
+        {elfError && <span className="text-red-400">{elfError}</span>}
+        {!elfFileName && !elfError && (
+          <span className="text-slate-500">地址框支持手工十六进制或已加载文件中的变量名</span>
+        )}
+      </div>
+
       {/* 手机单栏 / 桌面双栏 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
         {activeRows.map((row, i) => (
           <div key={i} className="grid grid-cols-[1.2rem_minmax(4rem,0.8fr)_minmax(7rem,1.4fr)_minmax(4rem,0.8fr)] gap-1 items-center">
             <span className="text-slate-500 text-xs text-right">{i + 1}</span>
-            <input
-              type="text"
-              value={row.varAddrHex}
-              onChange={(e) => setRow(i, { varAddrHex: e.target.value.toUpperCase() })}
-              className="bg-slate-700 border border-slate-600 rounded px-1.5 py-0.5 text-slate-100 font-mono text-xs w-full"
-              placeholder="0000"
-              maxLength={4}
-            />
+            <div className="relative min-w-0">
+              <input
+                type="text"
+                value={row.varAddrHex}
+                onChange={(e) => handleAddressInput(i, e.target.value)}
+                onFocus={() => setSuggestionRow(i)}
+                onBlur={() => setSuggestionRow(null)}
+                className="bg-slate-700 border border-slate-600 rounded px-1.5 py-0.5 text-slate-100 font-mono text-xs w-full"
+                placeholder="0000 或变量名"
+                maxLength={128}
+                aria-label={`通道 ${i + 1} 地址或变量名`}
+              />
+              {suggestionRow === i && elfParser && (() => {
+                const suggestions = filterElfVariableNames(elfVariableNames, row.varAddrHex);
+                if (suggestions.length === 0) return null;
+                return (
+                  <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-48 overflow-auto rounded border border-slate-600 bg-slate-800 shadow-xl">
+                    {suggestions.map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        title={name}
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          handleVariableSelect(i, name);
+                        }}
+                        className="block w-full truncate px-2 py-1 text-left font-mono text-xs text-slate-200 hover:bg-slate-700"
+                      >
+                        {name}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
+              {rowErrors[i] && <div className="absolute left-0 top-full z-40 mt-1 text-[10px] text-red-400">{rowErrors[i]}</div>}
+            </div>
             <select
               value={row.typeKey}
               onChange={(e) => setRow(i, { typeKey: e.target.value as ChannelRowState['typeKey'] })}
