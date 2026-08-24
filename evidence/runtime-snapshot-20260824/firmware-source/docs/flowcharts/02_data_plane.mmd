@@ -1,0 +1,122 @@
+flowchart TD
+    subgraph UART_RX[UART -> BLE/WiFi 上行路径]
+        U0[外部串口设备发送字节] --> U1[UART1 driver 产生 UART_DATA 事件]
+        U1 --> U2[uart_transport_task 从事件队列读取]
+        U2 --> U3[循环 uart_read_bytes<br/>追加到 64KB assemble buffer]
+        U3 --> U4{一帧结束?}
+        U4 -- event.timeout_flag --> U5[dispatch_frame]
+        U4 -- 2ms 软件空闲超时 --> U5
+        U4 -- assemble buffer 满 --> U5
+        U4 -- 未结束 --> U2
+        U2 --> U6{FIFO_OVF 或 BUFFER_FULL?}
+        U6 -- 是 --> U7[计 uart_overflows<br/>uart_transport_flush<br/>丢弃当前组帧]
+        U6 -- 否 --> U2
+        U5 --> U8[comm_stats_uart_rx_frame]
+        U8 --> U9[app_uart_frame_received]
+        U9 --> U10{是否 AT 控制命令?}
+        U10 -- AT+HELP --> U11[UART 回写命令帮助]
+        U10 -- AT+WIFI? --> U12[查询 wifi_manager_status<br/>UART 回写 WiFi 状态]
+        U10 -- AT+WIFI=STA --> U13[wifi_manager_schedule_net_mode STA<br/>UART 回写 QUEUED]
+        U10 -- AT+WIFI=AP --> U14[wifi_manager_schedule_net_mode AP<br/>UART 回写 QUEUED]
+        U10 -- 否 --> R0[构造 router_context<br/>当前 comm_mode + BLE/WiFi 可用性 + send 回调]
+    end
+
+    subgraph Router[router_service: UART 帧路由决策]
+        R0 --> R1[router_dispatch_uart_frame]
+        R1 --> R2{当前 router mode}
+        R2 -- WIFI --> R7[wifi_transport_send]
+        R2 -- BLE --> R8[ble_spp_transport_send]
+        R2 -- IDLE/AUTO --> R3{WiFi WebSocket 客户端已连接?}
+        R3 -- 是 --> R4[自动切换到 WIFI<br/>app_core_set_comm_mode WIFI<br/>更新显示 mode_wifi_auto]
+        R3 -- 否 --> R5{BLE 有 Notify 订阅者?}
+        R5 -- 是 --> R6[自动切换到 BLE<br/>app_core_set_comm_mode BLE<br/>更新显示 mode_ble_auto]
+        R5 -- 否 --> R9[无可用路由<br/>计 route_idle_drops<br/>丢弃帧]
+        R4 --> R7
+        R6 --> R8
+        R7 --> R10{全部入队?}
+        R8 --> R11{全部 notify?}
+        R10 -- 否 --> R12[计 route_partial_drops<br/>或 WiFi no_client/pool/queue 失败]
+        R11 -- 否 --> R13[计 BLE no_subscriber/notify failure]
+    end
+
+    subgraph WIFI_TX[WiFi WebSocket 发送细节]
+        W0[wifi_transport_send] --> W1{WS client active?}
+        W1 -- 否 --> W2[计 wifi_no_client_drops<br/>返回 0]
+        W1 -- 是 --> W3[按 512B 分片]
+        W3 --> W4[从 32 槽静态 frame_pool 取槽]
+        W4 --> W5{取槽成功?}
+        W5 -- 否 --> W6[计 wifi_pool_exhausted<br/>停止排队]
+        W5 -- 是 --> W7[复制数据到 frame 槽]
+        W7 --> W8{xQueueSend 到 s_send_queue 成功?}
+        W8 -- 否 --> W9[计 wifi_queue_full<br/>释放 frame<br/>停止排队]
+        W8 -- 是 --> W10[计 wifi_tx_queued<br/>继续下一片]
+        W10 --> W3
+        W10 --> W11[wifi_send_task 收到 frame]
+        W11 --> W12[httpd_queue_work 调度 ws_async_send]
+        W12 --> W13{queue_work 成功?}
+        W13 -- 否 --> W14[计 httpd_queue_failure 和 tx_failure<br/>释放 frame]
+        W13 -- 是 --> W15[HTTP server context 执行 ws_async_send]
+        W15 --> W16[httpd_ws_send_frame_async]
+        W16 --> W17{发送成功?}
+        W17 -- 是 --> W18[计 wifi_tx_sent<br/>释放 frame]
+        W17 -- 否 --> W19[计 wifi_tx_failure<br/>清除当前 WS client<br/>释放 frame]
+    end
+
+    subgraph BLE_TX[BLE Notify 发送细节]
+        B0[ble_spp_transport_send] --> B1[遍历所有已订阅 conn_handle]
+        B1 --> B2{存在订阅者?}
+        B2 -- 否 --> B3[计 ble_no_subscriber_drops<br/>返回 0]
+        B2 -- 是 --> B4[每个连接按 ATT MTU-3 分片]
+        B4 --> B5[ble_hs_mbuf_from_flat]
+        B5 --> B6{mbuf 分配成功?}
+        B6 -- 否 --> B7[计 ble_alloc_failure<br/>该片失败]
+        B6 -- 是 --> B8[ble_gatts_notify_custom]
+        B8 --> B9{notify 成功?}
+        B9 -- 是 --> B10[计 ble_tx_bytes<br/>继续下一片]
+        B9 -- 否且 chunk>20 --> B11[降到 20B 安全分片重试]
+        B11 --> B4
+        B9 -- 否且 chunk=20 --> B12[计 ble_notify_failure<br/>返回已发送长度]
+    end
+
+    subgraph WIFI_RX[WiFi WebSocket -> UART 下行路径]
+        X0[浏览器/上位机发送 /ws 二进制帧] --> X1[ws_handler 非 GET]
+        X1 --> X2[先读取帧长度]
+        X2 --> X3{长度为 0?}
+        X3 -- 是 --> X4[直接返回 OK]
+        X3 -- 否 --> X5[malloc RX buffer]
+        X5 --> X6{分配成功?}
+        X6 -- 否 --> X7[计 wifi_rx_failure<br/>返回 NO_MEM]
+        X6 -- 是 --> X8[读取 WebSocket payload]
+        X8 --> X9{读取成功?}
+        X9 -- 否 --> X10[计 wifi_rx_failure<br/>free buffer]
+        X9 -- 是 --> X11[计 wifi_rx_frame]
+        X11 --> X12[app_wifi_frame_received]
+        X12 --> X13{当前 comm_mode 是 WIFI?}
+        X13 -- 否 --> X14[切换 app_core 到 WIFI<br/>显示 ws_rx<br/>uart_transport_flush]
+        X13 -- 是 --> X15[uart_transport_write]
+        X14 --> X15
+        X15 --> X16[计 UART TX 结果<br/>数据发往外部串口设备]
+        X16 --> X17[free buffer]
+    end
+
+    subgraph BLE_RX[BLE GATT Write -> UART 下行路径]
+        Y0[BLE 客户端写 SPP 特征 0xABF1] --> Y1[ble_svc_gatt_handler WRITE_CHR]
+        Y1 --> Y2[读取 OS_MBUF 总长度]
+        Y2 --> Y3{长度 > 0?}
+        Y3 -- 否 --> Y4[返回 OK]
+        Y3 -- 是 --> Y5[malloc data buffer]
+        Y5 --> Y6{分配成功?}
+        Y6 -- 否 --> Y7[计 ble_alloc_failure<br/>返回 ATT insufficient resources]
+        Y6 -- 是 --> Y8[os_mbuf_copydata]
+        Y8 --> Y9[计 ble_rx_frame]
+        Y9 --> Y10[app_ble_frame_received]
+        Y10 --> Y11{当前 comm_mode 是 BLE?}
+        Y11 -- 否 --> Y12[切换 app_core 到 BLE<br/>显示 ble_rx<br/>uart_transport_flush]
+        Y11 -- 是 --> Y13[uart_transport_write]
+        Y12 --> Y13
+        Y13 --> Y14[计 UART TX 结果<br/>数据发往外部串口设备]
+        Y14 --> Y15[free data buffer]
+    end
+
+    R7 -. 展开 .-> W0
+    R8 -. 展开 .-> B0
