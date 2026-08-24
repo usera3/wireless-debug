@@ -7,30 +7,43 @@ interface WaitForMatchingModbusFrameOptions {
   timeoutMs: number;
   matches?: (frame: Uint8Array) => boolean;
   subscribe?: SubscribeModbusFrame;
+  signal?: AbortSignal;
 }
 
 export function waitForMatchingModbusFrame({
   timeoutMs,
   matches = () => true,
   subscribe = frameRouter.subscribeModbusFrame.bind(frameRouter),
+  signal,
 }: WaitForMatchingModbusFrameOptions): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
     let settled = false;
     let unsubscribe = () => {};
 
-    const timer = setTimeout(() => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      unsubscribe();
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const rejectOnce = (error: unknown) => {
       if (settled) return;
       settled = true;
-      unsubscribe();
-      reject(new Error(`modbus timeout after ${timeoutMs}ms`));
+      cleanup();
+      reject(error);
+    };
+    const onAbort = () => rejectOnce(new DOMException('Modbus wait aborted', 'AbortError'));
+    const timer = setTimeout(() => {
+      rejectOnce(new Error(`modbus timeout after ${timeoutMs}ms`));
     }, timeoutMs);
 
     unsubscribe = subscribe((frame) => {
       if (settled || !matches(frame)) return;
       settled = true;
-      clearTimeout(timer);
-      unsubscribe();
+      cleanup();
       resolve(frame);
     });
+
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
   });
 }

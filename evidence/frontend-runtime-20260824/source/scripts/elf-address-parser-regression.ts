@@ -5,6 +5,7 @@ import {
   createElfAddressParser,
   filterElfVariableNames,
   formatElfAddress,
+  MAX_ELF_FILE_BYTES,
   parseManualAddress,
 } from '../src/lib/elfAddressParser';
 
@@ -32,6 +33,9 @@ if (!existsSync(fixture)) {
     filterElfVariableNames(['prefix_cnt', 'cnt_tbc', 'cnt_tbs', '$C$FSL8'], 'CNT'),
     ['cnt_tbc', 'cnt_tbs'],
   );
+
+  const oversized = { size: MAX_ELF_FILE_BYTES + 1, arrayBuffer: async () => { throw new Error('must not read oversized file'); } } as unknown as Blob;
+  await assert.rejects(createElfAddressParser(oversized), /不超过 64 MB/);
 
   await assert.rejects(
     createElfAddressParser(new Blob([new Uint8Array([0, 1, 2, 3])])),

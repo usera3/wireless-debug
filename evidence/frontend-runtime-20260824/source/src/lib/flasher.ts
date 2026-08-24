@@ -13,14 +13,18 @@ export interface FlasherCallbacks {
   onProgress: (current: number, total: number, pct: number) => void;
 }
 
+export interface FlasherOptions {
+  responseTimeoutMs?: number;
+}
+
 export class Flasher {
   private client: BlModbusClient;
   private cb: FlasherCallbacks;
   private shouldStop = false;
   isFlashing = false;
 
-  constructor(slaveId: number, callbacks: FlasherCallbacks) {
-    this.client = new BlModbusClient(slaveId);
+  constructor(slaveId: number, callbacks: FlasherCallbacks, options: FlasherOptions = {}) {
+    this.client = new BlModbusClient(slaveId, options.responseTimeoutMs);
     this.cb = callbacks;
   }
 

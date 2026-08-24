@@ -32,7 +32,13 @@ function matchesResponse(request: Uint8Array, response: Uint8Array): boolean {
   if (response[1] !== functionCode || !verifyCrc(response)) return false;
 
   if (functionCode === 0x04) return response.length === 7 && response[2] === 0x02;
-  if (functionCode === 0x75) return response.length === 8 && response[2] === request[2];
+  if (functionCode === 0x75) {
+    return response.length === 8
+      && response[2] === request[2]
+      && response[3] === request[3]
+      && response[4] === request[4]
+      && response[5] === request[5];
+  }
   return true;
 }
 

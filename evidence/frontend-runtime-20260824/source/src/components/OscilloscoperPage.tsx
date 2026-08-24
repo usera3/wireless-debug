@@ -9,11 +9,12 @@ import { useConnectionStore } from '../store/connectionStore';
 import { useModbusOscStore } from '../store/modbusOscStore';
 import { OscChannelConfig, buildChannelConfigs } from './OscChannelConfig';
 import { OscChart } from './OscChart';
-import { OscLiveChart } from './OscLiveChart';
 import { useOscController } from '../hooks/useOscController';
 import { exportCsv, importCsv } from '../lib/csvWave';
 import { resolveConnectionTarget } from '../lib/connectionTarget';
-import { describeOscTransport } from '../lib/oscTransport';
+import { describeOscTransport, shouldStopOscOnDisconnect } from '../lib/oscTransport';
+import { oscPlotPointBudget } from '../lib/oscRenderBudget';
+import { getOscChannelType } from '../lib/oscChannelTypes';
 
 function createMockOscData(): Map<number, number[]> {
   const samples = 30_000;
@@ -48,6 +49,7 @@ function formatMemory(bytes: number): string {
 
 function formatDuration(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '0s';
+  if (seconds < 1) return `${(seconds * 1000).toFixed(seconds < 0.1 ? 1 : 0)}ms`;
   if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
   return `${(seconds / 60).toFixed(seconds < 600 ? 1 : 0)}min`;
 }
@@ -80,9 +82,13 @@ export function OscilloscoperPage() {
   const url = useConnectionStore((s) => s.url);
   const modbusOscRunning = useModbusOscStore((s) => s.running);
   const { start, stop } = useOscController();
-  const transport = useMemo(
-    () => describeOscTransport(resolveConnectionTarget(url, window.location.origin)),
+  const connectionTarget = useMemo(
+    () => resolveConnectionTarget(url, window.location.origin),
     [url],
+  );
+  const transport = useMemo(
+    () => describeOscTransport(connectionTarget),
+    [connectionTarget],
   );
 
   const [csvError, setCsvError] = useState<string | null>(null);
@@ -90,8 +96,8 @@ export function OscilloscoperPage() {
   const importRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!connected && running) stop();
-  }, [connected, running, stop]);
+    if (!connected && running && shouldStopOscOnDisconnect(connectionTarget.kind)) stop();
+  }, [connected, running, stop, connectionTarget.kind]);
 
   const configuredChannels = useMemo(() => buildChannelConfigs(configRows, numChannels), [configRows, numChannels]);
   const activeChannels = channels.length > 0 ? channels : configuredChannels;
@@ -105,10 +111,12 @@ export function OscilloscoperPage() {
     ? clamp(reviewEndSeconds ?? latestSeconds, firstSeconds, latestSeconds)
     : latestSeconds;
   const selectedStartSeconds = Math.max(firstSeconds, selectedEndSeconds - viewWindowSeconds);
-  const isLive = running && !viewPaused;
 
   const estimatedBytesPerSecond = useMemo(() => {
-    const sampleBytes = activeChannels.reduce((sum, channel) => sum + channel.byteWidth, 0);
+    const sampleBytes = activeChannels.reduce(
+      (sum, channel) => sum + getOscChannelType(channel.typeKey).byteWidth,
+      0,
+    );
     return sampleBytes * Math.max(sampleRate, 0);
   }, [activeChannels, sampleRate]);
 
@@ -125,14 +133,14 @@ export function OscilloscoperPage() {
   }, [viewWindowSeconds]);
 
   const chartData = useMemo(() => {
-    if (!hasHistory || isLive) return [[]] as [number[]];
+    if (!hasHistory) return [[]] as [number[]];
     return oscHistory.buildAlignedData(
       channelNos,
       selectedStartSeconds,
       selectedEndSeconds,
-      2400,
+      oscPlotPointBudget(channelNos.length),
     );
-  }, [hasHistory, isLive, channelKey, historyVersion, selectedStartSeconds, selectedEndSeconds, channelNos]);
+  }, [hasHistory, channelKey, historyVersion, selectedStartSeconds, selectedEndSeconds]);
 
   function handleStart() {
     const chs = configuredChannels;
@@ -177,9 +185,8 @@ export function OscilloscoperPage() {
     const mockChannels = Array.from({ length: 4 }, (_, index) => ({
       channelNo: index + 1,
       varAddr: 0,
-      paramType: 0x03,
+      typeKey: 'float32' as const,
       label: `SIM${index + 1}`,
-      byteWidth: 4,
     }));
     setChannels(mockChannels);
     setSampleRate(mockSampleRate);
@@ -212,9 +219,8 @@ export function OscilloscoperPage() {
       const importedChannels = labels.map((label, index) => ({
         channelNo: index + 1,
         varAddr: 0,
-        paramType: 0x03,
+        typeKey: 'float32' as const,
         label: label || `CH${index + 1}`,
-        byteWidth: 4,
       }));
       const batch = new Map<number, number[]>();
       columns.forEach((column, index) => batch.set(index + 1, column));
@@ -379,25 +385,16 @@ export function OscilloscoperPage() {
       )}
 
       <div className="flex-1 min-h-0">
-        {isLive ? (
-          <OscLiveChart
-            channelNos={channelNos}
-            series={chartSeries}
-            sampleRate={sampleRate}
-            windowSeconds={viewWindowSeconds}
-          />
-        ) : (
-          <OscChart
-            alignedData={chartData}
-            series={chartSeries}
-            sampleInterval={sampleIntervalSec}
-            running={running && !viewPaused}
-            windowSeconds={viewWindowSeconds}
-            xRange={{ min: selectedStartSeconds, max: selectedEndSeconds }}
-            onXRangeChange={({ min, max }) => updateReviewRange(min, max)}
-            resetViewSignal={resetViewSignal}
-          />
-        )}
+        <OscChart
+          alignedData={chartData}
+          series={chartSeries}
+          sampleInterval={sampleIntervalSec}
+          running={running && !viewPaused}
+          windowSeconds={viewWindowSeconds}
+          xRange={{ min: selectedStartSeconds, max: selectedEndSeconds }}
+          onXRangeChange={({ min, max }) => updateReviewRange(min, max)}
+          resetViewSignal={resetViewSignal}
+        />
       </div>
     </div>
   );

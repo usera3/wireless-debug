@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { apiFetch, apiUrl } from '../lib/apiClient';
+import { apiFetch, apiUrl, currentConnectionTarget } from '../lib/apiClient';
 import type { ParameterSourcePolicy } from '../lib/parameterSourcePolicy';
+import {
+  ESP_PARAMETER_FILENAME_MAX_BYTES,
+  getEspParameterFilenameTransportLength,
+  isEspParameterFilenameSupported,
+} from '../lib/parameterFilename';
+import { buildParameterUploadRequest } from '../lib/parameterFileUpload';
 
 interface Props {
   /** 选中并成功下载文件后的回调，传入 File 对象供 parseParameterTable 使用 */
@@ -32,17 +38,16 @@ export function EspFilePicker({ onFileReady, onClose, policy }: Props) {
       const list: string[] = await apiFetch('/api/excel/list').then((r) => r.json());
       setFiles(list);
       st(list.length ? `共 ${list.length} 个文件` : '', list.length ? 'ok' : '');
-      if (policy.autoLoadSingleRemoteFile && list.length === 1) {
-        await selectFile(list[0]);
-      }
     } catch (e) {
       st(`❌ 获取列表失败：${(e as Error).message}`, 'err');
     }
   }
 
   async function handleUpload(file: File) {
-    if (file.name.length > 16) {
-      st(`⚠️ 文件名过长（${file.name.length} 字符），SPIFFS 限制 16 字符以内`, 'err');
+    const isCloud = currentConnectionTarget().kind === 'cloud';
+    const filenameLength = getEspParameterFilenameTransportLength(file.name);
+    if (!isCloud && !isEspParameterFilenameSupported(file.name)) {
+      st(`⚠️ 文件名过长（${filenameLength} 字节），设备最多支持 ${ESP_PARAMETER_FILENAME_MAX_BYTES} 字节`, 'err');
       return;
     }
     st(`正在上传 ${file.name}（${(file.size / 1024).toFixed(1)} KB）...`, 'ing');
@@ -51,13 +56,20 @@ export function EspFilePicker({ onFileReady, onClose, policy }: Props) {
       await new Promise<void>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open('POST', apiUrl('/api/excel/upload'));
-        xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
+        if (!isCloud) xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) setProgress(Math.round((e.loaded / e.total) * 95));
         };
         xhr.onload = () => (xhr.status === 200 ? resolve() : reject(new Error(xhr.responseText)));
         xhr.onerror = () => reject(new Error('网络错误'));
-        xhr.send(file);
+        if (isCloud) {
+          void buildParameterUploadRequest('/api/excel/upload', file).then((request) => {
+            Object.entries(request.headers).forEach(([name, value]) => xhr.setRequestHeader(name, value));
+            xhr.send(request.body);
+          }).catch(reject);
+        } else {
+          xhr.send(file);
+        }
       });
       setProgress(100);
       setTimeout(() => setProgress(0), 800);

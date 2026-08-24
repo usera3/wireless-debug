@@ -15,8 +15,8 @@ for (const token of [
 }
 
 assert.ok(
-  /useEffect\(\(\) => \{[\s\S]*if \(!connected && running\)[\s\S]*stop\(\)/.test(page),
-  'address oscilloscope must stop and reset after the active WebSocket disconnects',
+  /if \(!connected && running && shouldStopOscOnDisconnect\(connectionTarget\.kind\)\) stop\(\)/.test(page),
+  'only local address sampling must stop immediately after a WebSocket disconnect',
 );
 assert.ok(controller.includes('frameRouter.reset()'), 'osc stop path must reset the shared frame parser');
 

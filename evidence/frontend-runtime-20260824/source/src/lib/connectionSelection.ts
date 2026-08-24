@@ -21,9 +21,14 @@ export function onlineCloudDevices(devices: CloudDeviceRecord[]): CloudDeviceOpt
     .sort((a, b) => a.displayName.localeCompare(b.displayName, 'zh-CN'));
 }
 
-export function buildCloudDeviceUrl(pageOrigin: string, deviceId: string): string {
-  const url = new URL(pageOrigin);
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+export function buildCloudDeviceUrl(
+  pageOrigin: string,
+  deviceId: string,
+  cloudWsTemplate?: string,
+): string {
+  const url = new URL(cloudWsTemplate || pageOrigin);
+  if (url.protocol === 'https:') url.protocol = 'wss:';
+  if (url.protocol === 'http:') url.protocol = 'ws:';
   if (url.port === '18088') url.port = '18089';
   url.pathname = `/ws/device/${encodeURIComponent(deviceId)}`;
   url.search = '';

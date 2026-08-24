@@ -1,9 +1,16 @@
 import { useConnectionStore } from '../store/connectionStore';
 import { resolveConnectionTarget, targetApiUrl } from './connectionTarget';
 import { buildLocalNetworkRequestInit } from './localNetworkAccess';
+import { currentRuntimeInfo } from './runtimeMode';
 
 export function currentConnectionTarget() {
-  return resolveConnectionTarget(useConnectionStore.getState().url, window.location.origin);
+  const runtime = currentRuntimeInfo();
+  const cloudApiOrigin = runtime.mode === 'cloud-device' ? runtime.pageOrigin : undefined;
+  return resolveConnectionTarget(
+    useConnectionStore.getState().url,
+    window.location.origin,
+    cloudApiOrigin,
+  );
 }
 
 export function apiUrl(path: string): string {

@@ -1,4 +1,4 @@
-# Runtime Snapshot: 2026-08-20 (refreshed 2026-08-21)
+# Runtime Snapshot: 2026-08-20 (static runtime refreshed 2026-08-24)
 
 This directory records the firmware currently used by the ESP32-S3 board and
 the cloud runtime currently deployed on private host 183.
@@ -8,7 +8,7 @@ the cloud runtime currently deployed on private host 183.
 - Source branch: `cloud-lb-migration-20260818`
 - Source commit: `6cb4de2`
 - Source tag: `firmware-oled-ap-ssid-visible-20260818`
-- Embedded web source commit: `55122fb`
+- Embedded web asset commit: `f8de108`
 - Target: ESP32-S3, 8 MB flash, DIO, 80 MHz
 - Cloud endpoints compiled into this firmware:
   - MQTT: `mqtt://39.108.83.25:1883`
@@ -38,8 +38,9 @@ authoritative because `app/app.py` contains later runtime edits.
 The capture excludes passwords, tokens, `.env` secrets, credentials, database
 data, certificates, keys, caches, and backups. `cloud-183/deployment/app.env.redacted`
 contains only non-secret runtime settings needed to understand the deployment.
-The `dist/orig/` files were refreshed from web source commit `55122fb` after
-the same static assets were deployed to host 183 on August 21.
+The `dist/orig/` files were refreshed from web source commit `f8de108` after
+the same static assets were deployed to host 183 on August 24. The service
+source remains the captured August 21 cloud implementation.
 
 ## Verification performed
 

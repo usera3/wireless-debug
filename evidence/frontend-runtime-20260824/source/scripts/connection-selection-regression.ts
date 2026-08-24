@@ -14,6 +14,14 @@ const devices = onlineCloudDevices([
 assert.deepEqual(devices.map((device) => device.displayName), ['办公室', '测试台']);
 assert.equal(buildCloudDeviceUrl('http://43.153.137.20:18088', 'wd-online-a'), 'ws://43.153.137.20:18089/ws/device/wd-online-a');
 assert.equal(buildCloudDeviceUrl('https://cloud.example.com', 'wd-online-a'), 'wss://cloud.example.com/ws/device/wd-online-a');
+assert.equal(
+  buildCloudDeviceUrl(
+    'http://rdev.midea.com:18088',
+    'wd-online-a',
+    'ws://39.108.83.25:18089/ws/device/wd-current',
+  ),
+  'ws://39.108.83.25:18089/ws/device/wd-online-a',
+);
 assert.equal(connectionChoiceFromUrl('http://192.168.4.1'), 'local');
 assert.equal(connectionChoiceFromUrl('ws://43.153.137.20:18089/ws/device/wd-online-a'), 'cloud');
 assert.equal(connectionChoiceFromUrl('ws://10.0.0.8/ws'), 'custom');

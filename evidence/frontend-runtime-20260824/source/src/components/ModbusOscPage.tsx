@@ -9,9 +9,11 @@ import {
 } from '../store/oscStore';
 import { useModbusOscController } from '../hooks/useModbusOscController';
 import { OscChart } from './OscChart';
-import { OscLiveChart } from './OscLiveChart';
 import { exportCsv, importCsv } from '../lib/csvWave';
 import type { AlignedData } from '../lib/oscHistory';
+import { oscPlotPointBudget } from '../lib/oscRenderBudget';
+import { resolveConnectionTarget } from '../lib/connectionTarget';
+import { shouldStopOscOnDisconnect } from '../lib/oscTransport';
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -31,6 +33,7 @@ function formatMemory(bytes: number): string {
 
 function formatDuration(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return '0s';
+  if (seconds < 1) return `${(seconds * 1000).toFixed(seconds < 0.1 ? 1 : 0)}ms`;
   if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
   return `${(seconds / 60).toFixed(seconds < 600 ? 1 : 0)}min`;
 }
@@ -123,8 +126,17 @@ export function ModbusOscPage() {
   const pages = useParamStore((s) => s.pages);
   const params = useParamStore((s) => s.params);
   const connected = useConnectionStore((s) => s.connected);
+  const connectionUrl = useConnectionStore((s) => s.url);
+  const connectionKind = useMemo(
+    () => resolveConnectionTarget(connectionUrl, window.location.origin).kind,
+    [connectionUrl],
+  );
   const oscRunning = useOscStore((s) => s.running);
   const { start, stop } = useModbusOscController();
+
+  useEffect(() => {
+    if (!connected && running && shouldStopOscOnDisconnect(connectionKind)) stop();
+  }, [connected, running, stop, connectionKind]);
 
   const [csvError, setCsvError] = useState<string | null>(null);
   const [resetViewSignal, setResetViewSignal] = useState(0);
@@ -162,7 +174,6 @@ export function ModbusOscPage() {
     ? clamp(reviewEndSeconds ?? latestSeconds, firstSeconds, latestSeconds)
     : latestSeconds;
   const selectedStartSeconds = Math.max(firstSeconds, selectedEndSeconds - viewWindowSeconds);
-  const isLive = running && !viewPaused;
   const channelNos = useMemo(() => aliases.map((_, index) => index + 1), [aliases]);
   const channelKey = aliases.join('\u001f');
   const chartSeries = useMemo(
@@ -170,14 +181,14 @@ export function ModbusOscPage() {
     [aliases],
   );
   const chartData = useMemo(() => {
-    if (!hasHistory || isLive) return emptyAlignedData(aliases.length);
+    if (!hasHistory) return emptyAlignedData(aliases.length);
     return modbusOscHistory.buildAlignedData(
       channelNos,
       selectedStartSeconds,
       selectedEndSeconds,
-      2400,
+      oscPlotPointBudget(channelNos.length),
     );
-  }, [hasHistory, isLive, aliases.length, channelKey, historyVersion, selectedStartSeconds, selectedEndSeconds, channelNos]);
+  }, [hasHistory, aliases.length, channelKey, historyVersion, selectedStartSeconds, selectedEndSeconds, channelNos]);
   const viewWindowOptions = useMemo(() => {
     if (OSC_VIEW_WINDOW_OPTIONS.includes(viewWindowSeconds)) return OSC_VIEW_WINDOW_OPTIONS;
     return [...OSC_VIEW_WINDOW_OPTIONS, viewWindowSeconds].sort((a, b) => a - b);
@@ -464,25 +475,16 @@ export function ModbusOscPage() {
       )}
 
       <div className="flex-1 min-h-0">
-        {isLive ? (
-          <OscLiveChart
-            channelNos={channelNos}
-            series={chartSeries}
-            sampleRate={effectiveSampleRate}
-            windowSeconds={viewWindowSeconds}
-          />
-        ) : (
-          <OscChart
-            alignedData={chartData}
-            series={chartSeries}
-            sampleInterval={sampleIntervalSec}
-            running={running && !viewPaused}
-            windowSeconds={viewWindowSeconds}
-            xRange={{ min: selectedStartSeconds, max: selectedEndSeconds }}
-            onXRangeChange={({ min, max }) => updateReviewRange(min, max)}
-            resetViewSignal={resetViewSignal}
-          />
-        )}
+        <OscChart
+          alignedData={chartData}
+          series={chartSeries}
+          sampleInterval={sampleIntervalSec}
+          running={running && !viewPaused}
+          windowSeconds={viewWindowSeconds}
+          xRange={{ min: selectedStartSeconds, max: selectedEndSeconds }}
+          onXRangeChange={({ min, max }) => updateReviewRange(min, max)}
+          resetViewSignal={resetViewSignal}
+        />
       </div>
     </div>
   );

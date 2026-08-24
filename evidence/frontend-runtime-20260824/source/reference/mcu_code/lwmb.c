@@ -205,7 +205,7 @@ void lwmb_osc_sample()
                     // 8位数据按16位处理，高位填0
                     u8_temp                            = *((uint8_t *)abs_addr);
                     lwmb_osc_sample_buf[index * 2]     = 0;               // 高字节
-                    lwmb_osc_sample_buf[index * 2 + 1] = u16_temp & 0xFF; // 低字节
+                    lwmb_osc_sample_buf[index * 2 + 1] = u8_temp;           // 低字节
                     index += 1;
                     break;
                 case LWMB_OSC_PARA_TYPE_DEFAULT:
@@ -545,6 +545,11 @@ static void lwmb_rx_frame_error_callback(void)
 
 lwmb_err_t lwmb_read_input_regs(uint8_t addr, uint16_t reg_addr, uint16_t reg_count, uint8_t *data, uint8_t *reply_data, uint16_t *reply_len)
 {
+    if (reg_count == 0 || reg_count > LWMB_MAX_READ_REGISTERS)
+    {
+        return LWMB_ERR_FRAME;
+    }
+
     reply_data[0] = addr;                      // 从地址
     reply_data[1] = LWMB_FUNC_READ_INPUT_REGS; // 功能码
     reply_data[2] = reg_count * 2;             // 数据字节数
@@ -576,6 +581,10 @@ lwmb_err_t lwmb_read_input_regs(uint8_t addr, uint16_t reg_addr, uint16_t reg_co
 
 lwmb_err_t lwmb_read_holding_regs(uint8_t addr, uint16_t reg_addr, uint16_t reg_count, uint8_t *data, uint8_t *reply_data, uint16_t *reply_len)
 {
+    if (reg_count == 0 || reg_count > LWMB_MAX_READ_REGISTERS)
+    {
+        return LWMB_ERR_FRAME;
+    }
 
 #if defined(SYS_ENABLE_MONITOR_PARA_MGR)
     uint8_t page = reg_addr >> 8;

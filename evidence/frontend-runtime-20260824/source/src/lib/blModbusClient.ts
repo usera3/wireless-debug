@@ -7,8 +7,16 @@
 import { wsClient } from './wsClient';
 import { frameRouter } from './frameRouter';
 import { appendCrc, verifyCrc } from './crc16';
+import type { ConnectionTarget } from './connectionTarget';
 
-const TIMEOUT_MS = 500;
+const LOCAL_BOOTLOADER_RESPONSE_TIMEOUT_MS = 500;
+const CLOUD_BOOTLOADER_RESPONSE_TIMEOUT_MS = 5000;
+
+export function bootloaderResponseTimeoutMs(kind: ConnectionTarget['kind']): number {
+  return kind === 'cloud'
+    ? CLOUD_BOOTLOADER_RESPONSE_TIMEOUT_MS
+    : LOCAL_BOOTLOADER_RESPONSE_TIMEOUT_MS;
+}
 
 /** Bootloader 广播地址（进入BL时固定使用，无需知道从站ID） */
 const BL_ENTER_SLAVE_ID = 0xff;
@@ -28,7 +36,10 @@ const RESPONSE_LEN: Record<number, number> = {
 const noop = (_unused: Uint8Array) => { void _unused; };
 
 export class BlModbusClient {
-  constructor(public slaveId: number = 1) {}
+  constructor(
+    public slaveId: number = 1,
+    private readonly responseTimeoutMs: number = LOCAL_BOOTLOADER_RESPONSE_TIMEOUT_MS,
+  ) {}
 
   // ── Private ────────────────────────────────────────────────────────────────
 
@@ -48,7 +59,7 @@ export class BlModbusClient {
       const timeout = setTimeout(() => {
         frameRouter.onModbusFrame(noop);
         reject(new Error('响应超时'));
-      }, TIMEOUT_MS);
+      }, this.responseTimeoutMs);
 
       frameRouter.onModbusFrame((frame: Uint8Array) => {
         const merged = new Uint8Array(buf.length + frame.length);
@@ -104,7 +115,16 @@ export class BlModbusClient {
   async enterBootloaderMode(): Promise<{ success: true; message: string }> {
     const header = new Uint8Array([BL_ENTER_SLAVE_ID, 0x65]);
     const req = appendCrc(header);
-    const resp = await this._sendRequest(req, 0x65);
+    let resp: Uint8Array;
+    try {
+      resp = await this._sendRequest(req, 0x65);
+    } catch (error) {
+      // The application may switch to Bootloader before it can send the first
+      // ACK. Repeating this idempotent transition command mirrors the required
+      // second click while preserving real protocol and CRC failures.
+      if (!(error instanceof Error) || error.message !== '响应超时') throw error;
+      resp = await this._sendRequest(req, 0x65);
+    }
     const data = this._checkResponse(resp, 0x65);
     if (data.length < 1) throw new Error('响应数据长度不足');
     const status = data[0];

@@ -2,7 +2,7 @@
 
 These files describe the Wireless Debug service captured from private host 183
 on 2026-08-20 through the approved VNT SSH path. The `dist/orig/` static assets
-and their checksums were refreshed after the verified 2026-08-21 deployment.
+and their checksums were refreshed after the verified 2026-08-24 deployment.
 
 - `app.env.redacted` contains non-secret runtime settings only.
 - `supervisord.conf` is the captured Supervisor program definition with secret
@@ -21,5 +21,5 @@ The remote checks recorded for this capture were: Supervisor programs
 WebSocket listener without an upgrade request; and a successful MQTT CONNACK.
 Before the August 21 static refresh, the deployed files were backed up to
 `/apps/backups/wireless-debug-cloud/pre-static-20260821T124743.tar.gz`. After
-the refresh, the `cloud` Supervisor service was running and the WebSocket HTTP
-probe continued to return the expected `426` response.
+the August 24 ELF-enabled refresh, the `cloud` Supervisor service was running
+and the WebSocket HTTP probe continued to return the expected `426` response.

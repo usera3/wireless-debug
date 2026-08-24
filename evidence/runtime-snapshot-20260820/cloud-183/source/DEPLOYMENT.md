@@ -1,16 +1,16 @@
 # Wireless Debug 183 Deployment
 
 Initial deployment: 2026-08-03 (Asia/Shanghai)
-Static web refresh: 2026-08-21 (Asia/Shanghai)
+Static web refresh: 2026-08-24 (Asia/Shanghai)
 
 ## Source
 
 - Firmware/cloud repository branch: `wifi-provisioning-fix-20260803`
 - Firmware/cloud repository commit: `9be8d1b`
-- Web source commit: `55122fb`
+- Web source commit: `f8de108`
 - `app.py` SHA-256: `8e64b783c3c4a2cf4da7f99453af1c2d0b2b327f556a7187b222905203051c65`
 - `ws_fanout.py` SHA-256: `50ada87f72696c1b86512ea9514a191eaa53bce9ef080fa83884d781055af1a3`
-- `a.js` SHA-256: `31df096059f34fae289700da0bce3da8c7f0aa6800d59dad0305a710a57b9bda`
+- `a.js` SHA-256: `7e06ebba94b04d3106154677ba558cc13dad9e7d090e19a170d81818c969a4c3`
 
 This is a fresh deployment. It does not contain a copy of the Japan PostgreSQL data.
 

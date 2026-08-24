@@ -7,6 +7,10 @@ export type OscTransportDescription = {
   tone: 'fast' | 'cloud' | 'invalid';
 };
 
+export function shouldStopOscOnDisconnect(kind: ConnectionTarget['kind']): boolean {
+  return kind !== 'cloud';
+}
+
 export function describeOscTransport(target: ConnectionTarget): OscTransportDescription {
   if (target.kind === 'local') {
     return {

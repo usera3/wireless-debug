@@ -9,6 +9,26 @@ export interface BinaryParseResult {
 type Section = { name: string; type: number; offset: number; size: number; link: number; info: number; entrySize: number };
 type Abbrev = { tag: string; children: boolean; attrs: [number, number, number?][] };
 
+// Only these DIEs participate in address resolution. Keeping compile units,
+// subprograms and lexical blocks multiplies memory use for large firmware ELF
+// files without adding any information needed by the channel picker.
+const RETAINED_TAGS = new Set([
+  'DW_TAG_variable',
+  'DW_TAG_member',
+  'DW_TAG_structure_type',
+  'DW_TAG_union_type',
+  'DW_TAG_class_type',
+  'DW_TAG_array_type',
+  'DW_TAG_base_type',
+  'DW_TAG_typedef',
+  'DW_TAG_const_type',
+  'DW_TAG_volatile_type',
+  'DW_TAG_pointer_type',
+  'DW_TAG_enumeration_type',
+  'DW_TAG_subroutine_type',
+  'DW_TAG_inheritance',
+]);
+
 const TAGS: Record<number, string> = {
   0x01: "DW_TAG_array_type", 0x02: "DW_TAG_class_type", 0x04: "DW_TAG_enumeration_type", 0x05: "DW_TAG_formal_parameter",
   0x0b: "DW_TAG_lexical_block", 0x0d: "DW_TAG_member", 0x0f: "DW_TAG_pointer_type", 0x11: "DW_TAG_compile_unit",
@@ -57,21 +77,66 @@ export function parseElfBinary(input: ArrayBuffer | Uint8Array): BinaryParseResu
   return { symbols, dies, signatures };
 }
 
-function sectionData(bytes: Uint8Array, section?: Section) { return section ? bytes.subarray(section.offset, section.offset + section.size) : new Uint8Array(); }
+function sectionData(bytes: Uint8Array, section?: Section) {
+  return section ? bytes.subarray(section.offset, section.offset + section.size) : new Uint8Array();
+}
 function cstr(bytes: Uint8Array, offset: number) { let end = offset; while (end < bytes.length && bytes[end]) end++; return new TextDecoder().decode(bytes.slice(offset, end)); }
 
 function parseSymbols(bytes: Uint8Array, symtab?: Section, strtab?: Section) {
   const result = new Map<string, SymbolEntry>(); if (!symtab || !strtab) return result; const strings = sectionData(bytes, strtab), data = sectionData(bytes, symtab);
-  for (let p = 0; p + 16 <= data.length; p += symtab.entrySize || 16) { const r = new Reader(data, p), name = r.u32(), value = r.u32(), size = r.u32(), info = r.u8(); r.u8(); r.u16(); const symbolName = cstr(strings, name); if (!symbolName || !value) continue; const entry = { name: symbolName, address: BigInt(value), size: BigInt(size), type: (info & 0xf) === 1 ? "OBJECT" : "NOTYPE", bind: String(info >> 4) }; if (!result.has(symbolName)) result.set(symbolName, entry); }
+  for (let p = 0; p + 16 <= data.length; p += symtab.entrySize || 16) {
+    const r = new Reader(data, p), name = r.u32(), value = r.u32(), size = r.u32(), info = r.u8();
+    r.u8(); r.u16();
+    const kind = info & 0xf;
+    // Keep data symbols and vendor toolchains' untyped data symbols. Function
+    // and section symbols only pollute the variable autocomplete list.
+    if (kind !== 0 && kind !== 1) continue;
+    const symbolName = cstr(strings, name);
+    if (!symbolName || !value) continue;
+    const entry = { name: symbolName, address: BigInt(value), size: BigInt(size), type: kind === 1 ? "OBJECT" : "NOTYPE", bind: String(info >> 4) };
+    if (!result.has(symbolName)) result.set(symbolName, entry);
+  }
   return result;
 }
 
 function parseUnits(bytes: Uint8Array, data: Uint8Array, abbrevData: Uint8Array, strSection: Section | undefined, lineStrSection: Section | undefined, typeUnit: boolean, sectionOffset: number, dies: Map<number, Die>, signatures: Map<string, Die[]>) {
-  const strings = strSection ? bytes.subarray(strSection.offset, strSection.offset + strSection.size) : new Uint8Array(), lineStrings = lineStrSection ? bytes.subarray(lineStrSection.offset, lineStrSection.offset + lineStrSection.size) : strings;
+  const strings = sectionData(bytes, strSection);
+  const lineStrings = lineStrSection ? sectionData(bytes, lineStrSection) : strings;
   let unitPos = 0;
   while (unitPos + 4 <= data.length) { const start = unitPos, length = new DataView(data.buffer, data.byteOffset + unitPos, 4).getUint32(0, true); unitPos += 4; if (!length || unitPos + length > data.length) break; const end = unitPos + length, r = new Reader(data, unitPos); r.u16(); const abbrevOffset = r.u32(), addressSize = r.u8(); let signature = "";
     if (typeUnit) { signature = [...r.bytesN(8)].reverse().map(x => x.toString(16).padStart(2, "0")).join(""); r.u32(); }
-    const table = readAbbrevs(abbrevData, abbrevOffset), stack: Die[] = []; while (r.pos < end) { const codePos = r.pos, code = r.uleb(); if (!code) { stack.pop(); continue; } const spec = table.get(code); if (!spec) throw new Error(`Unsupported DWARF abbreviation ${code}`); const dieOffset = codePos, die: Die = { offset: dieOffset, unit: sectionOffset + start, unitBase: start, tag: spec.tag, attrs: new Map(), children: [] }; if (stack.length) stack[stack.length - 1].children.push(die); if (spec.children) stack.push(die); for (const [attr, formCode, implicitValue] of spec.attrs) { const value = readForm(r, formCode, addressSize, strings, lineStrings, start, end, implicitValue); if (value !== undefined) die.attrs.set(ATTRS[attr] ?? `DW_AT_0x${attr.toString(16)}`, value); } let key = die.offset; while (dies.has(key)) key += 0x100000000; dies.set(key, die); if (signature && typeUnit && die.tag !== "DW_TAG_type_unit" && !signatures.has(signature)) signatures.set(signature, [die]); }
+    const table = readAbbrevs(abbrevData, abbrevOffset);
+    const stack: Array<{ die: Die | null }> = [];
+    while (r.pos < end) {
+      const codePos = r.pos;
+      const code = r.uleb();
+      if (!code) {
+        stack.pop();
+        continue;
+      }
+      const spec = table.get(code);
+      if (!spec) throw new Error(`Unsupported DWARF abbreviation ${code}`);
+
+      const keep = RETAINED_TAGS.has(spec.tag) || spec.tag.startsWith('User TAG value:');
+      const parent = [...stack].reverse().find((frame) => frame.die)?.die;
+      const die = keep
+        ? { offset: codePos, unit: sectionOffset + start, unitBase: start, tag: spec.tag, attrs: new Map(), children: [] }
+        : null;
+      if (die && parent) parent.children.push(die);
+      if (spec.children) stack.push({ die });
+
+      for (const [attr, formCode, implicitValue] of spec.attrs) {
+        const value = readForm(r, formCode, addressSize, strings, lineStrings, start, end, implicitValue);
+        if (die && value !== undefined) die.attrs.set(ATTRS[attr] ?? `DW_AT_0x${attr.toString(16)}`, value);
+      }
+
+      if (die) {
+        let key = die.offset;
+        while (dies.has(key)) key += 0x100000000;
+        dies.set(key, die);
+        if (signature && typeUnit && !signatures.has(signature)) signatures.set(signature, [die]);
+      }
+    }
     unitPos = end;
   }
 }

@@ -14,7 +14,7 @@ import {
   type CloudDeviceOption,
   type ConnectionChoice,
 } from '../lib/connectionSelection';
-import { platformDeviceDirectoryUrl } from '../lib/remoteConsole';
+import { platformDeviceDirectoryUrl, remoteConsoleWsUrl } from '../lib/remoteConsole';
 
 type StatusKind = 'idle' | 'ok' | 'err' | 'ing';
 
@@ -180,9 +180,13 @@ export function ConnectionPanel() {
   const [cloudDevices, setCloudDevices] = useState<CloudDeviceOption[]>([]);
   const [cloudDevicesLoading, setCloudDevicesLoading] = useState(false);
   const [selectedCloudDeviceId, setSelectedCloudDeviceId] = useState(() => cloudDeviceIdFromUrl(url) || '');
-  const refreshInFlightRef = useRef<AbortController | null>(null);
 
-  const target = useMemo(() => resolveConnectionTarget(url, window.location.origin), [url]);
+  const cloudWsTemplate = remoteConsoleWsUrl() || undefined;
+  const cloudApiOrigin = cloudWsTemplate ? window.location.origin : undefined;
+  const target = useMemo(
+    () => resolveConnectionTarget(url, window.location.origin, cloudApiOrigin),
+    [cloudApiOrigin, url],
+  );
   const wifiConfigHref = target.kind === 'invalid' ? '#' : `${target.apiBase}/wifi.html`;
   const needsLocalPermission = requiresLocalNetworkPermission(target, window.location.protocol);
 
@@ -226,14 +230,14 @@ export function ConnectionPanel() {
     }
     if (choice === 'cloud') {
       const deviceId = selectedCloudDeviceId || cloudDevices[0]?.deviceId;
-      if (deviceId) setUrl(buildCloudDeviceUrl(window.location.origin, deviceId));
+      if (deviceId) setUrl(buildCloudDeviceUrl(window.location.origin, deviceId, cloudWsTemplate));
     }
   }
 
   function selectCloudDevice(deviceId: string) {
     setSelectedCloudDeviceId(deviceId);
     if (!connected && !connecting && deviceId) {
-      setUrl(buildCloudDeviceUrl(window.location.origin, deviceId));
+      setUrl(buildCloudDeviceUrl(window.location.origin, deviceId, cloudWsTemplate));
     }
   }
 
@@ -246,18 +250,13 @@ export function ConnectionPanel() {
       return;
     }
     if (needsLocalPermission && !localAccessGranted) return;
-    if (silent && refreshInFlightRef.current) return;
-    refreshInFlightRef.current?.abort();
-    const controller = new AbortController();
-    refreshInFlightRef.current = controller;
     if (!silent) setRefreshing(true);
     try {
       const [device, wifi, ble] = await Promise.all([
-        apiJson<DeviceStatus>('/api/device/status', { signal: controller.signal }),
-        apiJson<WifiStatus>('/api/wifi/status', { signal: controller.signal }),
-        apiJson<BleStatus>('/api/ble/status', { signal: controller.signal }),
+        apiJson<DeviceStatus>('/api/device/status'),
+        apiJson<WifiStatus>('/api/wifi/status'),
+        apiJson<BleStatus>('/api/ble/status'),
       ]);
-      if (refreshInFlightRef.current !== controller) return;
       setDeviceStatus(device);
       setWifiStatus(wifi);
       setBleStatus(ble);
@@ -265,18 +264,13 @@ export function ConnectionPanel() {
         setActionStatus({ msg: '状态已刷新', kind: 'ok' });
       }
     } catch (err) {
-      if (controller.signal.aborted || silent) return;
       setActionStatus({ msg: `状态刷新失败：${(err as Error).message}`, kind: 'err' });
     } finally {
-      if (refreshInFlightRef.current === controller) {
-        refreshInFlightRef.current = null;
-        if (!silent) setRefreshing(false);
-      }
+      if (!silent) setRefreshing(false);
     }
   }, [localAccessGranted, needsLocalPermission, target]);
 
   useEffect(() => {
-    refreshInFlightRef.current?.abort();
     setLocalAccessGranted(false);
   }, [url]);
 

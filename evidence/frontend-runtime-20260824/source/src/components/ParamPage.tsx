@@ -5,8 +5,9 @@ import { parseParameterTable } from '../lib/paramParser';
 import { ParamRow } from './ParamRow';
 import { useModbusOps } from '../hooks/useModbusOps';
 import { EspFilePicker } from './EspFilePicker';
-import { currentConnectionTarget } from '../lib/apiClient';
+import { apiFetch, currentConnectionTarget } from '../lib/apiClient';
 import { parameterSourcePolicy } from '../lib/parameterSourcePolicy';
+import { buildParameterUploadRequest } from '../lib/parameterFileUpload';
 
 export function ParamPage() {
   const { pages, params, loadParams, activePage, search, setActivePage, setSearch } = useParamStore();
@@ -25,7 +26,14 @@ export function ParamPage() {
   async function loadFile(file: File) {
     setLoading(true);
     try {
-      const { params: p, pages: pg } = await parseParameterTable(file);
+      const parsed = await parseParameterTable(file);
+      if (currentConnectionTarget().kind === 'cloud') {
+        const request = await buildParameterUploadRequest('/api/excel/upload', file);
+        const { url, ...init } = request;
+        const response = await apiFetch(url, init);
+        if (!response.ok) throw new Error(`参数表上传失败：HTTP ${response.status}`);
+      }
+      const { params: p, pages: pg } = parsed;
       loadParams(p, pg);
       setActivePage(pg[0] ?? '');
     } catch (err) {

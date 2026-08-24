@@ -1,4 +1,9 @@
 import { appendCrc, crc16, verifyCrc } from './crc16';
+import {
+  decodeOscChannelValue,
+  getOscChannelType,
+  type OscChannelDescriptor,
+} from './oscChannelTypes';
 
 const SLAVE = 0xff;
 
@@ -48,9 +53,6 @@ export interface ParseOscDataFrameOptions {
   requireCrc?: boolean;
 }
 
-// float32 解析的 paramType 集合：0x03=float32, 0x07=double→float(4B)
-const FLOAT32_TYPES = new Set([0x03, 0x07]);
-
 /** 解析示波数据帧，返回各通道按采样点排列的原始值数组
  *
  * 帧结构（frameLen 字节，不含尾部附加 Modbus）：
@@ -62,7 +64,7 @@ const FLOAT32_TYPES = new Set([0x03, 0x07]);
  */
 export function parseOscDataFrame(
   data: Uint8Array,
-  channels: { byteWidth: number; paramType: number }[],
+  channels: OscChannelDescriptor[],
   options: ParseOscDataFrameOptions = {},
 ): OscFrame | null {
   const MAGIC = [0xff, 0x77, 0xaa, 0x55];
@@ -73,15 +75,7 @@ export function parseOscDataFrame(
 
   if (data.length < OVERHEAD) return null;
 
-  // 校验头 magic
-  for (let i = 0; i < HEADER_LEN; i++) {
-    if (data[i] !== MAGIC[i]) return null;
-  }
-
-  // 校验尾 magic
-  for (let i = 0; i < FOOTER_LEN; i++) {
-    if (data[data.length - FOOTER_LEN + i] !== MAGIC[i]) return null;
-  }
+  const headerValid = MAGIC.every((byte, index) => data[index] === byte);
 
   // payload 范围：[4 .. data.length - 6)，CRC 在 [data.length-6 .. data.length-4)
   const payloadStart = HEADER_LEN;
@@ -93,9 +87,16 @@ export function parseOscDataFrame(
   const crcHi = data[crcOffset + 1];
   const calcCrc = crc16(payload);
   const crcValid = crcLo === (calcCrc & 0xff) && crcHi === ((calcCrc >> 8) & 0xff);
-  if (options.requireCrc && !crcValid) return null;
+  const footerValid = MAGIC.every(
+    (byte, index) => data[data.length - FOOTER_LEN + index] === byte,
+  );
+  if (!headerValid && !footerValid) return null;
+  if (!crcValid && (options.requireCrc || !headerValid || !footerValid)) return null;
 
-  const stridePerSample = channels.reduce((a, c) => a + c.byteWidth, 0);
+  const stridePerSample = channels.reduce(
+    (total, channel) => total + getOscChannelType(channel.typeKey).byteWidth,
+    0,
+  );
   if (stridePerSample === 0) return null;
   const sampleCount = Math.floor(payload.length / stridePerSample);
   const channelData: number[][] = channels.map(() => []);
@@ -103,19 +104,10 @@ export function parseOscDataFrame(
 
   for (let s = 0; s < sampleCount; s++) {
     let offset = s * stridePerSample;
-    channels.forEach(({ byteWidth: w, paramType }, ci) => {
-      let val: number;
-      if (w === 2) {
-        val = view.getInt16(offset, false);
-      } else if (w === 4) {
-        val = FLOAT32_TYPES.has(paramType)
-          ? view.getFloat32(offset, false)
-          : view.getInt32(offset, false);
-      } else {
-        val = view.getFloat64(offset, false);
-      }
-      channelData[ci].push(val);
-      offset += w;
+    channels.forEach((channel, ci) => {
+      const definition = getOscChannelType(channel.typeKey);
+      channelData[ci].push(decodeOscChannelValue(view, offset, channel));
+      offset += definition.byteWidth;
     });
   }
   return { channels: channelData, rawData: payload };

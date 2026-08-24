@@ -28,7 +28,7 @@ Omit `COM4` to use the default port. The image is an 8 MB ESP32-S3 image.
 SHA-256:
 
 ```text
-6943913ab937072d3b8aa4e886d4bed853b601e7785f62b8985f8d07331ba9d9  full_flash_0x0.bin
+c87b3095f48811de799c70b23cf35d3fd81b0152ad32d2187dfef242fc7fedfb  full_flash_0x0.bin
 ```
 
 ## Split Images

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { oscHistory, OscHistoryStats } from '../lib/oscHistory';
+import type { OscChannelTypeKey } from '../lib/oscChannelTypes';
 
 export const OSC_VIEW_WINDOW_OPTIONS = [5, 10, 30, 60];
 export const OSC_HISTORY_RETENTION_OPTIONS = [60, 300, 600, 1800];
@@ -9,19 +10,18 @@ export const OSC_DEFAULT_RETENTION_SECONDS = 300;
 export interface ChannelConfig {
   channelNo: number;  // 1-based
   varAddr: number;    // 变量地址
-  paramType: number;  // 0x00-0x04
+  typeKey: OscChannelTypeKey;
   label: string;
-  byteWidth: number;  // 2/4/8
 }
 
 export interface ChannelRowState {
   varAddrHex: string;
-  paramType: number;
+  typeKey: OscChannelTypeKey;
   label: string;
 }
 
 export function defaultRow(channelNo: number): ChannelRowState {
-  return { varAddrHex: '0000', paramType: 0x00, label: `CH${channelNo}` };
+  return { varAddrHex: '0000', typeKey: 'default-int16', label: `CH${channelNo}` };
 }
 
 interface OscState {
@@ -62,7 +62,8 @@ interface OscState {
 
 function normalizeWindow(seconds: number): number {
   if (!Number.isFinite(seconds) || seconds <= 0) return OSC_DEFAULT_VIEW_WINDOW_SECONDS;
-  return Math.max(1, seconds);
+  // 视口允许亚秒值；图表层按采样间隔保证至少能看到一个样本。
+  return seconds;
 }
 
 function normalizeRetention(seconds: number): number {
@@ -96,9 +97,9 @@ export const useOscStore = create<OscState>((set, get) => ({
   setMaxChannels: (v) => set({ maxChannels: v }),
   setFrameLen: (v) => set({ frameLen: v }),
   setChannels: (v) => set({ channels: v }),
-  appendSamples: (batch, elapsedMs) => {
+  appendSamples: (batch) => {
     if (batch.size === 0) return;
-    oscHistory.appendBatchAt(batch, elapsedMs);
+    oscHistory.appendBatch(batch);
     const stats = oscHistory.getStats();
     set({ historyStats: stats, historyVersion: stats.version });
   },

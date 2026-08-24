@@ -4,7 +4,8 @@ import type { AddressResult } from './elfParser/model';
 export type ElfAddressParser = Pick<AddressParser, 'getVariableNames' | 'resolve'>;
 export type { AddressResult };
 
-// Keep the parser's full-file buffer and DWARF model within a predictable browser budget.
+// Parsing retains a compact DWARF type graph, but the browser still needs one
+// temporary ArrayBuffer while reading the upload. Keep that peak bounded.
 export const MAX_ELF_FILE_BYTES = 64 * 1024 * 1024;
 
 export async function createElfAddressParser(file: Blob): Promise<ElfAddressParser> {

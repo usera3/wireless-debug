@@ -108,7 +108,7 @@ export async function parseParameterTable(
       try {
         const data = new Uint8Array(e.target!.result as ArrayBuffer);
         const wb = XLSX.read(data, { type: 'array' });
-        const skipSheets = new Set(['Settings', 'BASE']);
+        const skipSheets = new Set(['Settings']);
         const pages = wb.SheetNames.filter((s) => !skipSheets.has(s));
         const params = pages.flatMap((s) => parseSheet(XLSX, wb, s));
         resolve({ params, pages });

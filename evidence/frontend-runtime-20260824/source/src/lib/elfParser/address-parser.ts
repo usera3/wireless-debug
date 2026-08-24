@@ -5,20 +5,26 @@ const TYPE_TAGS = new Set(["DW_TAG_structure_type", "DW_TAG_union_type", "DW_TAG
 
 export class AddressParser {
   private readonly variables = new Map<string, Die>();
+  private readonly diesByUnitOffset = new Map<string, Die>();
+  private readonly variablesByAddress = new Map<string, Die>();
   private readonly signatures = new Map<string, Die[]>();
   constructor(private readonly symbols: Map<string, SymbolEntry>, private readonly dies: Map<number, Die>, signatures = new Map<string, Die[]>()) {
     this.signatures = signatures;
-    for (const die of dies.values()) if (die.tag === "DW_TAG_variable") {
+    for (const die of dies.values()) {
+      this.diesByUnitOffset.set(`${die.unit}:${die.offset}`, die);
+      if (die.tag !== "DW_TAG_variable") continue;
       const name = normalizedName(die.attrs.get("DW_AT_name"));
+      const location = die.attrs.get("DW_AT_location");
+      const address = locationAddress(location);
+      if (address) this.variablesByAddress.set(address, die);
       if (typeof name === "string") {
-        const location = die.attrs.get("DW_AT_location");
         const existing = this.variables.get(name);
         if (!existing || (typeof location === "string" && location.includes("DW_OP_addr"))) this.variables.set(name, die);
       }
     }
     for (const [name, symbol] of symbols) {
       const address = symbol.address.toString(16);
-      const variable = [...dies.values()].find(die => die.tag === "DW_TAG_variable" && locationAddress(die.attrs.get("DW_AT_location")) === address) ?? [...dies.values()].find(die => die.tag === "DW_TAG_variable" && normalizedName(die.attrs.get("DW_AT_name")) === name);
+      const variable = this.variablesByAddress.get(address) ?? this.variables.get(name);
       if (variable) this.variables.set(name, variable);
     }
   }
@@ -60,7 +66,7 @@ export class AddressParser {
 
   private variableType(name: string): Die {
     const variable = this.variables.get(name);
-    if (!variable) throw new Error(`DWARF variable not found: ${name} (variables=${this.variables.size}, dies=${this.dies.size}, candidates=${[...this.dies.values()].filter(die => die.tag === "DW_TAG_variable" && String(die.attrs.get("DW_AT_name")).toLowerCase().includes(name.toLowerCase())).length}, near=${[...this.dies.values()].filter(die => die.offset >= 0x477c && die.offset <= 0x4792).map(die => `${die.tag}:${String(die.attrs.get("DW_AT_name"))}`).join(",")})`);
+    if (!variable) throw new Error(`DWARF type information is unavailable for ${name}`);
     return this.ref(variable);
   }
   private ref(die: Die): Die {
@@ -71,7 +77,7 @@ export class AddressParser {
       return candidates[0];
     }
     if (typeof ref !== "number") throw new Error(`DIE ${die.offset.toString(16)} has no type`);
-    return [...this.dies.values()].find(candidate => candidate.unit === die.unit && candidate.offset === ref) ?? this.dies.get(ref) ?? (() => { throw new Error(`Missing DIE 0x${ref.toString(16)} in unit ${die.unit}`); })();
+    return this.diesByUnitOffset.get(`${die.unit}:${ref}`) ?? this.dies.get(ref) ?? (() => { throw new Error(`Missing DIE 0x${ref.toString(16)} in unit ${die.unit}`); })();
   }
   private unwrap(die: Die): Die { let current = die, guard = 0; while ((TYPE_TAGS.has(current.tag) || current.tag.startsWith("User TAG value:")) && current.tag !== "DW_TAG_structure_type" && current.tag !== "DW_TAG_union_type" && current.tag !== "DW_TAG_array_type" && guard++ < 32) { if (!current.attrs.has("DW_AT_type")) break; current = this.ref(current); } return current; }
   private elementSize(array: Die): number { const base = this.unwrap(this.ref(array)), size = numberValue(base.attrs.get("DW_AT_byte_size")); if (size === undefined) throw new Error(`Array element size is unavailable`); return size; }
