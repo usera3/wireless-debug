@@ -47,8 +47,12 @@ def wait_until(predicate, timeout: float = 1.0) -> None:
 
 def main() -> None:
     compose = COMPOSE_PATH.read_text(encoding="utf-8")
-    assert re.search(r"CLOUD_WS_BROWSER_CHUNK_BYTES:.*:-2048", compose)
-    assert re.search(r"CLOUD_WS_BROWSER_SEND_INTERVAL_MS:.*:-20", compose)
+    queue_match = re.search(r"CLOUD_WS_BROWSER_QUEUE_FRAMES:.*:-(\d+)", compose)
+    chunk_match = re.search(r"CLOUD_WS_BROWSER_CHUNK_BYTES:.*:-(\d+)", compose)
+    interval_match = re.search(r"CLOUD_WS_BROWSER_SEND_INTERVAL_MS:.*:-(\d+)", compose)
+    assert queue_match and int(queue_match.group(1)) == 256
+    assert chunk_match and int(chunk_match.group(1)) == 2048
+    assert interval_match and int(interval_match.group(1)) == 0
     module = load_module()
     drop_events: list[int] = []
     fast_connection = RecordingConnection()
@@ -93,23 +97,22 @@ def main() -> None:
     assert paced_connection.sent == [b"abcd", b"efgh", b"ijkl"]
     paced.close()
 
-    coalesced_connection = RecordingConnection()
-    coalesced = module.BrowserSendPump(
-        coalesced_connection,
-        max_frames=16,
-        chunk_bytes=8,
-        min_send_interval=0.05,
+    burst_connection = RecordingConnection(blocked=True)
+    burst = module.BrowserSendPump(
+        burst_connection,
+        max_frames=int(queue_match.group(1)),
+        chunk_bytes=int(chunk_match.group(1)),
+        min_send_interval=int(interval_match.group(1)) / 1000,
     )
-    coalesced.start()
-    assert coalesced.enqueue(b"warm")
-    wait_until(lambda: coalesced_connection.sent == [b"warm"])
-    for payload in (b"ab", b"cd", b"ef", b"gh"):
-        assert coalesced.enqueue(payload)
-    wait_until(lambda: len(coalesced_connection.sent) >= 2)
-    assert coalesced_connection.sent[1] == b"abcdefgh", (
-        "small frames queued during pacing must share one browser send"
-    )
-    coalesced.close()
+    burst.start()
+    burst_frames = [index.to_bytes(2, "big") for index in range(200)]
+    for payload in burst_frames:
+        assert burst.enqueue(payload)
+    assert burst.dropped_frames == 0
+    burst_connection.release.set()
+    wait_until(lambda: len(burst_connection.sent) == len(burst_frames), timeout=3.0)
+    assert burst_connection.sent == burst_frames
+    burst.close()
     print("cloud WebSocket fanout regression passed")
 
 

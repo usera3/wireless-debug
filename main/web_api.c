@@ -18,8 +18,6 @@
 #include "motor_diag.h"
 #include "uart_transport.h"
 
-#define DEVICE_STATUS_RESPONSE_CAPACITY 5120U
-
 static web_api_context_t s_ctx;
 
 typedef enum {
@@ -1083,35 +1081,15 @@ static esp_err_t device_status_handler(httpd_req_t *req)
     cloud_ws_uplink_get_stats(&uplink);
     http_prepare_json(req);
 
-    char *resp = heap_caps_malloc(
-        DEVICE_STATUS_RESPONSE_CAPACITY,
-        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (resp == NULL) {
-        resp = heap_caps_malloc(
-            DEVICE_STATUS_RESPONSE_CAPACITY,
-            MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    }
-    if (resp == NULL) {
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
-                                   "device status allocation failed");
-    }
-
-    int written = snprintf(resp, DEVICE_STATUS_RESPONSE_CAPACITY,
+    char resp[3072];
+    int written = snprintf(resp, sizeof(resp),
              "{\"ok\":true,\"net\":\"%s\",\"comm\":\"%s\",\"uart_baud\":%lu,"
              "\"ble_ready\":%s,\"wifi_ws_client\":%s,"
              "\"display_backend\":\"%s\",\"display_status\":\"%s\","
              "\"menu_active\":%s,\"menu_title\":\"%s\",\"menu_message\":\"%s\","
              "\"comm_stats\":{"
              "\"uart\":{\"rx_frames\":%llu,\"rx_bytes\":%llu,\"tx_bytes\":%llu,"
-             "\"tx_failures\":%llu,\"overflows\":%llu,"
-             "\"fifo_overflows\":%llu,\"buffer_full_overflows\":%llu,"
-             "\"overflow_assemble_bytes\":%llu,\"overflow_driver_bytes\":%llu,"
-             "\"last_overflow_event\":%llu,\"last_overflow_assemble_bytes\":%llu,"
-             "\"last_overflow_driver_bytes\":%llu,\"dispatch_calls\":%llu,"
-             "\"dispatch_total_us\":%llu,\"dispatch_max_us\":%llu,"
-             "\"cloud_route_calls\":%llu,\"cloud_route_total_us\":%llu,"
-             "\"cloud_route_max_us\":%llu,\"local_route_calls\":%llu,"
-             "\"local_route_total_us\":%llu,\"local_route_max_us\":%llu},"
+             "\"tx_failures\":%llu,\"overflows\":%llu},"
              "\"ble\":{\"rx_frames\":%llu,\"rx_bytes\":%llu,\"tx_bytes\":%llu,"
              "\"notify_failures\":%llu,\"no_subscriber_drops\":%llu,"
              "\"dropped_bytes\":%llu,\"alloc_failures\":%llu},"
@@ -1126,27 +1104,18 @@ static esp_err_t device_status_handler(httpd_req_t *req)
              "\"connected\":%s,\"queue_in_psram\":%s,"
              "\"compression_capable\":%s,\"compression_active\":%s,"
              "\"sender_stack_min_free\":%lu,\"queue_pending_frames\":%lu,"
-             "\"queue_pending_bytes\":%llu,\"queue_high_water_frames\":%lu,"
-             "\"queue_high_water_bytes\":%llu,\"queued_frames\":%lu,"
-             "\"queued_bytes\":%llu,"
-             "\"sent_frames\":%lu,\"sent_bytes\":%llu,\"queue_full\":%lu,"
-             "\"overload_dropped_frames\":%lu,\"overload_dropped_bytes\":%llu,"
-             "\"rejected_frames\":%lu,\"rejected_bytes\":%llu,"
-             "\"send_failures\":%lu,"
+             "\"queued_frames\":%lu,"
+             "\"sent_frames\":%lu,\"sent_bytes\":%lu,\"queue_full\":%lu,"
+             "\"overload_dropped_frames\":%lu,\"send_failures\":%lu,"
              "\"fallback_frames\":%lu,"
-             "\"queued_fallback_frames\":%lu,\"queued_fallback_bytes\":%llu,"
-             "\"fallback_failures\":%lu,"
-             "\"stop_dropped_frames\":%lu,\"stop_dropped_bytes\":%llu,"
-             "\"connect_events\":%lu,"
+             "\"queued_fallback_frames\":%lu,\"fallback_failures\":%lu,"
+             "\"stop_dropped_frames\":%lu,\"connect_events\":%lu,"
              "\"disconnect_events\":%lu,\"error_events\":%lu,"
-             "\"closed_events\":%lu,\"downlink_frames\":%lu,"
-             "\"downlink_bytes\":%lu,\"downlink_failures\":%lu,"
-             "\"compression_calls\":%lu,\"compressed_frames\":%lu,"
-             "\"raw_envelope_frames\":%lu,\"compression_failures\":%lu,"
-             "\"raw_bytes\":%llu,\"wire_bytes\":%llu,"
-             "\"compression_total_us\":%llu,\"compression_max_us\":%lu,"
-             "\"send_calls\":%lu,\"send_total_us\":%llu,\"send_max_us\":%lu,"
-             "\"last_event_id\":%ld},"
+             "\"closed_events\":%lu,\"compression_calls\":%lu,"
+             "\"compressed_frames\":%lu,\"raw_envelope_frames\":%lu,"
+             "\"compression_failures\":%lu,\"raw_bytes\":%llu,"
+             "\"wire_bytes\":%llu,\"compression_total_us\":%llu,"
+             "\"compression_max_us\":%lu,\"last_event_id\":%ld},"
              "\"motor_params\":{\"count\":%u,\"capacity\":%u}}",
              system_menu_net_name(menu.net_mode),
              system_menu_comm_name(menu.comm_mode),
@@ -1163,22 +1132,6 @@ static esp_err_t device_status_handler(httpd_req_t *req)
              (unsigned long long)stats.uart_tx_bytes,
              (unsigned long long)stats.uart_tx_failures,
              (unsigned long long)stats.uart_overflows,
-             (unsigned long long)stats.uart_fifo_overflows,
-             (unsigned long long)stats.uart_buffer_full_overflows,
-             (unsigned long long)stats.uart_overflow_assemble_bytes,
-             (unsigned long long)stats.uart_overflow_driver_bytes,
-             (unsigned long long)stats.uart_last_overflow_event,
-             (unsigned long long)stats.uart_last_overflow_assemble_bytes,
-             (unsigned long long)stats.uart_last_overflow_driver_bytes,
-             (unsigned long long)stats.uart_dispatch_calls,
-             (unsigned long long)stats.uart_dispatch_total_us,
-             (unsigned long long)stats.uart_dispatch_max_us,
-             (unsigned long long)stats.uart_cloud_route_calls,
-             (unsigned long long)stats.uart_cloud_route_total_us,
-             (unsigned long long)stats.uart_cloud_route_max_us,
-             (unsigned long long)stats.uart_local_route_calls,
-             (unsigned long long)stats.uart_local_route_total_us,
-             (unsigned long long)stats.uart_local_route_max_us,
              (unsigned long long)stats.ble_rx_frames,
              (unsigned long long)stats.ble_rx_bytes,
              (unsigned long long)stats.ble_tx_bytes,
@@ -1207,32 +1160,20 @@ static esp_err_t device_status_handler(httpd_req_t *req)
              uplink.compression_active ? "true" : "false",
              (unsigned long)uplink.sender_stack_min_free,
              (unsigned long)uplink.queue_pending_frames,
-             (unsigned long long)uplink.queue_pending_bytes,
-             (unsigned long)uplink.queue_high_water_frames,
-             (unsigned long long)uplink.queue_high_water_bytes,
              (unsigned long)uplink.queued_frames,
-             (unsigned long long)uplink.queued_bytes,
              (unsigned long)uplink.sent_frames,
-             (unsigned long long)uplink.sent_bytes,
+             (unsigned long)uplink.sent_bytes,
              (unsigned long)uplink.queue_full,
              (unsigned long)uplink.overload_dropped_frames,
-             (unsigned long long)uplink.overload_dropped_bytes,
-             (unsigned long)uplink.rejected_frames,
-             (unsigned long long)uplink.rejected_bytes,
              (unsigned long)uplink.send_failures,
              (unsigned long)uplink.fallback_frames,
              (unsigned long)uplink.queued_fallback_frames,
-             (unsigned long long)uplink.queued_fallback_bytes,
              (unsigned long)uplink.fallback_failures,
              (unsigned long)uplink.stop_dropped_frames,
-             (unsigned long long)uplink.stop_dropped_bytes,
              (unsigned long)uplink.connect_events,
              (unsigned long)uplink.disconnect_events,
              (unsigned long)uplink.error_events,
              (unsigned long)uplink.closed_events,
-             (unsigned long)uplink.downlink_frames,
-             (unsigned long)uplink.downlink_bytes,
-             (unsigned long)uplink.downlink_failures,
              (unsigned long)uplink.compression_calls,
              (unsigned long)uplink.compressed_frames,
              (unsigned long)uplink.raw_envelope_frames,
@@ -1241,20 +1182,15 @@ static esp_err_t device_status_handler(httpd_req_t *req)
              (unsigned long long)uplink.wire_bytes,
              (unsigned long long)uplink.compression_total_us,
              (unsigned long)uplink.compression_max_us,
-             (unsigned long)uplink.send_calls,
-             (unsigned long long)uplink.send_total_us,
-             (unsigned long)uplink.send_max_us,
              (long)uplink.last_event_id,
              (unsigned)motor_diag_param_count(),
              (unsigned)motor_diag_param_capacity());
-    if (written < 0 || (size_t)written >= DEVICE_STATUS_RESPONSE_CAPACITY) {
-        heap_caps_free(resp);
+    if (written < 0 || (size_t)written >= sizeof(resp)) {
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR,
                                    "device status response too large");
     }
-    esp_err_t send_ret = httpd_resp_sendstr(req, resp);
-    heap_caps_free(resp);
-    return send_ret;
+    httpd_resp_sendstr(req, resp);
+    return ESP_OK;
 }
 
 static esp_err_t comm_mode_get_handler(httpd_req_t *req)
@@ -1325,19 +1261,11 @@ static esp_err_t comm_mode_options_handler(httpd_req_t *req)
 
 static void send_comm_stats_json(httpd_req_t *req, const comm_stats_snapshot_t *stats)
 {
-    char resp[2048];
+    char resp[1024];
     snprintf(resp, sizeof(resp),
              "{\"ok\":true,"
              "\"uart\":{\"rx_frames\":%llu,\"rx_bytes\":%llu,\"tx_bytes\":%llu,"
-             "\"tx_failures\":%llu,\"overflows\":%llu,"
-             "\"fifo_overflows\":%llu,\"buffer_full_overflows\":%llu,"
-             "\"overflow_assemble_bytes\":%llu,\"overflow_driver_bytes\":%llu,"
-             "\"last_overflow_event\":%llu,\"last_overflow_assemble_bytes\":%llu,"
-             "\"last_overflow_driver_bytes\":%llu,\"dispatch_calls\":%llu,"
-             "\"dispatch_total_us\":%llu,\"dispatch_max_us\":%llu,"
-             "\"cloud_route_calls\":%llu,\"cloud_route_total_us\":%llu,"
-             "\"cloud_route_max_us\":%llu,\"local_route_calls\":%llu,"
-             "\"local_route_total_us\":%llu,\"local_route_max_us\":%llu},"
+             "\"tx_failures\":%llu,\"overflows\":%llu},"
              "\"ble\":{\"rx_frames\":%llu,\"rx_bytes\":%llu,\"tx_bytes\":%llu,"
              "\"notify_failures\":%llu,\"no_subscriber_drops\":%llu,"
              "\"dropped_bytes\":%llu,\"alloc_failures\":%llu},"
@@ -1353,22 +1281,6 @@ static void send_comm_stats_json(httpd_req_t *req, const comm_stats_snapshot_t *
              (unsigned long long)stats->uart_tx_bytes,
              (unsigned long long)stats->uart_tx_failures,
              (unsigned long long)stats->uart_overflows,
-             (unsigned long long)stats->uart_fifo_overflows,
-             (unsigned long long)stats->uart_buffer_full_overflows,
-             (unsigned long long)stats->uart_overflow_assemble_bytes,
-             (unsigned long long)stats->uart_overflow_driver_bytes,
-             (unsigned long long)stats->uart_last_overflow_event,
-             (unsigned long long)stats->uart_last_overflow_assemble_bytes,
-             (unsigned long long)stats->uart_last_overflow_driver_bytes,
-             (unsigned long long)stats->uart_dispatch_calls,
-             (unsigned long long)stats->uart_dispatch_total_us,
-             (unsigned long long)stats->uart_dispatch_max_us,
-             (unsigned long long)stats->uart_cloud_route_calls,
-             (unsigned long long)stats->uart_cloud_route_total_us,
-             (unsigned long long)stats->uart_cloud_route_max_us,
-             (unsigned long long)stats->uart_local_route_calls,
-             (unsigned long long)stats->uart_local_route_total_us,
-             (unsigned long long)stats->uart_local_route_max_us,
              (unsigned long long)stats->ble_rx_frames,
              (unsigned long long)stats->ble_rx_bytes,
              (unsigned long long)stats->ble_tx_bytes,

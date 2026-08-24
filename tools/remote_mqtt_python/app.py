@@ -19,13 +19,9 @@ from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 from websockets.exceptions import ConnectionClosed
 from websockets.sync.server import ServerConnection, serve
-from waveform_codec import (
-    CAPABILITY,
-    UplinkWaveformSession,
-    WaveformDecodeError,
-    WaveformDecoder,
-)
-from ws_fanout import BrowserSendPump, DeviceDownlinkRouter
+from ws_fanout import BrowserSendPump
+from waveform_codec import CAPABILITY_MARKER, WaveformCodecError, decode_uplink_message
+from remote_excel_codec import decode_base64_file
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -58,9 +54,9 @@ KNOWN_BUS_CHANNELS = ('notify', 'uart', 'ws', 'ble')
 BUS_PAYLOAD_LIMIT = 256
 REMOTE_WS_FRAME_LIMIT = 64
 REMOTE_WS_FRAME_MAX_BYTES = 512
-CLOUD_WS_BROWSER_QUEUE_FRAMES = int(os.environ.get('CLOUD_WS_BROWSER_QUEUE_FRAMES', '16'))
-CLOUD_WS_BROWSER_CHUNK_BYTES = int(os.environ.get('CLOUD_WS_BROWSER_CHUNK_BYTES', '4096'))
-CLOUD_WS_BROWSER_SEND_INTERVAL_MS = int(os.environ.get('CLOUD_WS_BROWSER_SEND_INTERVAL_MS', '40'))
+CLOUD_WS_BROWSER_QUEUE_FRAMES = int(os.environ.get('CLOUD_WS_BROWSER_QUEUE_FRAMES', '256'))
+CLOUD_WS_BROWSER_CHUNK_BYTES = int(os.environ.get('CLOUD_WS_BROWSER_CHUNK_BYTES', '2048'))
+CLOUD_WS_BROWSER_SEND_INTERVAL_MS = int(os.environ.get('CLOUD_WS_BROWSER_SEND_INTERVAL_MS', '0'))
 CLOUD_WS_MAX_MESSAGE_BYTES = int(os.environ.get('CLOUD_WS_MAX_MESSAGE_BYTES', '65536'))
 CLOUD_WS_HOST = os.environ.get('CLOUD_WS_HOST', '0.0.0.0')
 CLOUD_WS_PORT = int(os.environ.get('CLOUD_WS_PORT', '18089'))
@@ -73,6 +69,7 @@ app.secret_key = CLOUD_SESSION_SECRET or hashlib.sha256(
     f'{CLOUD_HTTP_USER}:{CLOUD_HTTP_PASSWORD}:wireless-debug-cloud'.encode('utf-8')
 ).hexdigest()
 app.config.update(
+    SESSION_COOKIE_NAME='wireless_debug_session',
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax',
     PERMANENT_SESSION_LIFETIME=timedelta(hours=12),
@@ -83,17 +80,69 @@ remote_ws_frames = defaultdict(lambda: deque(maxlen=REMOTE_WS_FRAME_LIMIT))
 remote_ws_lock = threading.Lock()
 remote_ws_seq = 0
 cloud_ws_clients = defaultdict(dict)
-cloud_ws_downlinks = DeviceDownlinkRouter(REMOTE_WS_FRAME_MAX_BYTES)
-waveform_decoder = WaveformDecoder()
+cloud_ws_uplinks = {}
 cloud_ws_lock = threading.RLock()
 cloud_ws_started = False
 cloud_ws_browser_dropped_frames_total = 0
+waveform_codec_metrics = {
+    'wire_bytes': 0,
+    'raw_bytes': 0,
+    'compressed_messages': 0,
+    'raw_envelope_messages': 0,
+    'raw_legacy_messages': 0,
+    'activation_messages': 0,
+    'decode_failures': 0,
+    'decode_total_us': 0,
+    'decode_max_us': 0,
+    'decode_failure_reasons': defaultdict(int),
+}
 
 
 def note_cloud_ws_browser_drop(count):
     global cloud_ws_browser_dropped_frames_total
     with cloud_ws_lock:
         cloud_ws_browser_dropped_frames_total += max(0, int(count))
+
+
+def note_waveform_activation():
+    with cloud_ws_lock:
+        waveform_codec_metrics['activation_messages'] += 1
+
+
+def note_waveform_decode(result):
+    with cloud_ws_lock:
+        waveform_codec_metrics['wire_bytes'] += max(0, int(result.wire_bytes))
+        waveform_codec_metrics['raw_bytes'] += max(0, int(result.raw_bytes))
+        waveform_codec_metrics['decode_total_us'] += max(0, int(result.decode_us))
+        waveform_codec_metrics['decode_max_us'] = max(
+            waveform_codec_metrics['decode_max_us'], max(0, int(result.decode_us)))
+        if result.codec == 'deflate':
+            waveform_codec_metrics['compressed_messages'] += 1
+        elif result.codec == 'raw':
+            waveform_codec_metrics['raw_envelope_messages'] += 1
+        elif result.codec == 'legacy':
+            waveform_codec_metrics['raw_legacy_messages'] += 1
+
+
+def note_waveform_decode_failure(reason):
+    normalized = str(reason or 'unknown')
+    with cloud_ws_lock:
+        waveform_codec_metrics['decode_failures'] += 1
+        waveform_codec_metrics['decode_failure_reasons'][normalized] += 1
+
+
+def waveform_codec_snapshot_locked():
+    snapshot = {
+        key: value
+        for key, value in waveform_codec_metrics.items()
+        if key != 'decode_failure_reasons'
+    }
+    decoded_messages = snapshot['compressed_messages'] + snapshot['raw_envelope_messages']
+    snapshot['decode_average_us'] = (
+        snapshot['decode_total_us'] // decoded_messages if decoded_messages else 0)
+    snapshot['decode_failure_reasons'] = dict(
+        waveform_codec_metrics['decode_failure_reasons'])
+    return snapshot
 
 
 def db_connect():
@@ -739,11 +788,8 @@ def enqueue_remote_ws_frame(device_id, payload_hex):
 
 
 def cloud_ws_uplink_connected(device_id):
-    return cloud_ws_downlinks.connected(device_id)
-
-
-def send_cloud_ws_downlink(device_id, data):
-    return cloud_ws_downlinks.send(device_id, data)
+    with cloud_ws_lock:
+        return cloud_ws_uplinks.get(device_id) is not None
 
 
 def publish_remote_ws_frame(device_id, data):
@@ -1011,9 +1057,9 @@ def cloud_ws_browser_handler(connection: ServerConnection, device_id):
                 data = message.encode('utf-8')
             else:
                 data = bytes(message or b'')
-            ok, msg = send_cloud_ws_downlink(device_id, data)
+            ok, msg, _message_id = publish_remote_ws_frame(device_id, data)
             if not ok:
-                app.logger.warning('cloud websocket downlink dropped for %s: %s', device_id, msg)
+                app.logger.warning('cloud websocket publish failed for %s: %s', device_id, msg)
     except ConnectionClosed as exc:
         app.logger.info(
             'cloud websocket browser closed for %s: code=%s reason=%s',
@@ -1031,39 +1077,40 @@ def cloud_ws_browser_handler(connection: ServerConnection, device_id):
 
 
 def cloud_ws_uplink_handler(connection: ServerConnection, device_id):
-    previous = cloud_ws_downlinks.attach(device_id, connection)
+    previous = None
+    with cloud_ws_lock:
+        previous = cloud_ws_uplinks.get(device_id)
+        cloud_ws_uplinks[device_id] = connection
     if previous is not None and previous is not connection:
         try:
             previous.close(code=1000, reason='uplink replaced')
         except Exception:
             pass
     app.logger.info('cloud websocket uplink connected: %s', device_id)
-    session = UplinkWaveformSession(waveform_decoder)
 
     try:
+        connection.send(CAPABILITY_MARKER)
+        envelope_active = False
         while True:
             message = connection.recv()
             if isinstance(message, str):
                 app.logger.warning('ignoring text websocket uplink frame for %s', device_id)
                 continue
             data = bytes(message or b'')
-            if not data:
-                continue
-            if session.is_offer(data):
-                sent, reason = cloud_ws_downlinks.send(device_id, CAPABILITY)
-                if sent:
-                    session.mark_reply_sent()
-                else:
-                    app.logger.warning(
-                        'waveform capability reply failed for %s: %s', device_id, reason)
-                continue
             try:
-                decoded = session.decode(data)
-            except WaveformDecodeError as exc:
+                result = decode_uplink_message(data, envelope_active)
+            except WaveformCodecError as exc:
+                note_waveform_decode_failure(exc.reason)
                 app.logger.warning(
-                    'waveform envelope rejected for %s: %s', device_id, exc.reason)
+                    'cloud waveform decode rejected for %s: %s', device_id, exc.reason)
                 continue
-            broadcast_remote_ws_bytes(device_id, decoded)
+            if result.activate:
+                envelope_active = True
+                note_waveform_activation()
+                continue
+            note_waveform_decode(result)
+            if result.payload:
+                broadcast_remote_ws_bytes(device_id, result.payload)
     except ConnectionClosed as exc:
         app.logger.warning(
             'cloud websocket uplink closed for %s: code=%s reason=%s',
@@ -1074,7 +1121,9 @@ def cloud_ws_uplink_handler(connection: ServerConnection, device_id):
     except Exception as exc:
         app.logger.warning('cloud websocket uplink closed for %s: %s', device_id, exc)
     finally:
-        cloud_ws_downlinks.detach(device_id, connection)
+        with cloud_ws_lock:
+            if cloud_ws_uplinks.get(device_id) is connection:
+                cloud_ws_uplinks.pop(device_id, None)
         app.logger.info('cloud websocket uplink disconnected: %s', device_id)
 
 
@@ -1433,22 +1482,19 @@ def logout():
 @app.get('/health')
 def health():
     with cloud_ws_lock:
+        ws_uplink_devices = len(cloud_ws_uplinks)
         ws_browser_clients = sum(len(clients) for clients in cloud_ws_clients.values())
         ws_browser_dropped_frames = cloud_ws_browser_dropped_frames_total
-    ws_downlink = cloud_ws_downlinks.snapshot()
+        waveform_codec = waveform_codec_snapshot_locked()
     return jsonify({
         'ok': True,
         'mqtt_connected': mqtt_connected.is_set(),
         'namespace': MQTT_NAMESPACE,
         'cloud_ws_port': CLOUD_WS_PORT,
-        'ws_uplink_devices': cloud_ws_downlinks.device_count(),
+        'ws_uplink_devices': ws_uplink_devices,
         'ws_browser_clients': ws_browser_clients,
         'ws_browser_dropped_frames': ws_browser_dropped_frames,
-        'ws_downlink_sent_frames': ws_downlink['sent_frames'],
-        'ws_downlink_sent_bytes': ws_downlink['sent_bytes'],
-        'ws_downlink_dropped_frames': ws_downlink['dropped_frames'],
-        'ws_downlink_send_failures': ws_downlink['send_failures'],
-        'waveform_codec': waveform_decoder.snapshot(),
+        'waveform_codec': waveform_codec,
     })
 
 
@@ -1500,8 +1546,18 @@ def remote_console_rewrite_script(device_id):
         const deviceId = {device_json};
         const remotePrefix = `/remote/${{encodeURIComponent(deviceId)}}`;
         const remoteWsUrl = {remote_ws_json};
+        const remoteHttpUrl = new URL(remoteWsUrl);
+        remoteHttpUrl.protocol = remoteHttpUrl.protocol === 'wss:' ? 'https:' : 'http:';
+        if (remoteHttpUrl.port === '18089') remoteHttpUrl.port = '18088';
+        const remoteHttpOrigin = remoteHttpUrl.origin;
         const rewriteHttp = (raw) => {{
           const url = new URL(raw, window.location.href);
+          const isRemoteDeviceApi =
+            url.pathname.startsWith(`${{remotePrefix}}/api/`) ||
+            url.pathname.startsWith(`${{remotePrefix}}/excel/`);
+          if (url.origin === remoteHttpOrigin && isRemoteDeviceApi) {{
+            return `${{window.location.origin}}${{url.pathname}}${{url.search}}`;
+          }}
           if (url.origin !== window.location.origin) return raw;
           if (url.pathname.startsWith('/api/')) {{
             return `${{remotePrefix}}${{url.pathname}}${{url.search}}`;
@@ -1773,13 +1829,32 @@ def remote_excel_list(device_id):
 
 
 def remote_excel_upload(device_id):
-    filename = normalize_excel_filename(
-        request.headers.get('X-Filename') or request.args.get('name')
-    )
+    uploaded = request.files.get('file')
+    if uploaded is not None:
+        filename = normalize_excel_filename(uploaded.filename)
+        data = uploaded.read(REMOTE_EXCEL_MAX_BYTES + 1) or b''
+    elif request.is_json:
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or payload.get('encoding') != 'base64':
+            return json_response({'ok': False, 'msg': 'json upload requires encoding=base64'}, 400)
+        filename = normalize_excel_filename(payload.get('name'))
+        if not filename:
+            return json_response({'ok': False, 'msg': 'valid excel filename required'}, 400)
+        try:
+            data = decode_base64_file(payload.get('data_base64'), REMOTE_EXCEL_MAX_BYTES)
+        except ValueError as exc:
+            status = 413 if str(exc) == 'file too large' else 400
+            return json_response({'ok': False, 'msg': str(exc)}, status)
+    else:
+        # Keep compatibility with the existing ESP32/raw-byte uploader.
+        filename = normalize_excel_filename(
+            request.headers.get('X-Filename') or request.args.get('name')
+        )
+        data = request.get_data() or b''
+
     if not filename:
         return json_response({'ok': False, 'msg': 'valid excel filename required'}, 400)
 
-    data = request.get_data() or b''
     if not data:
         return json_response({'ok': False, 'msg': 'empty file'}, 400)
     if len(data) > REMOTE_EXCEL_MAX_BYTES:

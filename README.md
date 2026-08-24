@@ -44,13 +44,26 @@ The root path redirects to `/orig/i.html`.
 ## Firmware Flash Files
 
 The current ESP32-S3 binary files are archived under
-[`evidence/runtime-snapshot-20260820/firmware-flash/`](evidence/runtime-snapshot-20260820/firmware-flash/).
+[`evidence/runtime-snapshot-20260824/firmware-flash/`](evidence/runtime-snapshot-20260824/firmware-flash/).
 For a quick entry point, open [`FLASHING.md`](FLASHING.md). The recommended
 full-flash image is
-[`full_flash_0x0.bin`](evidence/runtime-snapshot-20260820/firmware-flash/full_flash_0x0.bin);
+[`full_flash_0x0.bin`](evidence/runtime-snapshot-20260824/firmware-flash/full_flash_0x0.bin);
 write it at offset `0x0`.
 
-## Current Runtime Snapshot
+The latest hardening snapshot is
+[`evidence/runtime-snapshot-20260824/`](evidence/runtime-snapshot-20260824/).
+It includes the current firmware source, frontend source, cloud static runtime,
+and a complete 8 MB image.
+
+## Runtime Snapshots
+
+The latest 2026-08-24 source and flash package are archived in
+[`evidence/runtime-snapshot-20260824`](evidence/runtime-snapshot-20260824/).
+The complete image is
+[`full_flash_0x0.bin`](evidence/runtime-snapshot-20260824/firmware-flash/full_flash_0x0.bin)
+and must be written at offset `0x0`.
+
+## Historical Runtime Snapshot: 2026-08-20
 
 The firmware and 183 cloud files captured on 2026-08-20, with the verified web
 runtime refresh from 2026-08-21, are archived in

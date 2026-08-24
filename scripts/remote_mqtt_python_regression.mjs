@@ -10,6 +10,7 @@ const files = [
   `${base}/requirements.txt`,
   `${base}/app.py`,
   `${base}/ws_fanout.py`,
+  `${base}/waveform_codec.py`,
   `${base}/schema.sql`,
   `${base}/Dockerfile`,
   `${base}/docker-compose.yml`,
@@ -169,9 +170,11 @@ for (const dangerous of [
 const compose = readFileSync(resolve(root, `${base}/docker-compose.yml`), 'utf8');
 for (const token of [
   'postgres:',
+  '${POSTGRES_IMAGE:-postgres:17-alpine}',
   'mosquitto:',
   'cloud:',
-  '${APP_PORT:-18088}:18088',
+  '127.0.0.1:${APP_PORT:-18088}:18088',
+  '${CLOUD_WS_PORT:-18089}:18089',
   'DATABASE_URL',
   'MQTT_URL',
   'PIP_INDEX_URL',
@@ -185,6 +188,10 @@ for (const token of [
 ]) {
   assert.ok(compose.includes(token), `compose missing ${token}`);
 }
+assert.ok(
+  !compose.includes('127.0.0.1:${CLOUD_WS_PORT:-18089}:18089'),
+  'cloud WebSocket bridge port 18089 must be reachable by ESP32 devices, not localhost-only',
+);
 
 const dockerfile = readFileSync(resolve(root, `${base}/Dockerfile`), 'utf8');
 for (const token of ['python:', 'PIP_INDEX_URL', 'pip install', 'requirements.txt', 'ws_fanout.py', 'waitress-serve', '18089']) {
@@ -202,7 +209,11 @@ for (const token of [
   'ORIG_WEB_DIR=',
   'CLOUD_WS_PORT=18089',
   'CLOUD_WS_PUBLIC_URL=',
-  'CLOUD_WS_BROWSER_QUEUE_FRAMES=16',
+  'CLOUD_WS_BROWSER_QUEUE_FRAMES=256',
+  'CLOUD_WS_BROWSER_CHUNK_BYTES=2048',
+  'CLOUD_WS_BROWSER_SEND_INTERVAL_MS=0',
+  'CLOUD_WS_MAX_MESSAGE_BYTES=65536',
+  'POSTGRES_IMAGE=postgres:17-alpine',
 ]) {
   assert.ok(envExample.includes(token), `.env.example missing ${token}`);
 }
@@ -296,18 +307,16 @@ assert.ok(
 );
 assert.match(
   app,
-  /def cloud_ws_uplink_connected\(device_id\):[\s\S]*cloud_ws_downlinks\.connected\(device_id\)/,
-  'backend must expose the serialized router binary-uplink presence check',
+  /def cloud_ws_uplink_connected\(device_id\):[\s\S]*cloud_ws_uplinks\.get\(device_id\)/,
+  'backend must expose a locked binary-uplink presence check',
 );
 for (const token of [
-  'cloud_ws_downlinks',
+  'cloud_ws_uplinks',
   "prefix = '/ws/uplink/'",
   'cloud_ws_browser_handler',
   'cloud_ws_uplink_handler',
-  'send_cloud_ws_downlink',
   'broadcast_remote_ws_bytes',
   'BrowserSendPump',
-  'DeviceDownlinkRouter',
   'CLOUD_WS_BROWSER_QUEUE_FRAMES',
   'CLOUD_WS_MAX_MESSAGE_BYTES',
   "'ws_browser_dropped_frames'",
@@ -316,10 +325,10 @@ for (const token of [
   "cloud websocket uplink connected",
   "'ws_uplink_devices'",
   "'ws_browser_clients'",
-  "'ws_downlink_sent_frames'",
-  "'ws_downlink_sent_bytes'",
-  "'ws_downlink_dropped_frames'",
-  "'ws_downlink_send_failures'",
+  'from waveform_codec import CAPABILITY_MARKER, WaveformCodecError, decode_uplink_message',
+  'connection.send(CAPABILITY_MARKER)',
+  'decode_uplink_message(data, envelope_active)',
+  'waveform_codec_metrics',
 ]) {
   assert.ok(app.includes(token), `binary WebSocket uplink missing backend token: ${token}`);
 }
@@ -333,30 +342,11 @@ const uplinkHandler = app.match(
 )?.[1] || '';
 assert.ok(uplinkHandler, 'backend must define a device uplink handler');
 assert.ok(
-  uplinkHandler.includes('decoded = session.decode(data)') &&
-    uplinkHandler.includes('broadcast_remote_ws_bytes(device_id, decoded)'),
-  'device uplink envelopes must be losslessly decoded before browser fan-out',
+  uplinkHandler.includes('broadcast_remote_ws_bytes(device_id, result.payload)'),
+  'device uplink binary data must be decoded and forwarded directly to browser clients',
 );
 assert.ok(!uplinkHandler.includes('db_connect()'), 'device uplink must not access PostgreSQL');
 assert.ok(!uplinkHandler.includes('mqtt_client'), 'device uplink must not route waveform data through MQTT');
-assert.ok(
-  uplinkHandler.includes('cloud_ws_downlinks.attach(device_id, connection)') &&
-    uplinkHandler.includes('cloud_ws_downlinks.detach(device_id, connection)'),
-  'device uplink lifecycle must be owned by the serialized direct-downlink router',
-);
-const browserHandler = app.match(
-  /def cloud_ws_browser_handler\(connection: ServerConnection, device_id\):([\s\S]*?)\n\ndef /,
-)?.[1] || '';
-assert.ok(browserHandler, 'backend must define a browser websocket handler');
-assert.ok(
-  browserHandler.includes('send_cloud_ws_downlink(device_id, data)'),
-  'browser UART frames must be sent directly through the device websocket',
-);
-assert.ok(
-  !browserHandler.includes('publish_remote_ws_frame') &&
-    !browserHandler.includes('mqtt_client'),
-  'browser websocket downlink must never fall back to MQTT',
-);
 const devicePublishBody = app.match(
   /def record_device_bus_publish\(device_id, payload\):([\s\S]*?)\n\ndef /,
 )?.[1] || '';
@@ -372,7 +362,7 @@ assert.match(
 assert.match(
   app,
   /CLOUD_WS_MAX_MESSAGE_BYTES\s*=\s*int\(os\.environ\.get\('CLOUD_WS_MAX_MESSAGE_BYTES', '65536'\)\)[\s\S]*max_size=CLOUD_WS_MAX_MESSAGE_BYTES/,
-  'cloud WebSocket server must accept the maximum negotiated waveform envelope',
+  'cloud WebSocket server must accept larger firmware aggregate frames',
 );
 assert.ok(
   /def cloud_ws_handler\(connection: ServerConnection\):[\s\S]*cloud_ws_uplink_device_id[\s\S]*cloud_ws_uplink_handler/.test(app),

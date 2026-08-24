@@ -1,174 +1,105 @@
 #!/usr/bin/env python3
-"""Regression checks for the negotiated cloud waveform envelope codec."""
+"""Regression coverage for the cloud waveform wire codec."""
 
 from __future__ import annotations
 
-import argparse
-import base64
-from collections import Counter
-from contextlib import contextmanager
-import hashlib
-import json
-from pathlib import Path
-import random
 import struct
 import sys
-from typing import Iterator
+import zlib
+from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE_DIR = ROOT / "tools" / "remote_mqtt_python"
-FIXTURE_PATH = ROOT / "fixtures" / "cloud-waveform-codec-v1.json"
-sys.path.insert(0, str(MODULE_DIR))
+sys.path.insert(0, str(ROOT / "tools" / "remote_mqtt_python"))
 
 from waveform_codec import (  # noqa: E402
+    CAPABILITY_MARKER,
+    CODEC_DEFLATE,
+    CODEC_RAW,
     HEADER,
-    MAX_RAW_BYTES,
-    WaveformDecodeError,
-    WaveformDecoder,
-    encode_envelope,
+    MAGIC,
+    WaveformCodecError,
+    decode_uplink_message,
 )
 
 
-def payloads() -> dict[str, bytes]:
-    rng = random.Random(0x57445A31)
-    return {
-        "zero_heavy": bytes(MAX_RAW_BYTES),
-        "mixed": bytes((index * 37 + index // 11) & 0xFF for index in range(8192)),
-        "incompressible": rng.randbytes(8192),
-    }
+def envelope(codec: int, raw: bytes, payload: bytes | None = None, crc: int | None = None) -> bytes:
+    encoded = raw if payload is None else payload
+    checksum = zlib.crc32(raw) & 0xFFFFFFFF if crc is None else crc
+    return HEADER.pack(MAGIC, codec, len(raw), checksum) + encoded
 
 
-def replace_header(
-    envelope: bytes,
-    *,
-    magic: bytes | None = None,
-    codec: int | None = None,
-    reserved: bytes | None = None,
-    raw_len: int | None = None,
-    crc32: int | None = None,
-) -> bytes:
-    current = list(HEADER.unpack(envelope[:HEADER.size]))
-    replacements = (magic, codec, reserved, raw_len, crc32)
-    for index, value in enumerate(replacements):
-        if value is not None:
-            current[index] = value
-    return HEADER.pack(*current) + envelope[HEADER.size:]
-
-
-@contextmanager
-def expect_decode_error(reason: str) -> Iterator[None]:
+def expect_error(reason: str, data: bytes) -> None:
     try:
-        yield
-    except WaveformDecodeError as exc:
-        assert exc.reason == reason, f"expected {reason}, got {exc.reason}"
+        decode_uplink_message(data, envelope_active=True)
+    except WaveformCodecError as exc:
+        assert exc.reason == reason, (exc.reason, reason)
     else:
-        raise AssertionError(f"expected WaveformDecodeError({reason})")
+        raise AssertionError(f"expected codec error: {reason}")
 
 
-def fixture_document() -> dict[str, object]:
-    fixtures = []
-    for name, raw in payloads().items():
-        fixtures.append({
-            "name": name,
-            "raw_len": len(raw),
-            "raw_sha256": hashlib.sha256(raw).hexdigest(),
-            "raw_b64": base64.b64encode(raw).decode("ascii"),
-            "raw_envelope_b64": base64.b64encode(
-                encode_envelope(raw, force_raw=True)
-            ).decode("ascii"),
-            "zlib_envelope_b64": base64.b64encode(encode_envelope(raw)).decode("ascii"),
-        })
-    return {"version": 1, "fixtures": fixtures}
+legacy = bytes.fromhex("ff77aa55000000410f91")
+legacy_result = decode_uplink_message(legacy, envelope_active=False)
+assert legacy_result.payload == legacy
+assert legacy_result.activate is False
+assert legacy_result.codec == "legacy"
+assert legacy_result.raw_bytes == len(legacy)
+assert legacy_result.wire_bytes == len(legacy)
 
+activation = decode_uplink_message(CAPABILITY_MARKER, envelope_active=False)
+assert activation.payload is None
+assert activation.activate is True
+assert activation.codec == "control"
 
-def rendered_fixtures() -> str:
-    return json.dumps(fixture_document(), indent=2, sort_keys=True) + "\n"
+raw = (bytes.fromhex("ff77aa55") + b"\x00" * 128) * 8
+raw_result = decode_uplink_message(envelope(CODEC_RAW, raw), envelope_active=True)
+assert raw_result.payload == raw
+assert raw_result.codec == "raw"
+assert raw_result.decode_us >= 0
 
+compressed = zlib.compress(raw, level=1)
+wire = envelope(CODEC_DEFLATE, raw, compressed)
+decoded = decode_uplink_message(wire, envelope_active=True)
+assert decoded.payload == raw
+assert decoded.codec == "deflate"
+assert decoded.raw_bytes == len(raw)
+assert decoded.wire_bytes == len(wire)
+assert decoded.decode_us >= 0
 
-def run_contract() -> None:
-    values = payloads()
-    zero_heavy = values["zero_heavy"]
-    mixed = values["mixed"]
-    decoder = WaveformDecoder()
+expect_error("bad_magic", b"BAD!" + wire[4:])
 
-    assert decoder.decode(b"legacy-uart", False) == b"legacy-uart"
-    valid_zlib = encode_envelope(zero_heavy)
-    valid_raw = encode_envelope(mixed, force_raw=True)
-    assert decoder.decode(valid_zlib, True) == zero_heavy
-    assert decoder.decode(valid_raw, True) == mixed
+bad_reserved = bytearray(wire)
+bad_reserved[5] = 1
+expect_error("bad_reserved", bytes(bad_reserved))
 
-    initial = decoder.snapshot()
-    assert initial["legacy_raw_messages"] == 1
-    assert initial["compressed_messages"] == 1
-    assert initial["raw_envelope_messages"] == 1
+expect_error("unsupported_codec", envelope(7, raw))
+expect_error("invalid_raw_length", HEADER.pack(MAGIC, CODEC_RAW, 0, 0))
+expect_error(
+    "invalid_raw_length",
+    HEADER.pack(MAGIC, CODEC_RAW, 32769, 0) + b"x",
+)
+expect_error(
+    "raw_length_mismatch",
+    HEADER.pack(MAGIC, CODEC_RAW, len(raw) + 1, zlib.crc32(raw)) + raw,
+)
+expect_error(
+    "compressed_trailing_data",
+    envelope(CODEC_DEFLATE, raw, compressed + b"trailing"),
+)
+expect_error(
+    "decompressed_too_large",
+    HEADER.pack(MAGIC, CODEC_DEFLATE, 16, zlib.crc32(raw)) + compressed,
+)
+short_raw = raw[:-1]
+expect_error(
+    "decompressed_length_mismatch",
+    HEADER.pack(MAGIC, CODEC_DEFLATE, len(raw), zlib.crc32(short_raw))
+    + zlib.compress(short_raw, level=1),
+)
+expect_error(
+    "compressed_incomplete",
+    envelope(CODEC_DEFLATE, raw, compressed[:-2]),
+)
+expect_error("crc_mismatch", envelope(CODEC_RAW, raw, crc=0))
 
-    bad_cases = [
-        ("short header", "short_header", b"WDZ1"),
-        ("bad magic", "bad_magic", replace_header(valid_raw, magic=b"BAD1")),
-        (
-            "reserved nonzero",
-            "reserved_nonzero",
-            replace_header(valid_raw, reserved=b"\x00\x01\x00"),
-        ),
-        (
-            "unsupported codec",
-            "unsupported_codec",
-            replace_header(valid_raw, codec=2),
-        ),
-        ("zero length", "invalid_length", replace_header(valid_raw, raw_len=0)),
-        (
-            "oversize length",
-            "invalid_length",
-            replace_header(valid_raw, raw_len=MAX_RAW_BYTES + 1),
-        ),
-        ("raw size mismatch", "raw_size_mismatch", valid_raw[:-1]),
-        ("truncated zlib", "compressed_stream", valid_zlib[:-1]),
-        ("trailing zlib data", "trailing_data", valid_zlib + b"x"),
-        (
-            "declared length mismatch",
-            "length_mismatch",
-            replace_header(valid_zlib, raw_len=len(zero_heavy) - 1),
-        ),
-        ("crc mismatch", "crc_mismatch", replace_header(valid_zlib, crc32=0)),
-    ]
-    for name, reason, envelope in bad_cases:
-        with expect_decode_error(reason):
-            decoder.decode(envelope, True)
-        assert name
-
-    snapshot = decoder.snapshot()
-    assert snapshot["decode_failures"] == dict(
-        Counter(reason for _, reason, _ in bad_cases)
-    )
-    assert snapshot["wire_bytes"] > 0
-    assert snapshot["decoded_raw_bytes"] == (
-        len(b"legacy-uart") + len(zero_heavy) + len(mixed)
-    )
-    assert snapshot["decode_total_us"] >= 0
-    assert snapshot["decode_max_us"] >= 0
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("--write-fixtures", action="store_true")
-    group.add_argument("--check-fixtures", action="store_true")
-    return parser.parse_args()
-
-
-def main() -> int:
-    args = parse_args()
-    run_contract()
-    rendered = rendered_fixtures()
-    if args.write_fixtures:
-        FIXTURE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        FIXTURE_PATH.write_text(rendered, encoding="utf-8")
-    elif args.check_fixtures:
-        assert FIXTURE_PATH.read_text(encoding="utf-8") == rendered
-    print("cloud waveform codec regression passed")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+print("cloud waveform codec regression passed")
