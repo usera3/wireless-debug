@@ -1178,6 +1178,7 @@ function DeviceDetails({
     ['STA 配置', currentBoolText(mergedDevice, payloadValue(latestPayload, 'sta_configured') ?? mergedDevice.sta_configured, '已保存', '未保存')],
     ['STA 正在连接', currentBoolText(mergedDevice, payloadValue(latestPayload, 'sta_connecting') ?? mergedDevice.sta_connecting, '连接中', '空闲')],
     ['STA IP', currentText(mergedDevice, payloadValue(latestPayload, 'sta_ip') || mergedDevice.sta_ip || selectedRow?.staIp)],
+    ['AP 名称', currentText(mergedDevice, payloadValue(latestPayload, 'ap_ssid') || mergedDevice.ap_ssid)],
     ['AP IP', currentText(mergedDevice, payloadValue(latestPayload, 'ap_ip') || mergedDevice.ap_ip || selectedRow?.apIp)],
     ['通信模式', currentText(mergedDevice, payloadValue(latestPayload, 'comm_mode') || mergedDevice.comm_mode || selectedRow?.commMode, '未知')],
     ['UART', currentText(mergedDevice, payloadValue(latestPayload, 'uart_baud') || mergedDevice.uart_baud || selectedRow?.uartBaud)],
@@ -1198,9 +1199,9 @@ function DeviceDetails({
             maxLength={128}
             value={displayNameDraft}
             onChange={(event) => onDisplayNameChange(event.target.value)}
-            placeholder="ESP32-001"
+            placeholder="ESP32_7C9D"
           />
-          <p className="mt-2 text-xs font-bold text-slate-500">设备名不能重复；未填写时系统会自动分配 ESP32-001 这种名称。</p>
+          <p className="mt-2 text-xs font-bold text-slate-500">设备名不能重复；未填写时按 AP 名称自动生成，例如 ESP32_7C9D。</p>
         </div>
         <button className="mt-6 h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 shadow-sm transition hover:border-teal-300 hover:bg-teal-50 hover:text-teal-800" type="submit">
           保存设备名
