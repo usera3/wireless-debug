@@ -1,0 +1,23 @@
+menu "Wireless Debug Cloud MQTT"
+
+config CLOUD_MQTT_ENABLE
+    bool "Enable cloud MQTT remote status and control"
+    default y
+
+config CLOUD_MQTT_DEVICE_ID
+    string "Cloud MQTT device ID"
+    default "auto"
+
+config CLOUD_MQTT_URI
+    string "Cloud MQTT broker URI"
+    default "mqtt://39.108.83.25:1883"
+
+config CLOUD_WS_UPLINK_ENABLE
+    bool "Enable binary cloud WebSocket oscilloscope uplink"
+    default y
+
+config CLOUD_WS_UPLINK_URI
+    string "Cloud WebSocket uplink base URI"
+    default "ws://39.108.83.25:18089"
+
+endmenu

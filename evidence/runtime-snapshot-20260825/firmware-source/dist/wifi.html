@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ESP32 WiFi Config</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        background: #101820;
+        color: #eef5f7;
+        font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        width: min(460px, 100%);
+        min-height: 100vh;
+        margin: 0 auto;
+        padding: 18px 16px 24px;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: 20px;
+        letter-spacing: 0;
+      }
+
+      .toolbar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 12px;
+      }
+
+      .status {
+        min-height: 42px;
+        padding: 9px 11px;
+        border: 1px solid #344a55;
+        border-radius: 8px;
+        background: #16232b;
+        color: #c8d9df;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        word-break: break-word;
+      }
+
+      .hint {
+        margin: -3px 0 12px;
+        color: #8ea4af;
+        font-size: 12px;
+      }
+
+      .links {
+        display: flex;
+        gap: 10px;
+        margin: 0 0 14px;
+        flex-wrap: wrap;
+      }
+
+      .links a {
+        color: #9fc7ff;
+        text-decoration: none;
+        font-weight: 700;
+      }
+
+      button {
+        min-height: 42px;
+        border: 1px solid #3d5563;
+        border-radius: 8px;
+        background: #1c2a33;
+        color: #f8fbfc;
+        font: inherit;
+        font-weight: 700;
+        cursor: pointer;
+        touch-action: manipulation;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: wait;
+      }
+
+      .scan-list {
+        display: grid;
+        gap: 8px;
+        margin: 0 0 14px;
+      }
+
+      .ap {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 10px;
+        width: 100%;
+        padding: 9px 10px;
+        text-align: left;
+      }
+
+      .ssid {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .meta {
+        color: #9fb2bd;
+        font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+        white-space: nowrap;
+      }
+
+      label {
+        display: block;
+        margin: 11px 0 6px;
+        color: #c8d9df;
+        font-weight: 700;
+      }
+
+      input {
+        width: 100%;
+        min-height: 44px;
+        border: 1px solid #3d5563;
+        border-radius: 8px;
+        background: #16232b;
+        color: #f8fbfc;
+        font: inherit;
+        padding: 0 12px;
+      }
+
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      button.primary {
+        background: #176b5f;
+        border-color: #2c9b8d;
+      }
+
+      button.danger {
+        background: #59343c;
+        border-color: #8d5360;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>STA 配网</h1>
+
+      <div class="toolbar">
+        <div id="status" class="status">loading...</div>
+        <button id="scan" type="button">扫描</button>
+      </div>
+      <p class="hint">扫描中，ESP32 热点会短暂不可用；电脑重新连回 ESP32 后本页会继续刷新。</p>
+      <div class="links">
+        <a href="/orig/i.html">返回 Wireless Debug</a>
+      </div>
+
+      <div id="apList" class="scan-list"></div>
+
+      <form id="form">
+        <label for="ssid">Wi-Fi 名称</label>
+        <input id="ssid" name="ssid" maxlength="32" autocomplete="off" required />
+
+        <label for="password">Wi-Fi 密码</label>
+        <input id="password" name="password" maxlength="64" type="password" autocomplete="current-password" />
+
+        <div class="actions">
+          <button class="primary" id="connect" type="submit">连接并保存</button>
+          <button class="danger" id="clear" type="button">清除配置</button>
+        </div>
+      </form>
+    </main>
+
+    <script>
+      (() => {
+        const form = document.getElementById("form");
+        const ssidEl = document.getElementById("ssid");
+        const passwordEl = document.getElementById("password");
+        const scanEl = document.getElementById("scan");
+        const clearEl = document.getElementById("clear");
+        const connectEl = document.getElementById("connect");
+        const statusEl = document.getElementById("status");
+        const apListEl = document.getElementById("apList");
+        const CONNECT_STATUS_TIMEOUT_MS = 1500;
+        const CONNECT_POLL_INITIAL_DELAY_MS = 600;
+        const CONNECT_POLL_RETRY_MS = 300;
+        const CONNECT_FAILURE_GRACE_MS = 4000;
+        const STATUS_WS_RECONNECT_MS = 350;
+        let pollTimer = 0;
+        let pollGeneration = 0;
+        let statusSocket = null;
+        let statusSocketReconnectTimer = 0;
+
+        function setBusy(busy) {
+          scanEl.disabled = busy;
+          connectEl.disabled = busy;
+          clearEl.disabled = busy;
+        }
+
+        function setStatus(text) {
+          statusEl.textContent = text;
+        }
+
+        async function jsonFetch(path, options = {}, timeoutMs = 4500) {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), timeoutMs);
+          let resp;
+          try {
+            resp = await fetch(path, { cache: "no-store", signal: controller.signal, ...options });
+          } finally {
+            clearTimeout(timer);
+          }
+          if (!resp.ok) {
+            throw new Error(`HTTP ${resp.status}`);
+          }
+          return resp.json();
+        }
+
+        function delay(ms) {
+          return new Promise((resolve) => setTimeout(resolve, ms));
+        }
+
+        function formatNetworkError(err) {
+          const name = err && err.name ? String(err.name) : "";
+          const message = err && err.message ? String(err.message) : String(err || "");
+          if (
+            name === "AbortError" ||
+            /abort|network|failed to fetch|timed out|timeout/i.test(message)
+          ) {
+            return "等待 ESP32 热点恢复";
+          }
+          return message || "等待 ESP32 热点恢复";
+        }
+
+        function stopPolling() {
+          pollGeneration += 1;
+          if (pollTimer) {
+            clearTimeout(pollTimer);
+            pollTimer = 0;
+          }
+        }
+
+        function fetchWifiStatus(timeoutMs = 4500) {
+          return jsonFetch("/api/wifi/status", {}, timeoutMs);
+        }
+
+        function renderWifiStatus(data) {
+          if (data.sta_ssid && !ssidEl.value) ssidEl.value = data.sta_ssid;
+          if (data.sta_connected) {
+            setStatus(`connected: ${data.sta_ssid || "-"} ${data.sta_ip || ""}`);
+          } else if (data.sta_connecting) {
+            setStatus(`connecting: ${data.sta_ssid || "-"}`);
+          } else if (data.sta_configured) {
+            setStatus(`saved: ${data.sta_ssid || "-"}`);
+          } else {
+            setStatus(`AP ready: ${data.ap_ssid || "ESP32-S3_AP"}`);
+          }
+        }
+
+        function statusSocketUrl() {
+          const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+          return `${protocol}//${location.host}/ws/wifi-status`;
+        }
+
+        function scheduleStatusSocketReconnect() {
+          if (statusSocketReconnectTimer || document.visibilityState === "hidden") return;
+          statusSocketReconnectTimer = setTimeout(() => {
+            statusSocketReconnectTimer = 0;
+            openStatusSocket();
+          }, STATUS_WS_RECONNECT_MS);
+        }
+
+        function openStatusSocket() {
+          if (
+            statusSocket &&
+            (statusSocket.readyState === WebSocket.OPEN ||
+              statusSocket.readyState === WebSocket.CONNECTING)
+          ) {
+            return;
+          }
+
+          let socket;
+          try {
+            socket = new WebSocket(statusSocketUrl());
+          } catch (err) {
+            scheduleStatusSocketReconnect();
+            return;
+          }
+          statusSocket = socket;
+          socket.onmessage = (event) => {
+            if (socket !== statusSocket) return;
+            try {
+              const data = JSON.parse(event.data);
+              if (!data || data.type !== "wifi_status") return;
+              renderWifiStatus(data);
+              if (data.sta_connected) {
+                stopPolling();
+                setBusy(false);
+              }
+            } catch (err) {
+              // HTTP polling remains active if a malformed push is received.
+            }
+          };
+          socket.onclose = () => {
+            if (socket === statusSocket) statusSocket = null;
+            scheduleStatusSocketReconnect();
+          };
+          socket.onerror = () => socket.close();
+        }
+
+        async function loadStatus(statusToken = pollGeneration) {
+          const data = await fetchWifiStatus();
+          if (statusToken !== pollGeneration) return data;
+          renderWifiStatus(data);
+          return data;
+        }
+
+        function renderAps(aps) {
+          apListEl.textContent = "";
+          if (!aps.length) {
+            const empty = document.createElement("div");
+            empty.className = "status";
+            empty.textContent = "no wifi found";
+            apListEl.appendChild(empty);
+            return;
+          }
+          for (const ap of aps) {
+            const row = document.createElement("button");
+            row.className = "ap";
+            row.type = "button";
+            row.innerHTML = `<span class="ssid"></span><span class="meta"></span>`;
+            row.querySelector(".ssid").textContent = ap.ssid || "(hidden)";
+            row.querySelector(".meta").textContent = `${ap.rssi}dBm${ap.saved ? " saved" : ""}`;
+            row.addEventListener("click", () => {
+              ssidEl.value = ap.ssid || "";
+              setStatus(`selected: ${ap.ssid || "-"}`);
+            });
+            apListEl.appendChild(row);
+          }
+        }
+
+        function formatScanTiming(data) {
+          const duration = Number(data && data.duration_ms);
+          const elapsed = Number(data && data.elapsed_ms);
+          if (Number.isFinite(duration) && duration > 0) {
+            return `，扫描耗时 ${Math.round(duration)}ms`;
+          }
+          if (Number.isFinite(elapsed) && elapsed > 0) {
+            return `，已等待 ${Math.round(elapsed)}ms`;
+          }
+          return "";
+        }
+
+        async function scanWifi() {
+          stopPolling();
+          setBusy(true);
+          setStatus("扫描中，ESP32 热点会短暂不可用");
+          let data = null;
+          let lastError = "";
+          let refreshRequested = false;
+          const deadline = Date.now() + 150000;
+
+          while (Date.now() < deadline) {
+            try {
+              const path = refreshRequested ? "/api/wifi/scan" : "/api/wifi/scan?refresh=1";
+              refreshRequested = true;
+              data = await jsonFetch(path, {}, 12000);
+              if (!data.ok) {
+                setStatus(`scan failed: ${data.msg || "unknown"}`);
+                setBusy(false);
+                return;
+              }
+              if (data.state === "done") {
+                renderAps(data.aps || []);
+                setStatus(`found: ${(data.aps || []).length}${formatScanTiming(data)}`);
+                setBusy(false);
+                return;
+              }
+              setStatus(`扫描中，ESP32 热点会短暂不可用${formatScanTiming(data)}`);
+            } catch (err) {
+              lastError = formatNetworkError(err);
+              setStatus(`${lastError}，继续等待扫描结果...`);
+            }
+            await delay(1500);
+          }
+
+          setStatus(
+            lastError
+              ? `扫描超时：${lastError}，请确认电脑已重新连接 ESP32 热点后重试`
+              : "扫描超时：请确认电脑已重新连接 ESP32 热点后重试"
+          );
+          setBusy(false);
+        }
+
+        function pollConnect(targetSsid) {
+          stopPolling();
+          const pollToken = pollGeneration;
+          const failureGraceDeadline = Date.now() + CONNECT_FAILURE_GRACE_MS;
+          const deadline = Date.now() + 120000;
+
+          const pollOnce = async () => {
+            pollTimer = 0;
+            if (pollToken !== pollGeneration) return;
+
+            try {
+              const data = await fetchWifiStatus(CONNECT_STATUS_TIMEOUT_MS);
+              if (pollToken !== pollGeneration) return;
+              renderWifiStatus(data);
+              if (data.sta_connected) {
+                stopPolling();
+                setBusy(false);
+                return;
+              }
+              if (!data.sta_connecting && Date.now() >= failureGraceDeadline) {
+                stopPolling();
+                setBusy(false);
+                setStatus(`failed: ${targetSsid || data.sta_ssid || "-"}`);
+                return;
+              }
+              if (!data.sta_connecting) {
+                setStatus(`connecting: ${targetSsid || data.sta_ssid || "-"}`);
+              }
+            } catch (err) {
+              if (pollToken !== pollGeneration) return;
+              setStatus(`${formatNetworkError(err)}...`);
+            }
+
+            if (Date.now() >= deadline) {
+              stopPolling();
+              setBusy(false);
+              setStatus(`connect timeout: ${targetSsid || "-"}`);
+              return;
+            }
+
+            pollTimer = setTimeout(pollOnce, CONNECT_POLL_RETRY_MS);
+          };
+
+          pollTimer = setTimeout(pollOnce, CONNECT_POLL_INITIAL_DELAY_MS);
+        }
+
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const ssid = ssidEl.value.trim();
+          const password = passwordEl.value;
+          if (!ssid) {
+            setStatus("missing ssid");
+            return;
+          }
+          stopPolling();
+          setBusy(true);
+          setStatus("connecting... AP may reconnect");
+          try {
+            const data = await jsonFetch("/api/wifi/connect", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ssid, password, save: true }),
+            });
+            if (!data.ok) {
+              setBusy(false);
+              setStatus(`connect failed: ${data.msg || "unknown"}`);
+              return;
+            }
+            pollConnect(ssid);
+          } catch (err) {
+            setStatus("request sent; waiting for ESP32 AP...");
+            pollConnect(ssid);
+          }
+        });
+
+        clearEl.addEventListener("click", async () => {
+          setBusy(true);
+          setStatus("clearing...");
+          try {
+            const data = await jsonFetch("/api/wifi/sta", { method: "DELETE" });
+            if (data.ok) {
+              passwordEl.value = "";
+              setStatus("STA config cleared");
+            } else {
+              setStatus(`clear failed: ${data.msg || "unknown"}`);
+            }
+          } catch (err) {
+            setStatus(`clear failed: ${err.message}`);
+          } finally {
+            setBusy(false);
+          }
+        });
+
+        scanEl.addEventListener("click", scanWifi);
+
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") openStatusSocket();
+        });
+        openStatusSocket();
+
+        const initialStatusToken = pollGeneration;
+        loadStatus(initialStatusToken).catch((err) => {
+          if (initialStatusToken === pollGeneration) {
+            setStatus(`status failed: ${err.message}`);
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>

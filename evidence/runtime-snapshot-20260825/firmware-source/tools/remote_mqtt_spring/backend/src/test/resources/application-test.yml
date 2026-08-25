@@ -1,0 +1,22 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:remote_control;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH
+    username: sa
+    password:
+  flyway:
+    enabled: true
+  jpa:
+    hibernate:
+      ddl-auto: none
+
+app:
+  bootstrap:
+    admin-email: admin@example.com
+    admin-password: ChangeMe123!
+  security:
+    jwt-secret: test-secret-test-secret-test-secret-test-secret
+    cookie-secure: false
+  mqtt:
+    enabled: false
+    url: tcp://localhost:1883
+    namespace: wireless-debug

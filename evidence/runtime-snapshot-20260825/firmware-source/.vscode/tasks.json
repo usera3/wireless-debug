@@ -1,0 +1,38 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "LVGL OLED Simulator: build",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": [
+        "-d",
+        "Ubuntu-24.04",
+        "--",
+        "bash",
+        "-lc",
+        "cd \"$(wslpath '${workspaceFolder}')/tools/lvgl_pc_sim\" && cmake -S . -B build && cmake --build build -j"
+      ],
+      "group": "build",
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "LVGL OLED Simulator: run",
+      "type": "shell",
+      "command": "wsl.exe",
+      "args": [
+        "-d",
+        "Ubuntu-24.04",
+        "--",
+        "bash",
+        "-lc",
+        "cd \"$(wslpath '${workspaceFolder}')/tools/lvgl_pc_sim\" && cmake -S . -B build && cmake --build build -j && ./build/lvgl_oled_pc_sim"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$gcc"
+    }
+  ]
+}
