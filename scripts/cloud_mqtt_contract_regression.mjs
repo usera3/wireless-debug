@@ -67,9 +67,16 @@ for (const token of [
   '"menu"',
   '"motor_params"',
   '"device_mac"',
+  '"ap_ssid"',
 ]) {
   assert.ok(source.includes(token), `cloud_mqtt.c missing ${token}`);
 }
+
+assert.match(
+  source,
+  /cJSON_AddStringToObject\(root,\s*"ap_ssid",\s*wifi\.ap_ssid\)/,
+  'cloud status must report the real SoftAP SSID used for the default device name',
+);
 
 assert.match(source, /esp_mqtt_client_register_event/, 'MQTT event handler must be registered');
 assert.match(source, /cJSON_Parse/, 'commands must use cJSON parsing');

@@ -26,6 +26,11 @@ from waveform_codec import (
     WaveformDecoder,
 )
 from ws_fanout import BrowserSendPump, DeviceDownlinkRouter
+from device_naming import (
+    auto_display_name_from_device_id,
+    choose_device_display_name,
+    is_legacy_auto_display_name,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -42,8 +47,7 @@ ONLINE_SECONDS = int(os.environ.get('ONLINE_SECONDS', '60'))
 CLOUD_HTTP_USER = os.environ.get('CLOUD_HTTP_USER', '')
 CLOUD_HTTP_PASSWORD = os.environ.get('CLOUD_HTTP_PASSWORD', '')
 CLOUD_SESSION_SECRET = os.environ.get('CLOUD_SESSION_SECRET', '')
-AUTO_DISPLAY_NAME_PREFIX = 'ESP32-'
-AUTO_DISPLAY_NAME_EXAMPLE = 'ESP32-001'
+AUTO_DISPLAY_NAME_EXAMPLE = 'ESP32_7C9D'
 
 MQTT_TOPIC_EXAMPLES = (
     'wireless-debug/+/status',
@@ -114,46 +118,63 @@ def normalize_display_name(value):
     return name[:128] if name else None
 
 
-def next_auto_display_name(conn):
-    rows = conn.execute(
-        "select display_name from cloud_devices where display_name is not null"
-    ).fetchall()
-    used = set()
-    for row in rows:
-        name = str(row.get('display_name') or '').strip()
-        if not name.startswith(AUTO_DISPLAY_NAME_PREFIX):
-            continue
-        suffix = name[len(AUTO_DISPLAY_NAME_PREFIX):]
-        if suffix.isdigit():
-            used.add(int(suffix))
-
-    index = 1
-    while index in used:
-        index += 1
-    return f'{AUTO_DISPLAY_NAME_PREFIX}{index:03d}'
-
-
-def ensure_device_display_name(conn, device_id):
+def ensure_device_display_name(conn, device_id, status=None):
     row = conn.execute(
-        "select display_name from cloud_devices where device_id = %s",
+        """
+        select display_name, device_mac, last_status_json
+        from cloud_devices
+        where device_id = %s
+        """,
         (device_id,),
     ).fetchone()
     if not row:
         return None
     current = normalize_display_name(row.get('display_name'))
-    if current:
+    if current and not is_legacy_auto_display_name(current):
         return current
 
-    display_name = next_auto_display_name(conn)
-    conn.execute(
+    stored_status = row.get('last_status_json')
+    stored_status = stored_status if isinstance(stored_status, dict) else {}
+    incoming_status = status if isinstance(status, dict) else {}
+    used_rows = conn.execute(
+        """
+        select display_name
+        from cloud_devices
+        where device_id <> %s and display_name is not null and btrim(display_name) <> ''
+        """,
+        (device_id,),
+    ).fetchall()
+    display_name = choose_device_display_name(
+        current,
+        ap_ssid=incoming_status.get('ap_ssid') or stored_status.get('ap_ssid'),
+        device_mac=(
+            incoming_status.get('device_mac')
+            or row.get('device_mac')
+            or stored_status.get('device_mac')
+        ),
+        device_id=device_id,
+        used_names={item.get('display_name') for item in used_rows},
+    )
+    if display_name is None:
+        display_name = auto_display_name_from_device_id(device_id) or normalize_display_name(device_id)
+    if display_name == current:
+        return current
+
+    updated = conn.execute(
         """
         update cloud_devices
         set display_name = %s, updated_at = now()
-        where device_id = %s and (display_name is null or btrim(display_name) = '')
+        where device_id = %s
+          and (
+            display_name is null
+            or btrim(display_name) = ''
+            or display_name ~* '^ESP32-[0-9]{3,}$'
+          )
+        returning display_name
         """,
         (display_name, device_id),
-    )
-    return display_name
+    ).fetchone()
+    return normalize_display_name(updated.get('display_name')) if updated else current
 
 
 def backfill_missing_display_names(conn):
@@ -161,7 +182,9 @@ def backfill_missing_display_names(conn):
         """
         select device_id
         from cloud_devices
-        where display_name is null or btrim(display_name) = ''
+        where display_name is null
+           or btrim(display_name) = ''
+           or display_name ~* '^ESP32-[0-9]{3,}$'
         order by created_at asc, device_id asc
         """
     ).fetchall()
@@ -450,7 +473,7 @@ def record_status(device_id, payload):
                 Jsonb(status),
             ),
         )
-        ensure_device_display_name(conn, device_id)
+        ensure_device_display_name(conn, device_id, status)
         record_event(conn, device_id, 'status', status)
 
 
@@ -1906,6 +1929,7 @@ def list_devices():
             select device_id, device_mac, display_name, note, availability, net_mode, ap_ip, sta_ip,
                    sta_connected, uart_baud, fw_version, last_seen_at, updated_at,
                    last_status_json,
+                   last_status_json ->> 'ap_ssid' as ap_ssid,
                    (last_status_json ->> 'sta_configured')::boolean as sta_configured,
                    (last_status_json ->> 'sta_connecting')::boolean as sta_connecting,
                    last_status_json ->> 'comm_mode' as comm_mode,
@@ -2127,18 +2151,31 @@ def save_display_name(device_id):
     requested_name = normalize_display_name(body.get('display_name'))
 
     with db_connect() as conn:
-        display_name = requested_name or next_auto_display_name(conn)
         try:
-            conn.execute(
-                """
-                insert into cloud_devices (device_id, display_name, updated_at)
-                values (%s, %s, now())
-                on conflict (device_id) do update set
-                  display_name = excluded.display_name,
-                  updated_at = excluded.updated_at
-                """,
-                (device_id, display_name),
-            )
+            if requested_name is None:
+                conn.execute(
+                    """
+                    insert into cloud_devices (device_id, display_name, updated_at)
+                    values (%s, null, now())
+                    on conflict (device_id) do update set
+                      display_name = null,
+                      updated_at = excluded.updated_at
+                    """,
+                    (device_id,),
+                )
+                display_name = ensure_device_display_name(conn, device_id)
+            else:
+                display_name = requested_name
+                conn.execute(
+                    """
+                    insert into cloud_devices (device_id, display_name, updated_at)
+                    values (%s, %s, now())
+                    on conflict (device_id) do update set
+                      display_name = excluded.display_name,
+                      updated_at = excluded.updated_at
+                    """,
+                    (device_id, display_name),
+                )
         except psycopg.errors.UniqueViolation:
             return json_response({'ok': False, 'message': '设备名已存在'}, 409)
     return json_response({'ok': True, 'display_name': display_name, 'updated_at': datetime.utcnow()})

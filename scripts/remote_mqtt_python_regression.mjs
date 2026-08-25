@@ -9,6 +9,7 @@ const files = [
   `${base}/.env.example`,
   `${base}/requirements.txt`,
   `${base}/app.py`,
+  `${base}/device_naming.py`,
   `${base}/ws_fanout.py`,
   `${base}/schema.sql`,
   `${base}/Dockerfile`,
@@ -118,10 +119,11 @@ for (const token of [
   'wireless-debug/{deviceId}/inbox',
   'cloud_bus_messages',
   'cloud_message_subscriptions',
-  'next_auto_display_name',
   'ensure_device_display_name',
   'save_display_name',
-  'ESP32-001',
+  'auto_display_name_from_device_id',
+  'choose_device_display_name',
+  'ESP32_7C9D',
   'cloud_devices',
   'cloud_device_commands',
   'last_status_json ->>',
@@ -187,7 +189,7 @@ for (const token of [
 }
 
 const dockerfile = readFileSync(resolve(root, `${base}/Dockerfile`), 'utf8');
-for (const token of ['python:', 'PIP_INDEX_URL', 'pip install', 'requirements.txt', 'ws_fanout.py', 'waitress-serve', '18089']) {
+for (const token of ['python:', 'PIP_INDEX_URL', 'pip install', 'requirements.txt', 'device_naming.py', 'ws_fanout.py', 'waitress-serve', '18089']) {
   assert.ok(dockerfile.includes(token), `Dockerfile missing ${token}`);
 }
 
@@ -269,6 +271,7 @@ for (const token of [
   ':hover',
   '最近事件',
   '云端当前只开放安全查询',
+  'ESP32_7C9D',
 ]) {
   assert.ok(html.includes(token), `cloud UI missing ${token}`);
 }

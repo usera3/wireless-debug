@@ -1175,6 +1175,7 @@ void cloud_mqtt_publish_status_now(void)
     cJSON_AddBoolToObject(root, "sta_configured", wifi.sta_configured);
     cJSON_AddBoolToObject(root, "sta_connecting", wifi.sta_connecting);
     cJSON_AddBoolToObject(root, "sta_connected", wifi.sta_connected);
+    cJSON_AddStringToObject(root, "ap_ssid", wifi.ap_ssid);
     cJSON_AddStringToObject(root, "ap_ip", wifi.ap_ip);
     cJSON_AddStringToObject(root, "sta_ip", wifi.sta_ip);
     cJSON_AddNumberToObject(root, "uart_baud",
