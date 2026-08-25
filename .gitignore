@@ -33,6 +33,9 @@ build/
 *.map
 flasher_args.json # Generated in build directory
 
+# Dated release snapshots intentionally carry flashable firmware images.
+!evidence/runtime-snapshot-*/firmware-flash/*.bin
+
 # ESP-IDF dependencies
 # For older versions or manual component management
 /components/.idf/
