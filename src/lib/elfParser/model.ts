@@ -17,3 +17,11 @@ export interface AddressResult {
   type?: string;
   offset: bigint;
 }
+
+export type VariableSuggestionKind = 'value' | 'structure' | 'union' | 'array';
+
+export interface VariableSuggestion {
+  expression: string;
+  kind: VariableSuggestionKind;
+  continuation: '' | '.' | '[';
+}

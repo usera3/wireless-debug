@@ -1,8 +1,8 @@
 import { AddressParser } from './elfParser/address-parser';
-import type { AddressResult } from './elfParser/model';
+import type { AddressResult, VariableSuggestion } from './elfParser/model';
 
-export type ElfAddressParser = Pick<AddressParser, 'getVariableNames' | 'resolve'>;
-export type { AddressResult };
+export type ElfAddressParser = Pick<AddressParser, 'getVariableNames' | 'getSuggestions' | 'resolve'>;
+export type { AddressResult, VariableSuggestion };
 
 // Parsing retains a compact DWARF type graph, but the browser still needs one
 // temporary ArrayBuffer while reading the upload. Keep that peak bounded.
@@ -21,10 +21,11 @@ export function filterElfVariableNames(
   limit = 50,
 ): string[] {
   const normalized = query.trim().toLocaleLowerCase();
-  if (!normalized || limit <= 0) return [];
+  const cappedLimit = Math.min(50, Math.max(0, Math.floor(limit)));
+  if (!normalized || cappedLimit <= 0) return [];
   return names
     .filter((name) => name.toLocaleLowerCase().startsWith(normalized))
-    .slice(0, limit);
+    .slice(0, cappedLimit);
 }
 
 export function parseManualAddress(value: string): number | null {
@@ -38,4 +39,19 @@ export function formatElfAddress(address: bigint | number): string {
   const value = typeof address === 'bigint' ? address : BigInt(address);
   if (value < 0n) throw new Error('ELF address must be non-negative');
   return value.toString(16).toUpperCase().padStart(4, '0');
+}
+
+export function buildElfChannelPatch(
+  expression: string,
+  address: bigint | number,
+): { label: string; varAddrHex: string } {
+  const value = typeof address === 'bigint' ? address : BigInt(address);
+  if (value < 0n || value > 0xffffn) {
+    const displayAddress = value < 0n ? value.toString(16).toUpperCase() : formatElfAddress(value);
+    throw new Error(`变量地址 ${displayAddress} 超出 16 位示波器地址范围`);
+  }
+  return {
+    label: expression,
+    varAddrHex: formatElfAddress(value),
+  };
 }

@@ -19,6 +19,7 @@ const RETAINED_TAGS = new Set([
   'DW_TAG_union_type',
   'DW_TAG_class_type',
   'DW_TAG_array_type',
+  'DW_TAG_subrange_type',
   'DW_TAG_base_type',
   'DW_TAG_typedef',
   'DW_TAG_const_type',
@@ -32,7 +33,7 @@ const RETAINED_TAGS = new Set([
 const TAGS: Record<number, string> = {
   0x01: "DW_TAG_array_type", 0x02: "DW_TAG_class_type", 0x04: "DW_TAG_enumeration_type", 0x05: "DW_TAG_formal_parameter",
   0x0b: "DW_TAG_lexical_block", 0x0d: "DW_TAG_member", 0x0f: "DW_TAG_pointer_type", 0x11: "DW_TAG_compile_unit",
-  0x13: "DW_TAG_structure_type", 0x16: "DW_TAG_typedef", 0x17: "DW_TAG_union_type", 0x24: "DW_TAG_base_type",
+  0x13: "DW_TAG_structure_type", 0x16: "DW_TAG_typedef", 0x17: "DW_TAG_union_type", 0x21: "DW_TAG_subrange_type", 0x24: "DW_TAG_base_type",
   0x26: "DW_TAG_const_type", 0x2e: "DW_TAG_subprogram", 0x2f: "DW_TAG_subroutine_type", 0x30: "DW_TAG_reference_type",
   0x31: "DW_TAG_rvalue_reference_type", 0x1d: "DW_TAG_inheritance", 0x34: "DW_TAG_variable", 0x35: "DW_TAG_common_block", 0x36: "DW_TAG_common_inclusion",
   0x3a: "DW_TAG_volatile_type", 0x41: "DW_TAG_type_unit", 0x42: "DW_TAG_rvalue_reference_type",
@@ -40,8 +41,8 @@ const TAGS: Record<number, string> = {
 const ATTRS: Record<number, string> = {
   0x02: "DW_AT_location", 0x03: "DW_AT_name", 0x09: "DW_AT_ordering", 0x0b: "DW_AT_byte_size", 0x0c: "DW_AT_bit_offset",
   0x0d: "DW_AT_bit_size", 0x10: "DW_AT_stmt_list", 0x11: "DW_AT_low_pc", 0x12: "DW_AT_high_pc", 0x13: "DW_AT_language",
-  0x1c: "DW_AT_comp_dir", 0x1d: "DW_AT_const_value", 0x1f: "DW_AT_containing_type", 0x25: "DW_AT_producer",
-  0x27: "DW_AT_prototyped", 0x31: "DW_AT_abstract_origin", 0x32: "DW_AT_accessibility", 0x37: "DW_AT_sibling",
+  0x1c: "DW_AT_comp_dir", 0x1d: "DW_AT_const_value", 0x1f: "DW_AT_containing_type", 0x22: "DW_AT_lower_bound", 0x25: "DW_AT_producer",
+  0x27: "DW_AT_prototyped", 0x2f: "DW_AT_upper_bound", 0x31: "DW_AT_abstract_origin", 0x32: "DW_AT_accessibility", 0x37: "DW_AT_sibling",
   0x38: "DW_AT_data_member_location", 0x39: "DW_AT_identifier_case", 0x3a: "DW_AT_declaration", 0x3b: "DW_AT_discr_list",
   0x3c: "DW_AT_discr", 0x3d: "DW_AT_discr_value", 0x40: "DW_AT_start_scope", 0x47: "DW_AT_specification",
   0x49: "DW_AT_type", 0x4a: "DW_AT_return_addr", 0x4b: "DW_AT_calling_convention", 0x4c: "DW_AT_count",
@@ -60,8 +61,8 @@ class Reader {
   u64() { const d = new DataView(this.bytes.buffer, this.bytes.byteOffset + this.pos, 8); const v = d.getBigUint64(0, this.little); this.pos += 8; return v; }
   uleb() { let v = 0, shift = 0, b; do { b = this.u8(); v += (b & 0x7f) * 2 ** shift; shift += 7; } while (b & 0x80); return v; }
   sleb() { let v = 0, shift = 0, b; do { b = this.u8(); v += (b & 0x7f) * 2 ** shift; shift += 7; } while (b & 0x80); return b & 0x40 ? v - 2 ** shift : v; }
-  bytesN(n: number) { const v = this.bytes.slice(this.pos, this.pos + n); this.pos += n; return v; }
-  cstr() { const start = this.pos; while (this.bytes[this.pos]) this.pos++; const value = new TextDecoder().decode(this.bytes.slice(start, this.pos)); this.pos++; return value; }
+  bytesN(n: number) { const v = this.bytes.subarray(this.pos, this.pos + n); this.pos += n; return v; }
+  cstr() { const start = this.pos; while (this.bytes[this.pos]) this.pos++; const value = new TextDecoder().decode(this.bytes.subarray(start, this.pos)); this.pos++; return value; }
 }
 
 export function parseElfBinary(input: ArrayBuffer | Uint8Array): BinaryParseResult {
@@ -80,7 +81,7 @@ export function parseElfBinary(input: ArrayBuffer | Uint8Array): BinaryParseResu
 function sectionData(bytes: Uint8Array, section?: Section) {
   return section ? bytes.subarray(section.offset, section.offset + section.size) : new Uint8Array();
 }
-function cstr(bytes: Uint8Array, offset: number) { let end = offset; while (end < bytes.length && bytes[end]) end++; return new TextDecoder().decode(bytes.slice(offset, end)); }
+function cstr(bytes: Uint8Array, offset: number) { let end = offset; while (end < bytes.length && bytes[end]) end++; return new TextDecoder().decode(bytes.subarray(offset, end)); }
 
 function parseSymbols(bytes: Uint8Array, symtab?: Section, strtab?: Section) {
   const result = new Map<string, SymbolEntry>(); if (!symtab || !strtab) return result; const strings = sectionData(bytes, strtab), data = sectionData(bytes, symtab);
@@ -141,7 +142,7 @@ function parseUnits(bytes: Uint8Array, data: Uint8Array, abbrevData: Uint8Array,
   }
 }
 
-function readAbbrevs(data: Uint8Array, offset: number) { const r = new Reader(data, offset), result = new Map<number, Abbrev>(); while (r.pos < data.length) { const code = r.uleb(); if (!code) break; const tag = TAGS[r.uleb()] ?? `User TAG value: ${code}`; const children = r.u8() !== 0, attrs: [number, number, number?][] = []; while (true) { const attr = r.uleb(), form = r.uleb(); if (!attr && !form) break; attrs.push([attr, form, form === 0x21 ? r.sleb() : undefined]); } result.set(code, { tag, children, attrs }); } return result; }
+function readAbbrevs(data: Uint8Array, offset: number) { const r = new Reader(data, offset), result = new Map<number, Abbrev>(); while (r.pos < data.length) { const code = r.uleb(); if (!code) break; const tagCode = r.uleb(); const tag = TAGS[tagCode] ?? `User TAG value: 0x${tagCode.toString(16)}`; const children = r.u8() !== 0, attrs: [number, number, number?][] = []; while (true) { const attr = r.uleb(), form = r.uleb(); if (!attr && !form) break; attrs.push([attr, form, form === 0x21 ? r.sleb() : undefined]); } result.set(code, { tag, children, attrs }); } return result; }
 
 function readForm(r: Reader, formCode: number, addressSize: number, strings: Uint8Array, lineStrings: Uint8Array, unitStart: number, unitEnd: number, implicitValue?: number): string | number | undefined {
   if (formCode === 0x21) return implicitValue;
