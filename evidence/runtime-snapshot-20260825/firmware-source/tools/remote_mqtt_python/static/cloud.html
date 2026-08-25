@@ -1939,9 +1939,9 @@
         els.detailBody.innerHTML = `
           <form class="note-form" id="displayNameForm">
             <label class="section-title" for="displayNameInput">设备名</label>
-            <input id="displayNameInput" maxlength="128" value="${escapeHtml(device.display_name || '')}" placeholder="ESP32-001" />
+            <input id="displayNameInput" maxlength="128" value="${escapeHtml(device.display_name || '')}" placeholder="ESP32_7C9D" />
             <button class="button secondary" type="submit">保存设备名</button>
-            <div class="muted" id="displayNameMessage">设备名不能重复；未填写时系统会自动分配 ESP32-001 这种名称。</div>
+            <div class="muted" id="displayNameMessage">设备名不能重复；未填写时按 AP 名称自动生成，例如 ESP32_7C9D。</div>
           </form>
           <div class="kv">
             <div class="kv-card"><span>设备名</span><strong>${escapeHtml(device.display_name || device.device_id)}</strong></div>
@@ -1954,6 +1954,7 @@
             <div class="kv-card"><span>STA 配置</span><strong>${currentBoolText(device, payload.sta_configured, '已保存', '未保存')}</strong></div>
             <div class="kv-card"><span>STA 正在连接</span><strong>${currentBoolText(device, payload.sta_connecting, '连接中', '空闲')}</strong></div>
             <div class="kv-card"><span>STA IP</span><strong>${escapeHtml(currentText(device, payload.sta_ip || device.sta_ip))}</strong></div>
+            <div class="kv-card"><span>AP 名称</span><strong>${escapeHtml(currentText(device, payload.ap_ssid || device.ap_ssid))}</strong></div>
             <div class="kv-card"><span>AP IP</span><strong>${escapeHtml(currentText(device, payload.ap_ip || device.ap_ip))}</strong></div>
             <div class="kv-card"><span>通信模式</span><strong>${escapeHtml(currentText(device, payload.comm_mode || device.comm_mode, '未知'))}</strong></div>
             <div class="kv-card"><span>UART</span><strong>${escapeHtml(currentText(device, payload.uart_baud || device.uart_baud))}</strong></div>

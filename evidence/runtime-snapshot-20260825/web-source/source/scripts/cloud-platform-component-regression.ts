@@ -30,6 +30,8 @@ for (const marker of [
   'Cloud Console',
   'MQTT',
   '硬件 MAC',
+  'AP 名称',
+  'ESP32_7C9D',
   '健康',
   '通信',
   'UART',
@@ -39,6 +41,9 @@ for (const marker of [
 ]) {
   assert.ok(page.includes(marker), `CloudPlatformPage missing marker: ${marker}`);
 }
+
+const api = readFileSync('src/lib/cloudPlatformApi.ts', 'utf8');
+assert.ok(api.includes('ap_ssid?: string'), 'cloud device API type must expose the AP SSID');
 
 const app = readFileSync('src/App.tsx', 'utf8');
 assert.ok(app.includes('currentRuntimeInfo'), 'App must use runtime mode detection');

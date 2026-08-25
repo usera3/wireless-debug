@@ -9,6 +9,7 @@ export interface CloudDeviceRecord {
   last_seen_at?: string;
   status_age_seconds?: number;
   net_mode?: string;
+  ap_ssid?: string;
   sta_ip?: string;
   ap_ip?: string;
   sta_connected?: boolean;
@@ -40,6 +41,7 @@ export interface CloudDeviceRecord {
   last_status_json?: Record<string, unknown> & {
     device_mac?: string;
     net_mode?: string;
+    ap_ssid?: string;
     sta_ip?: string;
     ap_ip?: string;
     sta_connected?: boolean;

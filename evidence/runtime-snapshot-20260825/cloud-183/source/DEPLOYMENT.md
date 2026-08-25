@@ -2,15 +2,17 @@
 
 Initial deployment: 2026-08-03 (Asia/Shanghai)
 Static web refresh: 2026-08-25 (Asia/Shanghai)
+AP-derived device naming refresh: 2026-08-25 (Asia/Shanghai)
 
 ## Source
 
-- Firmware/cloud repository branch: `wifi-provisioning-fix-20260803`
-- Firmware/cloud repository commit: `9be8d1b`
-- Web source commit: `22fb25a`
-- `app.py` SHA-256: `8e64b783c3c4a2cf4da7f99453af1c2d0b2b327f556a7187b222905203051c65`
+- Firmware/cloud repository branch: `feature/elf-struct-array-index-20260825-fw`
+- Firmware/cloud repository commit: `f3e705c`
+- Web source commit: `fd40805`
+- `app.py` SHA-256: `e61cbe438e9f0a72cb57b0634b56661d2da1ac368d51705f393312efad657c09`
+- `device_naming.py` SHA-256: `f196bc07d44b57a39cf234197480fd61d800fdf6c1b296c026e1eb97f01d4000`
 - `ws_fanout.py` SHA-256: `50ada87f72696c1b86512ea9514a191eaa53bce9ef080fa83884d781055af1a3`
-- `a.js` SHA-256: `cba6ce842b404ef83ab382de5f9fb9e4afb5a630bae1fdfe8512bc35bfb89161`
+- `a.js` SHA-256: `94d03c32b9bacc98d5998ba1bd043d4aca6923c01ed4957d4300952a83cfe8f9`
 
 This is a fresh deployment. It does not contain a copy of the Japan PostgreSQL data.
 

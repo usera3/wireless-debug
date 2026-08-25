@@ -13,8 +13,8 @@ ESP32 和 183 云端都不接收文件，也不负责解析 ELF。
 
 ## 版本关系
 
-- Web 源码：`22fb25a`（`feature/elf-struct-array-index-20260825`）
-- 固件源码和嵌入网页：`4148575`（`feature/elf-struct-array-index-20260825-fw`）
+- Web 源码：`fd40805`（`feature/elf-struct-array-index-20260825`）
+- 固件源码和嵌入网页：`f3e705c`（`feature/elf-struct-array-index-20260825-fw`）
 - 183 静态网页：`cloud-183/source/dist/orig/`
 - 2026-08-24 基线：Web `f8de108`，Firmware `2c548ac`
 

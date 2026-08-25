@@ -2,19 +2,22 @@
 
 Build date: 2026-08-25. Target: ESP32-S3 with 8 MB flash, ESP-IDF 6.0.
 
-This package was built from firmware commit `4148575`, whose direct parent is
-the verified 2026-08-24 firmware commit `2c548ac`. It embeds web assets from
-frontend commit `22fb25a`. The firmware keeps the OLED dynamic `AP:%s` SSID
+This package was built from firmware commit `f3e705c`, based on the verified
+2026-08-24 firmware commit `2c548ac`. It embeds web assets from
+frontend commit `fd40805`. The firmware keeps the OLED dynamic `AP:%s` SSID
 display and includes memory-bounded `.out`/`.elf` structure and array indexing
-in the address-oscilloscope UI.
+in the address-oscilloscope UI. Its cloud heartbeat also reports `ap_ssid` for
+AP-derived default device names.
 
-The application image is `0x19af40` bytes; the 0x280000-byte app partition
-has `0xe50c0` bytes free.
+The application image is `0x19af60` bytes; the 0x280000-byte app partition
+has `0xe50a0` bytes free.
 
-The 2026-08-25 COM4 installation was followed by an independent esptool
-`verify-flash` of all four regions. The bootloader, partition table,
-application, and complete `0x570000`-byte storage partition all reported
-`Verification successful (digest matched)`.
+The preceding `4148575` package was installed on COM4 and independently
+verified with esptool. This update was rebuilt successfully but was not
+re-flashed because the cloud backend supports existing firmware through the
+MAC fallback. The complete image preserves the verified 8 MB base outside the
+four documented regions and overlays the new split images. Hash checks confirm
+that all four regions in the complete image exactly match those split files.
 
 ## Complete Flash
 
