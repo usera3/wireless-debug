@@ -31,6 +31,7 @@ from device_naming import (
     choose_device_display_name,
     is_legacy_auto_display_name,
 )
+from remote_excel_codec import decode_base64_file
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -1796,13 +1797,32 @@ def remote_excel_list(device_id):
 
 
 def remote_excel_upload(device_id):
-    filename = normalize_excel_filename(
-        request.headers.get('X-Filename') or request.args.get('name')
-    )
+    uploaded = request.files.get('file')
+    if uploaded is not None:
+        filename = normalize_excel_filename(uploaded.filename)
+        data = uploaded.read(REMOTE_EXCEL_MAX_BYTES + 1) or b''
+    elif request.is_json:
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or payload.get('encoding') != 'base64':
+            return json_response({'ok': False, 'msg': 'json upload requires encoding=base64'}, 400)
+        filename = normalize_excel_filename(payload.get('name'))
+        if not filename:
+            return json_response({'ok': False, 'msg': 'valid excel filename required'}, 400)
+        try:
+            data = decode_base64_file(payload.get('data_base64'), REMOTE_EXCEL_MAX_BYTES)
+        except ValueError as exc:
+            status = 413 if str(exc) == 'file too large' else 400
+            return json_response({'ok': False, 'msg': str(exc)}, status)
+    else:
+        # Keep compatibility with the existing ESP32/raw-byte uploader.
+        filename = normalize_excel_filename(
+            request.headers.get('X-Filename') or request.args.get('name')
+        )
+        data = request.get_data() or b''
+
     if not filename:
         return json_response({'ok': False, 'msg': 'valid excel filename required'}, 400)
 
-    data = request.get_data() or b''
     if not data:
         return json_response({'ok': False, 'msg': 'empty file'}, 400)
     if len(data) > REMOTE_EXCEL_MAX_BYTES:

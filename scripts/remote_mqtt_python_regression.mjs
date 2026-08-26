@@ -10,6 +10,7 @@ const files = [
   `${base}/requirements.txt`,
   `${base}/app.py`,
   `${base}/device_naming.py`,
+  `${base}/remote_excel_codec.py`,
   `${base}/ws_fanout.py`,
   `${base}/schema.sql`,
   `${base}/Dockerfile`,
@@ -98,6 +99,9 @@ for (const token of [
   'remote_excel_upload',
   'remote_excel_delete',
   'remote_excel_download',
+  "request.files.get('file')",
+  'uploaded.filename',
+  'decode_base64_file',
   'REMOTE_WS_FRAME_LIMIT',
   'CLOUD_WS_PORT',
   'CLOUD_WS_PUBLIC_URL',
@@ -142,6 +146,19 @@ for (const token of [
 ]) {
   assert.ok(app.includes(token), `app missing ${token}`);
 }
+
+const multipartUploadBranch = app.match(
+  /uploaded = request\.files\.get\('file'\)([\s\S]*?)else:\n\s+# Keep compatibility with the existing ESP32\/raw-byte uploader\./,
+)?.[1] || '';
+assert.ok(multipartUploadBranch, 'cloud parameter upload must accept browser multipart files');
+assert.ok(
+  multipartUploadBranch.includes('uploaded.filename'),
+  'cloud multipart upload must preserve the browser filename',
+);
+assert.ok(
+  multipartUploadBranch.includes('uploaded.read(REMOTE_EXCEL_MAX_BYTES + 1)'),
+  'cloud multipart upload must enforce its byte limit while reading',
+);
 
 assert.ok(app.includes('CLOUD_HTTP_USER'), 'app must support optional basic auth user');
 assert.ok(app.includes('CLOUD_HTTP_PASSWORD'), 'app must support optional basic auth password');
@@ -189,7 +206,7 @@ for (const token of [
 }
 
 const dockerfile = readFileSync(resolve(root, `${base}/Dockerfile`), 'utf8');
-for (const token of ['python:', 'PIP_INDEX_URL', 'pip install', 'requirements.txt', 'device_naming.py', 'ws_fanout.py', 'waitress-serve', '18089']) {
+for (const token of ['python:', 'PIP_INDEX_URL', 'pip install', 'requirements.txt', 'device_naming.py', 'remote_excel_codec.py', 'ws_fanout.py', 'waitress-serve', '18089']) {
   assert.ok(dockerfile.includes(token), `Dockerfile missing ${token}`);
 }
 
