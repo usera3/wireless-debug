@@ -1,0 +1,22 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  remote-server:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm start"
+    environment:
+      - MQTT_URL=mqtt://mosquitto:1883
+      - PORT=3000
+      - DEVICE_NAMESPACE=wireless-debug
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./server:/app
+    depends_on:
+      - mosquitto

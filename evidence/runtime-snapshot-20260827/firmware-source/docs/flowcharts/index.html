@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>wireless_debug 程序流程图</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, "Microsoft YaHei", sans-serif;
+      color: #1f2933;
+      background: #f5f7fa;
+    }
+    header {
+      padding: 20px 24px;
+      background: #0f172a;
+      color: white;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+      font-weight: 700;
+    }
+    header p {
+      margin: 0;
+      color: #cbd5e1;
+      line-height: 1.5;
+    }
+    main {
+      padding: 18px;
+    }
+    section {
+      margin: 0 0 18px;
+      padding: 16px;
+      background: white;
+      border: 1px solid #d9e2ec;
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+      color: #102a43;
+    }
+    .note {
+      margin: 0 0 14px;
+      font-size: 14px;
+      color: #52606d;
+    }
+    .mermaid {
+      min-width: 960px;
+    }
+    code {
+      background: #eef2f7;
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>wireless_debug 程序流程图</h1>
+    <p>基于当前源码整理。页面内嵌两张总览图；同目录的 <code>.mmd</code> 文件包含更详细流程，可单独导入 Mermaid Live、draw.io 或其他支持 Mermaid 的流程图工具。</p>
+  </header>
+  <main>
+    <section>
+      <h2>1. 启动初始化流程</h2>
+      <p class="note">文件：<code>01_boot_sequence.mmd</code></p>
+      <pre class="mermaid">
+flowchart TD
+    A([ESP32-S3 上电 / app_main]) --> B[NVS 初始化]
+    B --> C{NVS 分区可用?}
+    C -- 否: NO_FREE_PAGES 或 NEW_VERSION --> C1[擦除 NVS]
+    C1 --> C2[重新初始化 NVS]
+    C -- 是 --> D[app_core_init<br/>默认 UART=2Mbps<br/>默认通信=AUTO]
+    C2 --> D
+    D --> E{CONFIG_ENABLE_BLE?}
+    E -- 是 --> E1[ble_spp_transport_init<br/>注册 BLE RX/ready/status/heap 回调]
+    E -- 否 --> F[ui_controller_init]
+    E1 --> F
+    F --> F1[ui_controller_init<br/>注册 WiFi/UART/BLE/heap 操作回调]
+    F1 --> G{CONFIG_ENABLE_WIFI?}
+    G -- 是 --> G1[esp_netif_init]
+    G1 --> G2[esp_event_loop_create_default]
+    G -- 否 --> H[启动 UART transport]
+    G2 --> H
+    H --> H1[uart_transport_start]
+    H1 --> H2[安装 UART1 driver<br/>TX GPIO10, RX GPIO9<br/>RX/TX ring buffer 32KB]
+    H2 --> H3[设置 RX timeout 和 RX full threshold]
+    H3 --> H4[创建 uart_transport_task<br/>负责事件读取和软件组帧]
+    H4 --> I[display_port_init]
+    I --> I1{SSD1315 I2C 探测成功?}
+    I1 -- 是 --> I2[初始化 SSD1315 OLED<br/>写入启动测试图案]
+    I1 -- 否 --> I3[记录 display_status=ssd1315_missing<br/>主程序告警后继续]
+    I2 --> J[display_lvgl_start]
+    I3 --> J
+    J --> J1[lv_init 和 system_menu_init]
+    J1 --> J2[创建 128x64 LVGL display<br/>绑定 flush 回调]
+    J2 --> J3[display_ui_build<br/>构建状态栏/标题/4行/页脚]
+    J3 --> J4[启动 5ms LVGL tick timer]
+    J4 --> J5[创建 display_lvgl_task<br/>20ms 周期刷新 UI]
+    J5 --> J6[设置当前 UART 波特率到显示状态]
+    J6 --> K{CONFIG_ENABLE_WIFI?}
+    K -- 是 --> K1[web_static_init<br/>挂载 SPIFFS storage 分区]
+    K1 --> K2[wifi_manager_init]
+    K2 --> K3[创建默认 AP/STA netif<br/>AP DHCP 不发布网关/DNS]
+    K3 --> K4[esp_wifi_init<br/>注册 STA_DISCONNECTED / GOT_IP 事件]
+    K4 --> K5[创建 STA 连接超时回退 timer]
+    K5 --> K6[从 NVS 读取 STA 配置<br/>若无则使用默认 STA 配置]
+    K6 --> K7[生成 AP SSID: ESP32-S3_AP_XXXX]
+    K7 --> K8{有 STA 配置且允许开机 STA?}
+    K8 -- 是 --> K9[请求 SYSTEM_NET_STA<br/>启动 APSTA 并连接外部 WiFi]
+    K8 -- 否 --> K10[请求 SYSTEM_NET_AP<br/>启动 SoftAP]
+    K9 --> K11[start_webserver]
+    K10 --> K11
+    K -- 否 --> L{CONFIG_ENABLE_BLE<br/>且 CONFIG_BLE_START_ON_BOOT?}
+    K11 --> K12[wifi_transport_init<br/>创建 WS 发送队列/静态帧池/发送任务]
+    K12 --> K13[httpd_start<br/>端口 80, wildcard 匹配, 96 handlers]
+    K13 --> K14[注册 web_api handlers<br/>/api/...]
+    K14 --> K15[注册 WebSocket<br/>/ws]
+    K15 --> K16[注册 web_static handlers<br/>Excel API 和 /* 静态文件]
+    K16 --> L
+    L -- 是 --> L1[ble_spp_transport_start]
+    L1 --> L2[nimble_port_init]
+    L2 --> L3[初始化 GAP/GATT<br/>SPP UUID 0xABF0/0xABF1]
+    L3 --> L4[创建 NimBLE host task]
+    L4 --> L5[BLE sync 后设置设备名并开始广播]
+    L -- 否 --> M[health_reporter_start]
+    L5 --> M
+    M --> M1[创建 health_report_task<br/>每 30 秒或错误变化输出 HEALTH OK/ALERT]
+    M1 --> N[打印固件配置日志]
+    N --> O([app_main 返回<br/>各 FreeRTOS 任务持续运行])
+      </pre>
+    </section>
+    <section>
+      <h2>2. 模块关系总图</h2>
+      <p class="note">文件：<code>06_module_relationship.mmd</code></p>
+      <pre class="mermaid">
+flowchart LR
+    subgraph App[应用入口 main.c]
+        MAIN[app_main<br/>初始化顺序和回调装配]
+        CALLBACKS[应用回调<br/>UART/BLE/WiFi/Web API/UI]
+    end
+    subgraph Core[核心状态]
+        APP[app_core<br/>comm_mode + uart_baud]
+        STATS[comm_stats<br/>全局通信计数]
+        HEALTH[health_reporter<br/>串口健康日志]
+    end
+    subgraph DataPlane[数据面 Transport + Router]
+        UART[uart_transport<br/>UART1 驱动/组帧/写串口]
+        ROUTER[router_service<br/>UART 帧路由到 BLE 或 WiFi]
+        BLE[ble_transport<br/>NimBLE SPP GATT/Notify]
+        WST[wifi_transport<br/>WebSocket RX/TX/发送队列]
+    end
+    subgraph ControlPlane[控制面 HTTP/文件/WiFi]
+        WFM[wifi_manager<br/>AP/STA/NVS/事件/回退]
+        API[web_api<br/>/api 控制接口]
+        STATIC[web_static<br/>SPIFFS 静态页面和 Excel 文件]
+        HTTP[http_utils<br/>JSON/CORS/OPTIONS]
+        MOTOR[motor_diag<br/>电机诊断帧和参数表]
+    end
+    subgraph UI[屏幕和菜单]
+        UIC[ui_controller<br/>菜单动作协调]
+        MENU[system_menu<br/>菜单状态机]
+        LVGL[display_lvgl<br/>状态缓存/LVGL 任务]
+        DUI[display_ui<br/>128x64 UI 布局]
+        DPORT[display_port<br/>framebuffer/SSD1315 I2C]
+    end
+    MAIN --> APP
+    MAIN --> UART
+    MAIN --> BLE
+    MAIN --> WFM
+    MAIN --> WST
+    MAIN --> API
+    MAIN --> STATIC
+    MAIN --> UIC
+    MAIN --> LVGL
+    MAIN --> DPORT
+    MAIN --> HEALTH
+    UART -- 完整 UART 帧 --> CALLBACKS
+    CALLBACKS -- 普通数据 --> ROUTER
+    ROUTER -- send_ble --> BLE
+    ROUTER -- send_wifi --> WST
+    BLE -- GATT Write RX --> CALLBACKS
+    WST -- WebSocket RX --> CALLBACKS
+    CALLBACKS -- 写外部串口 --> UART
+    CALLBACKS -- 切换当前模式 --> APP
+    API -- 回调 --> CALLBACKS
+    API --> HTTP
+    API --> MOTOR
+    STATIC --> HTTP
+    WFM -- 状态回调 --> MENU
+    WFM -- 状态回调 --> LVGL
+    UIC --> APP
+    UIC --> WFM
+    UIC --> BLE
+    UIC --> UART
+    UIC --> LVGL
+    MENU --> LVGL
+    LVGL --> DUI
+    LVGL --> DPORT
+    UART --> STATS
+    BLE --> STATS
+    WST --> STATS
+    ROUTER --> STATS
+    STATS --> API
+    STATS --> LVGL
+    STATS --> HEALTH
+      </pre>
+    </section>
+    <section>
+      <h2>其他详细流程图</h2>
+      <p class="note">为避免这个 HTML 过大，完整详细图请打开或导入同目录这些 Mermaid 文件：</p>
+      <ul>
+        <li><code>02_data_plane.mmd</code>：UART/BLE/WiFi 双向透传数据流。</li>
+        <li><code>03_wifi_ble_state.mmd</code>：WiFi AP/STA 和 BLE SPP 状态机。</li>
+        <li><code>04_http_control_plane.mmd</code>：HTTP API、静态文件、Excel、电机诊断控制流。</li>
+        <li><code>05_display_health_stats.mmd</code>：OLED 显示、菜单、统计、健康报告流。</li>
+      </ul>
+    </section>
+  </main>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: true,
+      securityLevel: 'loose',
+      flowchart: {
+        htmlLabels: true,
+        curve: 'basis'
+      }
+    });
+  </script>
+</body>
+</html>

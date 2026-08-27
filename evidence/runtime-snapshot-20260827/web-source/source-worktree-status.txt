@@ -1,0 +1,3 @@
+Archive source: clean committed Git tree
+Commit: fd40805932197928f8f9f57f25064944ffd35248
+Generated directories excluded: node_modules, dist

@@ -1,0 +1,1060 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>远程设备控制台</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f3f5f8;
+      --surface: #ffffff;
+      --surface-muted: #f7f9fc;
+      --surface-strong: #eef2f7;
+      --line: #d6deea;
+      --line-soft: #e7ecf3;
+      --text: #101828;
+      --muted: #5f6b7a;
+      --subtle: #7a8697;
+      --accent: #155eef;
+      --accent-strong: #0b4bc7;
+      --accent-soft: #e9f0ff;
+      --ok: #067647;
+      --ok-soft: #dcfae6;
+      --warn: #93370d;
+      --warn-soft: #fff3d6;
+      --bad: #b42318;
+      --bad-soft: #fef0ef;
+      --neutral-soft: #eef2f7;
+      --log-bg: #10131f;
+      --log-line: rgba(255, 255, 255, 0.08);
+      --log-text: #d7deea;
+      --shadow: 0 16px 36px rgba(16, 24, 40, 0.08);
+      font-family: Arial, "Microsoft YaHei", "PingFang SC", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f141b;
+        --surface: #171e28;
+        --surface-muted: #111821;
+        --surface-strong: #202938;
+        --line: #344054;
+        --line-soft: #263243;
+        --text: #f2f4f7;
+        --muted: #b7c0cf;
+        --subtle: #98a2b3;
+        --accent: #75a7ff;
+        --accent-strong: #9bbfff;
+        --accent-soft: #172b4d;
+        --ok: #7ee2ad;
+        --ok-soft: #123525;
+        --warn: #ffd166;
+        --warn-soft: #3a2a10;
+        --bad: #ff9b91;
+        --bad-soft: #3a1717;
+        --neutral-soft: #202938;
+        --log-bg: #080b12;
+        --log-line: rgba(255, 255, 255, 0.1);
+        --log-text: #d7deea;
+        --shadow: 0 16px 36px rgba(0, 0, 0, 0.28);
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    button, select, input {
+      font: inherit;
+    }
+
+    button:focus-visible,
+    select:focus-visible,
+    input:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--accent) 45%, transparent);
+      outline-offset: 2px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        transition: none !important;
+        scroll-behavior: auto !important;
+      }
+    }
+
+    .console-shell {
+      max-width: 1220px;
+      margin: 0 auto;
+      padding: 22px 24px 30px;
+    }
+
+    .console-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 14px;
+    }
+
+    .eyebrow {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.2;
+    }
+
+    h1, h2, h3, p {
+      margin: 0;
+    }
+
+    h1 {
+      margin-top: 4px;
+      font-size: 26px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      max-width: 680px;
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .device-state-strip {
+      display: grid;
+      grid-template-columns: minmax(220px, 0.78fr) minmax(0, 2.2fr);
+      gap: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    .state-primary {
+      display: grid;
+      grid-template-columns: 12px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+      padding: 16px;
+      border-right: 1px solid var(--line);
+      background: var(--surface-muted);
+    }
+
+    .state-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 999px;
+      background: var(--subtle);
+      box-shadow: 0 0 0 4px var(--neutral-soft);
+    }
+
+    .state-dot.ok {
+      background: var(--ok);
+      box-shadow: 0 0 0 4px var(--ok-soft);
+    }
+
+    .state-dot.bad {
+      background: var(--bad);
+      box-shadow: 0 0 0 4px var(--bad-soft);
+    }
+
+    .state-kicker,
+    .metric-label,
+    .status-label,
+    label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.25;
+    }
+
+    .state-device {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 8px;
+      margin-top: 5px;
+    }
+
+    .state-device strong {
+      font-size: 21px;
+      line-height: 1.2;
+      overflow-wrap: anywhere;
+    }
+
+    .state-device span {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .state-metrics {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      margin: 0;
+    }
+
+    .metric {
+      min-width: 0;
+      padding: 14px 16px;
+      border-right: 1px solid var(--line-soft);
+    }
+
+    .metric:last-child {
+      border-right: 0;
+    }
+
+    .metric-label span,
+    .status-meta,
+    .control-hint {
+      display: block;
+      margin-top: 2px;
+      color: var(--subtle);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.25;
+    }
+
+    .metric-value {
+      margin-top: 8px;
+      color: var(--text);
+      font-size: 16px;
+      font-weight: 900;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
+    }
+
+    .metric-value.ip-value {
+      font-size: 15px;
+      white-space: nowrap;
+      overflow-wrap: normal;
+    }
+
+    .metric-value.muted {
+      color: var(--muted);
+    }
+
+    .console-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
+      gap: 14px;
+      align-items: start;
+      margin-top: 14px;
+    }
+
+    .status-console,
+    .control-console,
+    .log-console {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .section-heading {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 16px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    h2 {
+      font-size: 20px;
+      line-height: 1.25;
+    }
+
+    h3 {
+      font-size: 14px;
+      line-height: 1.3;
+    }
+
+    .section-description {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .status-table {
+      display: grid;
+    }
+
+    .status-group-title {
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--line-soft);
+      background: var(--surface-muted);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 900;
+    }
+
+    .status-row {
+      display: grid;
+      grid-template-columns: minmax(130px, 0.55fr) minmax(0, 1fr);
+      gap: 16px;
+      align-items: center;
+      min-height: 38px;
+      padding: 8px 16px;
+      border-bottom: 1px solid var(--line-soft);
+      font-size: 13px;
+    }
+
+    .status-row:last-child {
+      border-bottom: 0;
+    }
+
+    .status-value {
+      min-width: 0;
+      text-align: right;
+      font-weight: 900;
+      overflow-wrap: anywhere;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--neutral-soft);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+
+    .status-badge.ok {
+      border-color: color-mix(in srgb, var(--ok) 32%, transparent);
+      background: var(--ok-soft);
+      color: var(--ok);
+    }
+
+    .status-badge.warn {
+      border-color: color-mix(in srgb, var(--warn) 34%, transparent);
+      background: var(--warn-soft);
+      color: var(--warn);
+    }
+
+    .status-badge.bad {
+      border-color: color-mix(in srgb, var(--bad) 30%, transparent);
+      background: var(--bad-soft);
+      color: var(--bad);
+    }
+
+    .control-console {
+      display: grid;
+    }
+
+    .control-stack {
+      display: grid;
+    }
+
+    .command-block {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .command-block:last-child {
+      border-bottom: 0;
+    }
+
+    .command-title {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 9px;
+    }
+
+    .field-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: end;
+    }
+
+    .field {
+      min-width: 0;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    select,
+    input,
+    button {
+      width: 100%;
+      min-height: 38px;
+      border-radius: 7px;
+      font-size: 14px;
+    }
+
+    select,
+    input {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--text);
+      padding: 8px 10px;
+    }
+
+    button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+      padding: 8px 12px;
+      font-weight: 900;
+      cursor: pointer;
+      transition: background 120ms ease, border-color 120ms ease, opacity 120ms ease;
+      white-space: nowrap;
+    }
+
+    button:hover:not(:disabled) {
+      border-color: var(--accent-strong);
+      background: var(--accent-strong);
+    }
+
+    button.secondary {
+      background: var(--surface);
+      color: var(--accent);
+    }
+
+    button.secondary:hover:not(:disabled) {
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+    }
+
+    button.compact {
+      width: auto;
+      min-height: 32px;
+      padding: 6px 12px;
+      font-size: 13px;
+    }
+
+    button:disabled,
+    select:disabled,
+    input:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    button.is-busy {
+      cursor: progress;
+    }
+
+    .log-console {
+      margin-top: 14px;
+    }
+
+    .log-stream {
+      min-height: 154px;
+      max-height: 270px;
+      overflow: auto;
+      padding: 8px 12px 12px;
+      background: var(--log-bg);
+      color: var(--log-text);
+      font-family: Consolas, "SFMono-Regular", monospace;
+      font-size: 12px;
+    }
+
+    .log-entry {
+      display: grid;
+      grid-template-columns: 72px 76px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      min-height: 25px;
+      padding: 5px 0;
+      border-bottom: 1px solid var(--log-line);
+    }
+
+    .log-entry:last-child {
+      border-bottom: 0;
+    }
+
+    .log-time {
+      color: #98a2b3;
+    }
+
+    .log-status {
+      font-weight: 900;
+    }
+
+    .log-status.ok { color: #7ee2ad; }
+    .log-status.pending { color: #ffd166; }
+    .log-status.bad { color: #ff9b91; }
+
+    .log-message {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .empty-log {
+      padding: 18px 0;
+      color: #98a2b3;
+    }
+
+    @media (max-width: 1040px) {
+      .device-state-strip,
+      .console-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .state-primary {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .state-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .metric:nth-child(2n) {
+        border-right: 0;
+      }
+
+      .metric:nth-child(n + 3) {
+        border-top: 1px solid var(--line-soft);
+      }
+    }
+
+    @media (max-width: 640px) {
+      .console-shell {
+        padding: 14px 12px 22px;
+      }
+
+      .console-header,
+      .section-heading,
+      .command-title {
+        display: block;
+      }
+
+      .section-heading button {
+        margin-top: 10px;
+      }
+
+      .state-metrics,
+      .field-grid,
+      .status-row,
+      .log-entry {
+        grid-template-columns: 1fr;
+      }
+
+      .metric {
+        border-right: 0;
+        border-top: 1px solid var(--line-soft);
+      }
+
+      .metric:first-child {
+        border-top: 0;
+      }
+
+      .status-value {
+        text-align: left;
+      }
+
+      .field-grid button {
+        width: 100%;
+      }
+
+      .control-hint {
+        margin-top: 3px;
+      }
+
+      .log-status {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="console-shell">
+    <header class="console-header">
+      <div>
+        <div class="eyebrow">远程 MQTT 控制</div>
+        <h1>远程设备控制台</h1>
+        <p class="subtitle">集中查看在线状态、网络地址、链路状态和命令确认结果；页面通过实时刷新通道同步设备上报。</p>
+      </div>
+    </header>
+
+    <section class="device-state-strip" aria-label="设备当前状态">
+      <div class="state-primary">
+        <span id="stripStateDot" class="state-dot bad" aria-hidden="true"></span>
+        <div>
+          <div class="state-kicker">当前设备</div>
+          <div class="state-device">
+            <strong id="stripDevice">esp32-001</strong>
+            <span id="stripOnline">设备离线</span>
+          </div>
+        </div>
+      </div>
+      <dl class="state-metrics">
+        <div class="metric">
+          <dt class="metric-label">消息服务<span>MQTT Broker</span></dt>
+          <dd id="stripBroker" class="metric-value muted">未连接</dd>
+        </div>
+        <div class="metric">
+          <dt class="metric-label">网络模式<span>AP / STA / APSTA</span></dt>
+          <dd id="stripMode" class="metric-value muted">-</dd>
+        </div>
+        <div class="metric">
+          <dt class="metric-label">接入点 IP<span>AP</span></dt>
+          <dd id="stripApIp" class="metric-value ip-value muted">-</dd>
+        </div>
+        <div class="metric">
+          <dt class="metric-label">联网 IP<span>STA</span></dt>
+          <dd id="stripStaIp" class="metric-value ip-value muted">-</dd>
+        </div>
+        <div class="metric">
+          <dt class="metric-label">最近心跳<span>15 秒内视为在线</span></dt>
+          <dd id="stripHeartbeat" class="metric-value muted">-</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="console-grid">
+      <section class="status-console" aria-label="详细状态">
+        <div class="section-heading">
+          <div>
+            <h2>详细状态</h2>
+            <p class="section-description">设备每 5 秒上报一次；页面通过实时刷新通道 SSE 更新。</p>
+          </div>
+          <button class="secondary compact" data-command="query_status" data-requires-online>刷新状态</button>
+        </div>
+        <div id="statusTable" class="status-table"></div>
+      </section>
+
+      <aside class="control-console" aria-label="远程控制">
+        <div class="section-heading">
+          <div>
+            <h2>远程控制</h2>
+            <p class="section-description">设备离线时控制项会自动锁定；命令下发后等待 ACK 确认。</p>
+          </div>
+        </div>
+        <div class="control-stack">
+          <section class="command-block">
+            <div class="command-title">
+              <h3>网络模式</h3>
+              <span class="control-hint">AP / STA / APSTA</span>
+            </div>
+            <div class="field-grid">
+              <div class="field">
+                <label for="wifiMode">WiFi 模式</label>
+                <select id="wifiMode" data-requires-online>
+                  <option value="ap">AP 模式</option>
+                  <option value="sta">STA 模式</option>
+                  <option value="apsta" selected>APSTA 模式</option>
+                </select>
+              </div>
+              <button data-command="set_wifi_mode" data-requires-online>应用模式</button>
+            </div>
+          </section>
+
+          <section class="command-block">
+            <div class="command-title">
+              <h3>串口参数</h3>
+              <span class="control-hint">UART</span>
+            </div>
+            <div class="field-grid">
+              <div class="field">
+                <label for="uartBaud">串口波特率</label>
+                <select id="uartBaud" data-requires-online>
+                  <option>115200</option>
+                  <option>921600</option>
+                  <option selected>2000000</option>
+                  <option>3000000</option>
+                </select>
+              </div>
+              <button data-command="set_uart_baud" data-requires-online>应用波特率</button>
+            </div>
+          </section>
+
+          <section class="command-block">
+            <div class="command-title">
+              <h3>通信链路</h3>
+              <span class="control-hint">WiFi / BLE</span>
+            </div>
+            <div class="field-grid">
+              <div class="field">
+                <label for="commMode">通信模式</label>
+                <select id="commMode" data-requires-online>
+                  <option value="auto">自动选择</option>
+                  <option value="wifi">仅 WiFi</option>
+                  <option value="ble">仅 BLE</option>
+                </select>
+              </div>
+              <button data-command="set_comm_mode" data-requires-online>应用链路</button>
+            </div>
+            <button class="secondary" data-command="ble_start" data-requires-online>启动 BLE 广播</button>
+          </section>
+
+          <section class="command-block">
+            <div class="command-title">
+              <h3>OLED 显示</h3>
+              <span class="control-hint">远程显示测试</span>
+            </div>
+            <label for="displayText">显示文本</label>
+            <input id="displayText" data-requires-online value="Remote MQTT OK" maxlength="80">
+            <button data-command="display_text" data-requires-online>发送到 OLED</button>
+          </section>
+        </div>
+      </aside>
+    </section>
+
+    <section class="log-console" aria-label="命令日志">
+      <div class="section-heading">
+        <div>
+          <h2>命令日志</h2>
+          <p class="section-description">记录远程命令、等待确认和设备 ACK，便于现场复盘。</p>
+        </div>
+        <button id="clearLog" class="secondary compact">清空日志</button>
+      </div>
+      <div id="log" class="log-stream" role="log" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <script>
+    const DEVICE_ID = 'esp32-001';
+    const statusTable = document.querySelector('#statusTable');
+    const log = document.querySelector('#log');
+    const commandButtons = [...document.querySelectorAll('button[data-command]')];
+    const guardedControls = [...document.querySelectorAll('[data-requires-online]')];
+    const commandNames = {
+      query_status: '刷新状态',
+      set_wifi_mode: '应用 WiFi 模式',
+      set_uart_baud: '应用波特率',
+      set_comm_mode: '应用通信链路',
+      ble_start: '启动 BLE',
+      display_text: '发送 OLED 文本',
+    };
+    const netModeNames = { ap: 'AP 模式', sta: 'STA 模式', apsta: 'APSTA 模式' };
+    const commModeNames = { auto: '自动选择', wifi: '仅 WiFi', ble: '仅 BLE' };
+    const logs = [];
+    let currentDevice = null;
+    let lastAckId = null;
+    let activeCommandId = null;
+    let busyCommandType = null;
+
+    commandButtons.forEach((button) => {
+      button.dataset.defaultLabel = button.textContent.trim();
+    });
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }[char]));
+    }
+
+    function formatTimestamp(value) {
+      if (!value) return '-';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return date.toLocaleString('zh-CN', {
+        hour12: false,
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+    }
+
+    function formatLogTime(date = new Date()) {
+      return date.toLocaleTimeString('zh-CN', { hour12: false });
+    }
+
+    function valueOrDash(value) {
+      return value === undefined || value === null || value === '' ? '-' : value;
+    }
+
+    function modeHasAp(mode) {
+      return mode === 'ap' || mode === 'apsta';
+    }
+
+    function modeHasSta(mode) {
+      return mode === 'sta' || mode === 'apsta';
+    }
+
+    function visibleApIp(status) {
+      return modeHasAp(status.net_mode) ? valueOrDash(status.ap_ip) : '-';
+    }
+
+    function visibleStaIp(status) {
+      return modeHasSta(status.net_mode) ? valueOrDash(status.sta_ip) : '-';
+    }
+
+    function badge(text, tone = '') {
+      return `<span class="status-badge ${tone}">${escapeHtml(text)}</span>`;
+    }
+
+    function statusRow(label, value, meta = '', htmlValue = false) {
+      const renderedValue = htmlValue ? value : escapeHtml(valueOrDash(value));
+      return `
+        <div class="status-row">
+          <div>
+            <div class="status-label">${escapeHtml(label)}</div>
+            ${meta ? `<div class="status-meta">${escapeHtml(meta)}</div>` : ''}
+          </div>
+          <div class="status-value">${renderedValue}</div>
+        </div>
+      `;
+    }
+
+    function statusGroup(title, rows) {
+      return `
+        <div class="status-group-title">${escapeHtml(title)}</div>
+        ${rows.join('')}
+      `;
+    }
+
+    function setMetricValue(selector, value) {
+      const el = document.querySelector(selector);
+      el.textContent = valueOrDash(value);
+      el.classList.toggle('muted', valueOrDash(value) === '-');
+    }
+
+    function renderDeviceStrip(device) {
+      const status = device?.status || {};
+      const online = !!device?.online;
+      const broker = !!device?.broker_connected;
+      const dot = document.querySelector('#stripStateDot');
+      dot.classList.toggle('ok', online);
+      dot.classList.toggle('bad', !online);
+
+      document.querySelector('#stripDevice').textContent = device?.device_id || DEVICE_ID;
+      document.querySelector('#stripOnline').textContent = online ? '设备在线' : '设备离线';
+      setMetricValue('#stripBroker', broker ? '已连接' : '未连接');
+      setMetricValue('#stripMode', netModeNames[status.net_mode] || valueOrDash(status.net_mode));
+      setMetricValue('#stripApIp', visibleApIp(status));
+      setMetricValue('#stripStaIp', visibleStaIp(status));
+      setMetricValue('#stripHeartbeat', formatTimestamp(device?.status_at));
+    }
+
+    function staStateBadge(status) {
+      if (!modeHasSta(status.net_mode)) {
+        return badge('未启用', '');
+      }
+      if (status.sta_connected) {
+        return badge('已连接', 'ok');
+      }
+      if (status.sta_connecting) {
+        return badge('连接中', 'warn');
+      }
+      return badge('未连接', 'bad');
+    }
+
+    function latestAckText(device) {
+      const ack = Array.isArray(device?.ack_log) ? device.ack_log[0] : null;
+      if (!ack) return '-';
+      const result = ack.ok ? '成功' : '失败';
+      return `${ack.type || '-'} / ${result}`;
+    }
+
+    function renderStatusTable(device) {
+      const status = device?.status || {};
+      const deviceState = device?.online ? badge('在线', 'ok') : badge('离线', 'bad');
+      const brokerState = device?.broker_connected ? badge('已连接', 'ok') : badge('未连接', 'bad');
+      const bleState = status.ble_ready ? badge('就绪', 'ok') : badge('未启动', 'warn');
+      const wsState = status.wifi_ws_client ? badge('有客户端', 'ok') : badge('无客户端', 'warn');
+      const pendingCount = Array.isArray(device?.pending_commands) ? device.pending_commands.length : 0;
+
+      statusTable.innerHTML = [
+        statusGroup('网络', [
+          statusRow('设备状态', deviceState, '', true),
+          statusRow('消息服务', brokerState, 'MQTT Broker', true),
+          statusRow('WiFi 模式', netModeNames[status.net_mode] || status.net_mode),
+          statusRow('STA 连接', staStateBadge(status), '联网状态', true),
+          statusRow('接入点 IP', visibleApIp(status), 'AP'),
+          statusRow('联网 IP', visibleStaIp(status), 'STA'),
+        ]),
+        statusGroup('通信', [
+          statusRow('通信模式', commModeNames[status.comm_mode] || status.comm_mode),
+          statusRow('串口波特率', status.uart_baud, 'UART'),
+          statusRow('蓝牙链路', bleState, 'BLE', true),
+          statusRow('BLE 订阅', status.ble_subscribed ? badge('已有订阅', 'ok') : badge('未订阅', 'warn'), '', true),
+          statusRow('网页通道', wsState, 'WebSocket', true),
+        ]),
+        statusGroup('运行', [
+          statusRow('固件标识', status.fw),
+          statusRow('运行时间', status.uptime_ms ? `${Math.floor(status.uptime_ms / 1000)} 秒` : '-'),
+          statusRow('STA 配置', status.sta_configured ? badge('已保存', 'ok') : badge('未配置', 'warn'), '', true),
+          statusRow('最近心跳', formatTimestamp(device?.status_at), 'SSE 实时刷新'),
+        ]),
+        statusGroup('命令', [
+          statusRow('待确认命令', pendingCount ? badge(`${pendingCount} 条等待确认`, 'warn') : badge('无', 'ok'), '', true),
+          statusRow('命令确认', latestAckText(device), 'ACK'),
+        ]),
+      ].join('');
+    }
+
+    function setControlsEnabled(device) {
+      const enabled = !!device?.online && !busyCommandType;
+      guardedControls.forEach((el) => {
+        el.disabled = !enabled;
+      });
+    }
+
+    function setCommandBusy(type, commandId = null) {
+      busyCommandType = type;
+      activeCommandId = commandId;
+      commandButtons.forEach((button) => {
+        const isActive = type && button.dataset.command === type;
+        button.textContent = isActive ? '下发中...' : button.dataset.defaultLabel;
+        button.classList.toggle('is-busy', !!isActive);
+        button.toggleAttribute('aria-busy', !!isActive);
+      });
+      setControlsEnabled(currentDevice);
+    }
+
+    function clearCommandBusy(commandId = null) {
+      if (commandId && activeCommandId && commandId !== activeCommandId) {
+        return;
+      }
+      busyCommandType = null;
+      activeCommandId = null;
+      commandButtons.forEach((button) => {
+        button.textContent = button.dataset.defaultLabel;
+        button.classList.remove('is-busy');
+        button.removeAttribute('aria-busy');
+      });
+      setControlsEnabled(currentDevice);
+    }
+
+    function writeLog(status, message, detail = '') {
+      logs.unshift({
+        time: formatLogTime(),
+        status,
+        message,
+        detail,
+      });
+      logs.splice(80);
+      renderLogs();
+    }
+
+    function renderLogs() {
+      if (!logs.length) {
+        log.innerHTML = '<div class="empty-log">暂无命令日志。发送命令后会在这里显示等待确认和 ACK 结果。</div>';
+        return;
+      }
+      const label = { ok: '成功', pending: '等待确认', bad: '失败' };
+      log.innerHTML = logs.map((item) => `
+        <div class="log-entry">
+          <span class="log-time">${escapeHtml(item.time)}</span>
+          <span class="log-status ${escapeHtml(item.status)}">${escapeHtml(label[item.status] || item.status)}</span>
+          <span class="log-message">${escapeHtml(item.message)}${item.detail ? ` · ${escapeHtml(item.detail)}` : ''}</span>
+        </div>
+      `).join('');
+    }
+
+    function handleAck(ack) {
+      if (!ack || ack.command_id === lastAckId) {
+        return;
+      }
+      lastAckId = ack.command_id;
+      if (activeCommandId && ack.command_id === activeCommandId) {
+        clearCommandBusy(ack.command_id);
+      }
+      writeLog(ack.ok ? 'ok' : 'bad',
+        `${commandNames[ack.type] || ack.type || '命令'} ${ack.command_id || ''}`,
+        ack.message || '');
+    }
+
+    function render(device) {
+      currentDevice = device;
+      renderDeviceStrip(device);
+      renderStatusTable(device);
+      setControlsEnabled(device);
+      if (Array.isArray(device?.ack_log) && device.ack_log[0]) {
+        handleAck(device.ack_log[0]);
+      }
+    }
+
+    async function refresh() {
+      const res = await fetch(`/api/devices/${DEVICE_ID}/status`);
+      const data = await res.json();
+      render(data.device);
+    }
+
+    async function sendCommand(type) {
+      if (busyCommandType) {
+        return;
+      }
+      const args = {};
+      if (type === 'set_wifi_mode') args.mode = document.querySelector('#wifiMode').value;
+      if (type === 'set_uart_baud') args.baud = Number(document.querySelector('#uartBaud').value);
+      if (type === 'set_comm_mode') args.mode = document.querySelector('#commMode').value;
+      if (type === 'display_text') args.text = document.querySelector('#displayText').value;
+
+      setCommandBusy(type);
+      try {
+        const res = await fetch(`/api/devices/${DEVICE_ID}/command`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type, args }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          throw new Error(data.message || '命令下发失败');
+        }
+        if (lastAckId === data.command.command_id) {
+          clearCommandBusy(data.command.command_id);
+        } else {
+          setCommandBusy(type, data.command.command_id);
+          writeLog('pending', `${commandNames[type] || type} ${data.command.command_id}`, '等待设备 ACK');
+        }
+        await refresh();
+      } catch (err) {
+        clearCommandBusy();
+        writeLog('bad', commandNames[type] || type, err.message);
+      }
+    }
+
+    commandButtons.forEach((button) => {
+      button.addEventListener('click', () => sendCommand(button.dataset.command));
+    });
+
+    document.querySelector('#clearLog').addEventListener('click', () => {
+      logs.splice(0);
+      renderLogs();
+    });
+
+    const events = new EventSource('/events');
+    events.addEventListener('status', (ev) => render(JSON.parse(ev.data)));
+    events.addEventListener('availability', (ev) => render(JSON.parse(ev.data)));
+    events.addEventListener('ack', (ev) => render(JSON.parse(ev.data).device));
+    events.addEventListener('devices', (ev) => {
+      const device = JSON.parse(ev.data).find((item) => item.device_id === DEVICE_ID);
+      if (device) render(device);
+    });
+    events.addEventListener('broker', (ev) => {
+      const data = JSON.parse(ev.data);
+      if (!currentDevice) {
+        render({ device_id: DEVICE_ID, broker_connected: data.connected, online: false });
+      } else {
+        render({ ...currentDevice, broker_connected: data.connected });
+      }
+    });
+
+    renderLogs();
+    refresh().catch((err) => writeLog('bad', '页面初始化', err.message));
+    setInterval(refresh, 5000);
+  </script>
+</body>
+</html>

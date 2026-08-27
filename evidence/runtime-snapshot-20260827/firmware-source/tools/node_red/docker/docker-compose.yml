@@ -1,0 +1,17 @@
+services:
+  wireless-debug-node-red:
+    image: nodered/node-red:latest
+    container_name: wireless-debug-node-red
+    restart: unless-stopped
+    user: root
+    ports:
+      - "1880:1880"
+    environment:
+      TZ: Etc/UTC
+      NO_PROXY: "127.0.0.1,localhost,192.168.4.1"
+      no_proxy: "127.0.0.1,localhost,192.168.4.1"
+    volumes:
+      - /home/sunqi39/.node-red:/data
+      - /mnt/d/Users/sunqi39/Desktop/wireless_debug-main:/mnt/d/Users/sunqi39/Desktop/wireless_debug-main:ro
+    devices:
+      - /dev/ttyS4:/dev/ttyS4

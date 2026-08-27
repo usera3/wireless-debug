@@ -1,0 +1,106 @@
+--- a/esp_websocket_client.c
++++ b/esp_websocket_client.c
+@@ -160,0 +161 @@
++    esp_websocket_client_tx_diagnostics_t tx_diagnostics;
+@@ -167,0 +169,23 @@
++static uint32_t tx_diag_elapsed_us(int64_t started_us)
++{
++    int64_t elapsed_us = esp_timer_get_time() - started_us;
++    if (elapsed_us <= 0) {
++        return 0;
++    }
++    return elapsed_us > UINT32_MAX ? UINT32_MAX : (uint32_t)elapsed_us;
++}
++
++static void tx_diag_note_max(uint32_t *target, uint32_t value)
++{
++    uint32_t current = __atomic_load_n(target, __ATOMIC_RELAXED);
++    while (value > current &&
++           !__atomic_compare_exchange_n(target, &current, value, true,
++                                        __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
++    }
++}
++
++static void tx_diag_increment(uint32_t *target)
++{
++    (void)__atomic_fetch_add(target, 1U, __ATOMIC_RELAXED);
++}
++
+@@ -704,0 +729 @@
++    int64_t data_lock_started_us = esp_timer_get_time();
+@@ -705,0 +731,3 @@
++        tx_diag_note_max(&client->tx_diagnostics.data_lock_wait_max_us,
++                         tx_diag_elapsed_us(data_lock_started_us));
++        tx_diag_increment(&client->tx_diagnostics.data_lock_timeouts);
+@@ -708,0 +737,2 @@
++    tx_diag_note_max(&client->tx_diagnostics.data_lock_wait_max_us,
++                     tx_diag_elapsed_us(data_lock_started_us));
+@@ -729,0 +760 @@
++        int64_t transport_send_started_us = esp_timer_get_time();
+@@ -731,0 +763,2 @@
++        tx_diag_note_max(&client->tx_diagnostics.transport_send_max_us,
++                         tx_diag_elapsed_us(transport_send_started_us));
+@@ -1269,0 +1303 @@
++                    int64_t ping_lock_started_us = esp_timer_get_time();
+@@ -1270,0 +1305,3 @@
++                        tx_diag_note_max(&client->tx_diagnostics.ping_lock_wait_max_us,
++                                         tx_diag_elapsed_us(ping_lock_started_us));
++                        tx_diag_increment(&client->tx_diagnostics.ping_lock_timeouts);
+@@ -1274,0 +1312,2 @@
++                    tx_diag_note_max(&client->tx_diagnostics.ping_lock_wait_max_us,
++                                     tx_diag_elapsed_us(ping_lock_started_us));
+@@ -1285,0 +1325 @@
++                    int64_t ping_send_started_us = esp_timer_get_time();
+@@ -1286,0 +1327,2 @@
++                    tx_diag_note_max(&client->tx_diagnostics.ping_send_max_us,
++                                     tx_diag_elapsed_us(ping_send_started_us));
+@@ -1565,0 +1608,23 @@
++}
++
++esp_err_t esp_websocket_client_get_tx_diagnostics(
++    esp_websocket_client_handle_t client,
++    esp_websocket_client_tx_diagnostics_t *out)
++{
++    if (client == NULL || out == NULL) {
++        return ESP_ERR_INVALID_ARG;
++    }
++
++    out->data_lock_wait_max_us = __atomic_load_n(
++        &client->tx_diagnostics.data_lock_wait_max_us, __ATOMIC_RELAXED);
++    out->data_lock_timeouts = __atomic_load_n(
++        &client->tx_diagnostics.data_lock_timeouts, __ATOMIC_RELAXED);
++    out->transport_send_max_us = __atomic_load_n(
++        &client->tx_diagnostics.transport_send_max_us, __ATOMIC_RELAXED);
++    out->ping_lock_wait_max_us = __atomic_load_n(
++        &client->tx_diagnostics.ping_lock_wait_max_us, __ATOMIC_RELAXED);
++    out->ping_lock_timeouts = __atomic_load_n(
++        &client->tx_diagnostics.ping_lock_timeouts, __ATOMIC_RELAXED);
++    out->ping_send_max_us = __atomic_load_n(
++        &client->tx_diagnostics.ping_send_max_us, __ATOMIC_RELAXED);
++    return ESP_OK;
+--- a/include/esp_websocket_client.h
++++ b/include/esp_websocket_client.h
+@@ -80,0 +81,10 @@
++/** Read-only timing counters for diagnosing WebSocket transmit stalls. */
++typedef struct {
++    uint32_t data_lock_wait_max_us;
++    uint32_t data_lock_timeouts;
++    uint32_t transport_send_max_us;
++    uint32_t ping_lock_wait_max_us;
++    uint32_t ping_lock_timeouts;
++    uint32_t ping_send_max_us;
++} esp_websocket_client_tx_diagnostics_t;
++
+@@ -422,0 +433,12 @@
++
++/**
++ * @brief Copy cumulative per-client transmit timing diagnostics.
++ *
++ * @param[in]  client WebSocket client handle
++ * @param[out] out    Destination for the current counters
++ *
++ * @return ESP_OK, or ESP_ERR_INVALID_ARG for a null argument
++ */
++esp_err_t esp_websocket_client_get_tx_diagnostics(
++    esp_websocket_client_handle_t client,
++    esp_websocket_client_tx_diagnostics_t *out);
