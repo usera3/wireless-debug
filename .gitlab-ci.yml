@@ -1,0 +1,8 @@
+stages:
+  - test
+
+repository_hygiene:
+  stage: test
+  script:
+    - python3 scripts/repository_hygiene_check.py
+    - python3 scripts/repository_hygiene_check_regression.py

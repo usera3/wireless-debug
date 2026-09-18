@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:18-alpine}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-wireless_debug}
+      POSTGRES_USER: ${POSTGRES_USER:-wireless_debug}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wireless_debug}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wireless_debug} -d ${POSTGRES_DB:-wireless_debug}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mosquitto:
+    image: ${MOSQUITTO_IMAGE:-eclipse-mosquitto:2}
+    restart: unless-stopped
+    ports:
+      - "${MQTT_PORT:-1883}:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  nodered:
+    build:
+      context: ./nodered
+      args:
+        NODERED_BASE_IMAGE: ${NODERED_BASE_IMAGE:-nodered/node-red:latest}
+        NPM_REGISTRY: ${NPM_REGISTRY:-}
+    restart: unless-stopped
+    environment:
+      TZ: Etc/UTC
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-wireless_debug}
+      POSTGRES_USER: ${POSTGRES_USER:-wireless_debug}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wireless_debug}
+      POSTGRES_POOL_MAX: ${POSTGRES_POOL_MAX:-10}
+      NODE_RED_CREDENTIAL_SECRET: ${NODE_RED_CREDENTIAL_SECRET:-wireless-debug-node-red}
+      CLOUD_HTTP_USER: ${CLOUD_HTTP_USER:-}
+      CLOUD_HTTP_PASSWORD_HASH: ${CLOUD_HTTP_PASSWORD_HASH:-}
+    ports:
+      - "${NODERED_PORT:-1880}:1880"
+    volumes:
+      - nodered_data:/data
+      - ./nodered/flows.json:/data/flows.json:ro
+      - ./nodered/settings.js:/data/settings.js:ro
+      - ./nodered/public:/data/public:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+
+volumes:
+  pgdata:
+  nodered_data:

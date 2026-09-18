@@ -1,0 +1,14 @@
+{
+  "name": "wireless-debug-remote-mqtt",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "mock": "node src/mock_device.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "mqtt": "^5.10.1"
+  }
+}
