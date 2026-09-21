@@ -41,6 +41,8 @@ static const char *s_usb_strings[] = {
     "Midea",
     "Wireless Debug USB Network",
     s_usb_serial,
+    "Wireless Debug NCM",
+    "",
 };
 
 static const tusb_desc_device_t s_usb_device_descriptor = {

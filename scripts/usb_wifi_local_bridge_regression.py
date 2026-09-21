@@ -75,6 +75,16 @@ class UsbWifiLocalBridgeRegression(unittest.TestCase):
                 self.assertIn(symbol, source)
         self.assertNotIn("esp_netif_destroy", source)
 
+    def test_usb_string_table_covers_ncm_interface_and_mac_indices(self):
+        source = (MAIN / "local_access_bridge.c").read_text(encoding="utf-8")
+        table = source.split("static const char *s_usb_strings[] = {", 1)[1]
+        table = table.split("};", 1)[0]
+        self.assertIn('"Wireless Debug NCM"', table)
+        self.assertRegex(
+            table,
+            r's_usb_serial,\s*"Wireless Debug NCM",\s*"",',
+        )
+
     def test_usb_host_and_bridge_use_distinct_locally_administered_macs(self):
         source = (MAIN / "local_access_bridge.c").read_text(encoding="utf-8")
         self.assertIn("uint8_t ncm_mac[6]", source)
