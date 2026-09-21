@@ -18,3 +18,4 @@ dependencies:
   espressif/mqtt: ^1.0.0
   espressif/cjson: '*'
   espressif/esp_websocket_client: ^1.7.0
+  espressif/esp_tinyusb: ^2.0.0

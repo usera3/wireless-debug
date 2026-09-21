@@ -21,17 +21,20 @@ WiFi provisioning and SoftAP continuity fixes documented below.
 | UART RX | GPIO9 |
 | Default baud | 2 Mbps |
 | OLED | SSD1315, 128x64, I2C |
-| OLED SCL | GPIO19 |
-| OLED SDA | GPIO20 |
+| OLED SCL | GPIO4 |
+| OLED SDA | GPIO5 |
 | OLED I2C address | 0x3C |
 | Button S4 | GPIO17, next item |
 | Button S5 | GPIO18, short press OK, long press back |
+| Native USB D- | GPIO19, fixed by ESP32-S3 |
+| Native USB D+ | GPIO20, fixed by ESP32-S3 |
 
 The OLED hardware backend is enabled by default. The current board requires removing the bootloader jumper after flashing before the application can run normally.
 
 ## Web Entry
 
-When the board starts in AP mode:
+USB NCM and WiFi SoftAP share one local bridge. Either connection reaches the
+same URLs; no Web UI mode selector is required:
 
 | Page | URL |
 |------|-----|
@@ -40,6 +43,25 @@ When the board starts in AP mode:
 | WebSocket tunnel | `ws://192.168.4.1/ws` |
 
 The root path redirects to `/orig/i.html`.
+
+### USB and OLED wiring on ESP32-S3 DevKit
+
+- Connect the PC data cable to the board's native USB/OTG connector for NCM.
+- Keep the USB-UART connector (or an external USB-UART adapter) for flashing and logs.
+- Move OLED SCL from GPIO19 to GPIO4.
+- Move OLED SDA from GPIO20 to GPIO5.
+- OLED VCC and GND do not change.
+
+GPIO19/20 cannot be shared with the OLED because the ESP32-S3 internal USB PHY
+fixes those pins as D-/D+. Windows uses its inbox NCM driver through the
+firmware's Microsoft OS 2.0 descriptor.
+
+The bridge alone owns `192.168.4.1/24` and the DHCP server. Its USB and SoftAP
+ports have no separate IP address, while WiFi STA remains an independent cloud
+uplink. The local DHCP server publishes no default gateway, so connecting the
+board does not replace the PC's normal Internet route. ESP-IDF advertises the
+bridge itself as DNS; a small proxy forwards requests through the cloud STA
+when available and fails fast when there is no upstream DNS.
 
 ## WiFi Scan Stability
 
@@ -67,7 +89,8 @@ reconnect is acceptable.
 
 - UART transparent transmission through BLE or WiFi.
 - BLE SPP service based on NimBLE.
-- WiFi AP / STA mode switching.
+- WiFi AP / STA uplink mode switching while the local SoftAP remains available.
+- Native USB NCM and WiFi SoftAP access through the same `192.168.4.1` bridge.
 - WiFi scan, quick connect, password provisioning page, and saved STA credentials in NVS.
 - WebSocket binary UART tunnel.
 - Runtime UART baud-rate switching.
@@ -88,6 +111,9 @@ wireless_debug-main/
 │   ├── app_core.*          # shared runtime state
 │   ├── uart_transport.*    # UART driver, RX frame assembly, TX
 │   ├── wifi_manager.*      # AP/STA mode, scan, connect, NVS credentials
+│   ├── local_access_bridge.* # USB NCM + SoftAP bridge and DHCP owner
+│   ├── local_dns_proxy.*   # DNS forwarding through the active cloud STA
+│   ├── usb_ncm_windows.*   # Windows WINNCM descriptors
 │   ├── wifi_transport.*    # WebSocket UART tunnel
 │   ├── ble_transport.*     # BLE SPP transport
 │   ├── router_service.*    # UART/BLE/WiFi frame routing
@@ -175,8 +201,8 @@ Current defaults are defined in `main/display_port.h`:
 #define DISPLAY_WIDTH 128
 #define DISPLAY_HEIGHT 64
 #define DISPLAY_SSD1315_I2C_PORT 0
-#define DISPLAY_SSD1315_SCL_GPIO 19
-#define DISPLAY_SSD1315_SDA_GPIO 20
+#define DISPLAY_SSD1315_SCL_GPIO 4
+#define DISPLAY_SSD1315_SDA_GPIO 5
 #define DISPLAY_SSD1315_I2C_ADDR 0x3C
 #define DISPLAY_SSD1315_I2C_HZ 400000
 #define DISPLAY_SSD1315_COLUMN_OFFSET 2
@@ -299,7 +325,7 @@ and the board's `wifi.html` and `orig/a.js` matched the local SPIFFS sources.
 
 ## HTTP API
 
-Base URL in AP mode:
+Base URL over either WiFi SoftAP or native USB NCM:
 
 ```text
 http://192.168.4.1

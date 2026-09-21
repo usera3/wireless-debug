@@ -68,8 +68,10 @@ assert.ok(wifiManager.includes('static system_net_mode_t s_connect_target_mode =
 
 assert.ok(/static esp_err_t start_ap_locked\(void\)[\s\S]*?esp_wifi_set_mode\(WIFI_MODE_AP\)/.test(wifiManager),
   'AP mode must use true WIFI_MODE_AP');
-assert.ok(/static esp_err_t start_sta_locked\(void\)[\s\S]*?esp_wifi_set_mode\(WIFI_MODE_STA\)/.test(wifiManager),
-  'STA mode must use true WIFI_MODE_STA');
+assert.ok(/static esp_err_t start_sta_locked\(void\)[\s\S]*?esp_wifi_set_mode\(WIFI_MODE_APSTA\)/.test(wifiManager),
+  'logical STA mode must retain the SoftAP bridge port through WIFI_MODE_APSTA');
+assert.ok(!/static esp_err_t start_sta_locked\(void\)[\s\S]*?esp_wifi_set_mode\(WIFI_MODE_STA\)/.test(wifiManager),
+  'logical STA mode must not tear down the SoftAP bridge port');
 assert.ok(/static esp_err_t start_apsta_locked\(void\)[\s\S]*?esp_wifi_set_mode\(WIFI_MODE_APSTA\)/.test(wifiManager),
   'APSTA mode must use true WIFI_MODE_APSTA');
 assert.ok(/sta_fallback_timer_cb[\s\S]*?schedule_auto_scan_locked\(WIFI_MANAGER_AUTO_SCAN_IMMEDIATE_MS\)/.test(wifiManager),

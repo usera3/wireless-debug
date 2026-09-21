@@ -36,6 +36,7 @@
 #include "display_port.h"
 #include "health_reporter.h"
 #include "input_buttons.h"
+#include "local_access_bridge.h"
 #include "motor_diag.h"
 #include "router_service.h"
 #include "system_menu.h"
@@ -958,6 +959,7 @@ void app_main(void)
     #if CONFIG_ENABLE_WIFI
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    ESP_ERROR_CHECK(local_access_bridge_init());
     #endif
 
     /* ---------------------------------------------------------

@@ -1,4 +1,5 @@
 #include "wifi_manager.h"
+#include "local_access_bridge.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -141,7 +142,8 @@ static void unlock_mode(void)
 
 static bool auto_scan_ap_service_active_locked(void)
 {
-    return s_net_mode == SYSTEM_NET_AP || s_net_mode == SYSTEM_NET_APSTA;
+    /* Native USB bridging requires its Wi-Fi bridge port to stay running. */
+    return s_driver_started;
 }
 
 static uint8_t ap_client_count(void)
@@ -234,45 +236,6 @@ static void restore_pending_sta_config_locked(void)
         snprintf(s_sta_pass, sizeof(s_sta_pass), "%s", s_restore_sta_pass);
     }
     clear_pending_save_locked();
-}
-
-static esp_err_t configure_ap_netif_no_gateway(void)
-{
-    if (s_ap_netif == NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    esp_err_t ret = esp_netif_dhcps_stop(s_ap_netif);
-    if (ret != ESP_OK && ret != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
-        return ret;
-    }
-
-    esp_netif_ip_info_t ip_info;
-    ret = esp_netif_get_ip_info(s_ap_netif, &ip_info);
-    if (ret != ESP_OK) {
-        return ret;
-    }
-    ip_info.gw.addr = 0;
-    ret = esp_netif_set_ip_info(s_ap_netif, &ip_info);
-    if (ret != ESP_OK) {
-        return ret;
-    }
-
-    esp_netif_dns_info_t dns_zero = {
-        .ip = {
-            .type = ESP_IPADDR_TYPE_V4,
-            .u_addr.ip4.addr = 0,
-        },
-    };
-    (void)esp_netif_set_dns_info(s_ap_netif, ESP_NETIF_DNS_MAIN, &dns_zero);
-    (void)esp_netif_set_dns_info(s_ap_netif, ESP_NETIF_DNS_BACKUP, &dns_zero);
-    (void)esp_netif_set_dns_info(s_ap_netif, ESP_NETIF_DNS_FALLBACK, &dns_zero);
-
-    ret = esp_netif_dhcps_start(s_ap_netif);
-    if (ret == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
-        return ESP_OK;
-    }
-    return ret;
 }
 
 bool wifi_manager_has_sta_config(void)
@@ -809,7 +772,12 @@ static esp_err_t start_sta_locked(void)
     s_sta_connected = false;
     snprintf(s_sta_ip, sizeof(s_sta_ip), "-");
 
-    esp_err_t ret = esp_wifi_set_mode(WIFI_MODE_STA);
+    /* Keep the local AP bridge port alive; STA is the selected uplink mode. */
+    esp_err_t ret = esp_wifi_set_mode(WIFI_MODE_APSTA);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+    ret = configure_ap_locked();
     if (ret != ESP_OK) {
         return ret;
     }
@@ -1397,13 +1365,6 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                 }
             }
         }
-        if (target_mode == SYSTEM_NET_STA) {
-            esp_err_t mode_ret = esp_wifi_set_mode(WIFI_MODE_STA);
-            if (mode_ret != ESP_OK) {
-                ESP_LOGW(TAG, "Failed to finalize true STA mode: %s",
-                         esp_err_to_name(mode_ret));
-            }
-        }
         ESP_LOGI(TAG, "STA got IP: %s", s_sta_ip);
         report_net_mode(target_mode == SYSTEM_NET_STA ? SYSTEM_NET_STA : SYSTEM_NET_APSTA);
         report_message(target_mode == SYSTEM_NET_STA ? "STA CONNECTED" : "APSTA CONNECTED");
@@ -1441,22 +1402,19 @@ esp_err_t wifi_manager_init(const wifi_manager_config_t *config)
     }
 
     s_config = *config;
-    s_ap_netif = esp_netif_create_default_wifi_ap();
+    s_ap_netif = local_access_bridge_ap_netif();
+    if (s_ap_netif == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
     s_sta_netif = esp_netif_create_default_wifi_sta();
     (void)s_sta_netif;
-
-    esp_err_t ret = configure_ap_netif_no_gateway();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to configure AP DHCP gateway/DNS: %s",
-                 esp_err_to_name(ret));
-    }
 
     s_mode_mutex = xSemaphoreCreateMutex();
     if (s_mode_mutex == NULL) {
         return ESP_ERR_NO_MEM;
     }
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ret = esp_wifi_init(&cfg);
+    esp_err_t ret = esp_wifi_init(&cfg);
     if (ret != ESP_OK) {
         return ret;
     }
