@@ -11,6 +11,143 @@ MAIN = ROOT / "main"
 
 
 class UsbWifiLocalBridgeRegression(unittest.TestCase):
+    def test_dhcp_hooks_scope_android_gateway_to_the_usb_ingress_mac(self):
+        for path in (
+            MAIN / "project_include.cmake",
+            MAIN / "lwip_hooks" / "local_usb_dhcp_hooks.h",
+            MAIN / "local_usb_dhcp_hooks.c",
+        ):
+            self.assertTrue(path.is_file(), f"missing {path.relative_to(MAIN)}")
+        cmake = (MAIN / "CMakeLists.txt").read_text(encoding="utf-8")
+        project_hook = (MAIN / "project_include.cmake").read_text(encoding="utf-8")
+        hook_header = (MAIN / "lwip_hooks" / "local_usb_dhcp_hooks.h").read_text(
+            encoding="utf-8"
+        )
+        hook_source = (MAIN / "local_usb_dhcp_hooks.c").read_text(encoding="utf-8")
+        bridge = (MAIN / "local_access_bridge.c").read_text(encoding="utf-8")
+
+        for source in ("local_usb_dhcp_policy.c", "local_usb_dhcp_hooks.c"):
+            self.assertIn(source, cmake)
+        self.assertIn("WHOLE_ARCHIVE", cmake)
+        self.assertIn("ESP_IDF_LWIP_HOOK_FILENAME", project_hook)
+        self.assertIn("local_usb_dhcp_hooks.h", project_hook)
+        self.assertIn("LWIP_HOOK_DHCPS_POST_STATE", hook_header)
+        self.assertIn("LWIP_HOOK_DHCPS_POST_APPEND_OPTS", hook_header)
+        self.assertIn("local_usb_dhcp_policy_should_offer_router", hook_source)
+        self.assertIn("DHCP_OPTION_ROUTER", hook_source)
+        self.assertIn("local_usb_dhcp_policy_note_frame(buffer, len)", bridge)
+        self.assertIn("local_usb_dhcp_policy_reset()", bridge)
+        self.assertRegex(bridge, r"\.gw\s*=\s*\{\.addr\s*=\s*0\}")
+
+    def test_android_gateway_policy_uses_aosp_dhcp_fingerprint_on_usb(self):
+        module = MAIN / "local_usb_dhcp_policy.c"
+        checker = r'''
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+#include "local_usb_dhcp_policy.h"
+
+static void make_frame(uint8_t frame[14], const uint8_t source[6]) {
+    memset(frame, 0, 14);
+    memcpy(frame + 6, source, 6);
+}
+
+int main(void) {
+    const uint8_t usb_android[6] = {0x02, 0x11, 0x22, 0x33, 0x44, 0x55};
+    const uint8_t wifi_android[6] = {0x02, 0xaa, 0xbb, 0xcc, 0xdd, 0xee};
+    uint8_t frame[14];
+    const uint8_t android_options[] = {
+        0, 53, 1, 1,
+        60, 15, 'a','n','d','r','o','i','d','-','d','h','c','p','-','1','6',
+        255
+    };
+    const uint8_t windows_options[] = {
+        53, 1, 1, 60, 8, 'M','S','F','T',' ','5','.','0', 255
+    };
+    const uint8_t observed_android_options[] = {
+        53, 1, 1,
+        60, 9, 'd','h','c','p','c','d','-','1','6',
+        12, 7, 'p','h','o','n','e','-','1',
+        55, 10, 1, 3, 6, 15, 26, 28, 51, 58, 59, 108,
+        255
+    };
+    const uint8_t older_aosp_options[] = {
+        53, 1, 1,
+        55, 10, 1, 3, 6, 15, 26, 28, 51, 58, 59, 43,
+        255
+    };
+    const uint8_t current_aosp_options[] = {
+        53, 1, 1,
+        55, 12, 1, 3, 6, 15, 26, 28, 51, 58, 59, 43, 114, 108,
+        255
+    };
+    const uint8_t linux_dhcpcd_options[] = {
+        53, 1, 1,
+        60, 9, 'd','h','c','p','c','d','-','1','6',
+        55, 13, 1, 121, 33, 3, 6, 15, 28, 51, 54, 58, 59, 119, 26,
+        255
+    };
+    const uint8_t aosp_prefix_without_android_marker[] = {
+        53, 1, 1,
+        55, 10, 1, 3, 6, 15, 26, 28, 51, 58, 59, 12,
+        255
+    };
+    const uint8_t malformed_options[] = {60, 20, 'a', 'n', 'd', 255};
+
+    local_usb_dhcp_policy_reset();
+    make_frame(frame, usb_android);
+    local_usb_dhcp_policy_note_frame(frame, sizeof(frame));
+
+    if (!local_usb_dhcp_policy_should_offer_router(
+            usb_android, android_options, sizeof(android_options))) return 1;
+    if (local_usb_dhcp_policy_should_offer_router(
+            wifi_android, android_options, sizeof(android_options))) return 2;
+    if (local_usb_dhcp_policy_should_offer_router(
+            usb_android, windows_options, sizeof(windows_options))) return 3;
+    if (local_usb_dhcp_policy_should_offer_router(
+            usb_android, malformed_options, sizeof(malformed_options))) return 4;
+    if (!local_usb_dhcp_policy_should_offer_router(
+            usb_android, observed_android_options,
+            sizeof(observed_android_options))) return 6;
+    if (!local_usb_dhcp_policy_should_offer_router(
+            usb_android, older_aosp_options,
+            sizeof(older_aosp_options))) return 7;
+    if (!local_usb_dhcp_policy_should_offer_router(
+            usb_android, current_aosp_options,
+            sizeof(current_aosp_options))) return 8;
+    if (local_usb_dhcp_policy_should_offer_router(
+            usb_android, linux_dhcpcd_options,
+            sizeof(linux_dhcpcd_options))) return 9;
+    if (local_usb_dhcp_policy_should_offer_router(
+            usb_android, aosp_prefix_without_android_marker,
+            sizeof(aosp_prefix_without_android_marker))) return 10;
+
+    local_usb_dhcp_policy_reset();
+    if (local_usb_dhcp_policy_should_offer_router(
+            usb_android, android_options, sizeof(android_options))) return 5;
+    return 0;
+}
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "android_gateway_policy_check"
+            compiled = subprocess.run(
+                [
+                    "gcc", "-std=c11", "-Wall", "-Wextra", "-Werror",
+                    "-I", str(MAIN), "-x", "c", "-", "-x", "none",
+                    str(module), "-o", str(executable),
+                ],
+                input=checker,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            checked = subprocess.run(
+                [str(executable)], capture_output=True, text=True, check=False
+            )
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+
     def test_component_and_build_configuration_enable_ncm_bridge(self):
         cmake = (MAIN / "CMakeLists.txt").read_text(encoding="utf-8")
         manifest = (MAIN / "idf_component.yml").read_text(encoding="utf-8")
@@ -82,8 +219,63 @@ class UsbWifiLocalBridgeRegression(unittest.TestCase):
         self.assertIn('"Wireless Debug NCM"', table)
         self.assertRegex(
             table,
-            r's_usb_serial,\s*"Wireless Debug NCM",\s*"",',
+            r's_usb_serial,\s*"Wireless Debug NCM",\s*s_usb_mac_string,',
         )
+
+    def test_usb_identity_is_complete_before_the_device_connects(self):
+        source = (MAIN / "local_access_bridge.c").read_text(encoding="utf-8")
+        start_usb = source.split("static esp_err_t start_usb_port", 1)[1]
+        start_usb = start_usb.split("static esp_err_t create_wifi_ap_port", 1)[0]
+
+        self.assertIn("static char s_usb_mac_string[USB_MAC_STRING_LENGTH]", source)
+        self.assertIn("snprintf(s_usb_mac_string", start_usb)
+        self.assertLess(start_usb.index("snprintf(s_usb_mac_string"),
+                        start_usb.index("tinyusb_driver_install"))
+
+    def test_ncm_state_is_initialized_before_tinyusb_exposes_descriptors(self):
+        source = (MAIN / "local_access_bridge.c").read_text(encoding="utf-8")
+        start_usb = source.split("static esp_err_t start_usb_port", 1)[1]
+        start_usb = start_usb.split("static esp_err_t create_wifi_ap_port", 1)[0]
+        self.assertLess(start_usb.index("tinyusb_net_init"),
+                        start_usb.index("tinyusb_driver_install"))
+
+    def test_usb_uses_tinyusb_standard_attach_without_forced_reenumeration(self):
+        source = (MAIN / "local_access_bridge.c").read_text(encoding="utf-8")
+        start_usb = source.split("static esp_err_t start_usb_port", 1)[1]
+        start_usb = start_usb.split("static esp_err_t create_wifi_ap_port", 1)[0]
+
+        for symbol in ("USB_REENUMERATE_DELAY_MS", "tud_disconnect()",
+                       "tud_connect()"):
+            with self.subTest(symbol=symbol):
+                self.assertNotIn(symbol, source)
+
+    def test_ncm_device_descriptor_uses_iad_class_and_new_revision(self):
+        source = (MAIN / "local_access_bridge.c").read_text(encoding="utf-8")
+        descriptor = source.split(
+            "static const tusb_desc_device_t s_usb_device_descriptor", 1
+        )[1].split("};", 1)[0]
+        for field in (
+            ".bDeviceClass = TUSB_CLASS_MISC",
+            ".bDeviceSubClass = MISC_SUBCLASS_COMMON",
+            ".bDeviceProtocol = MISC_PROTOCOL_IAD",
+            ".bcdDevice = 0x0201",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(field, descriptor)
+
+    def test_usb_stack_initializes_in_normal_application_sequence(self):
+        main = (MAIN / "main.c").read_text(encoding="utf-8")
+        app_main = main.split("void app_main(void)", 1)[1]
+        self.assertLess(app_main.index("app_core_init("),
+                        app_main.index("local_access_bridge_init()"))
+        self.assertLess(app_main.index("ble_spp_transport_init("),
+                        app_main.index("local_access_bridge_init()"))
+        self.assertLess(app_main.index("ui_controller_init("),
+                        app_main.index("local_access_bridge_init()"))
+
+    def test_wifi_initialization_preserves_the_usb_phy(self):
+        sdkconfig = (ROOT / "sdkconfig").read_text(encoding="utf-8")
+        self.assertIn("CONFIG_ESP_PHY_ENABLE_USB=y", sdkconfig)
 
     def test_usb_host_and_bridge_use_distinct_locally_administered_macs(self):
         source = (MAIN / "local_access_bridge.c").read_text(encoding="utf-8")

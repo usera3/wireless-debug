@@ -21,9 +21,11 @@
 #include "tusb.h"
 
 #include "local_dns_proxy.h"
+#include "local_usb_dhcp_policy.h"
 #include "usb_ncm_windows.h"
 
 #define USB_SERIAL_LENGTH 13
+#define USB_MAC_STRING_LENGTH 13
 
 static const char *TAG = "local_access";
 
@@ -34,6 +36,7 @@ static uint8_t s_usb_driver_token;
 static volatile bool s_usb_attached;
 static bool s_bridge_active;
 static char s_usb_serial[USB_SERIAL_LENGTH];
+static char s_usb_mac_string[USB_MAC_STRING_LENGTH];
 
 static const char s_usb_language[] = {0x09, 0x04};
 static const char *s_usb_strings[] = {
@@ -42,20 +45,20 @@ static const char *s_usb_strings[] = {
     "Wireless Debug USB Network",
     s_usb_serial,
     "Wireless Debug NCM",
-    "",
+    s_usb_mac_string,
 };
 
 static const tusb_desc_device_t s_usb_device_descriptor = {
     .bLength = sizeof(tusb_desc_device_t),
     .bDescriptorType = TUSB_DESC_DEVICE,
     .bcdUSB = 0x0201,
-    .bDeviceClass = 0,
-    .bDeviceSubClass = 0,
-    .bDeviceProtocol = 0,
+    .bDeviceClass = TUSB_CLASS_MISC,
+    .bDeviceSubClass = MISC_SUBCLASS_COMMON,
+    .bDeviceProtocol = MISC_PROTOCOL_IAD,
     .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
     .idVendor = TINYUSB_ESPRESSIF_VID,
     .idProduct = 0x4000,
-    .bcdDevice = 0x0200,
+    .bcdDevice = 0x0201,
     .iManufacturer = 1,
     .iProduct = 2,
     .iSerialNumber = 3,
@@ -103,9 +106,11 @@ static void usb_device_event(tinyusb_event_t *event, void *arg)
         return;
     }
     if (event->id == TINYUSB_EVENT_ATTACHED) {
+        local_usb_dhcp_policy_reset();
         s_usb_attached = true;
         ESP_LOGI(TAG, "USB host attached");
     } else if (event->id == TINYUSB_EVENT_DETACHED) {
+        local_usb_dhcp_policy_reset();
         s_usb_attached = false;
         ESP_LOGI(TAG, "USB host detached; Wi-Fi local access remains active");
     }
@@ -146,6 +151,8 @@ static esp_err_t usb_receive(void *buffer, uint16_t len, void *context)
         return ESP_OK;
     }
 
+    local_usb_dhcp_policy_note_frame(buffer, len);
+
     /* TinyUSB owns its RX buffer; lwIP receives a separately owned copy. */
     void *copy = malloc(len);
     if (copy == NULL) {
@@ -175,24 +182,29 @@ static esp_err_t start_usb_port(const uint8_t base_mac[6],
              "%02X%02X%02X%02X%02X%02X",
              base_mac[0], base_mac[1], base_mac[2],
              base_mac[3], base_mac[4], base_mac[5]);
-
-    tinyusb_config_t usb_config = TINYUSB_DEFAULT_CONFIG(usb_device_event);
-    usb_config.descriptor.device = &s_usb_device_descriptor;
-    usb_config.descriptor.string = s_usb_strings;
-    usb_config.descriptor.string_count =
-        sizeof(s_usb_strings) / sizeof(s_usb_strings[0]);
-    esp_err_t ret = tinyusb_driver_install(&usb_config);
-    if (ret != ESP_OK) {
-        return ret;
-    }
+    snprintf(s_usb_mac_string, sizeof(s_usb_mac_string),
+             "%02X%02X%02X%02X%02X%02X",
+             ncm_mac[0], ncm_mac[1], ncm_mac[2],
+             ncm_mac[3], ncm_mac[4], ncm_mac[5]);
 
     tinyusb_net_config_t ncm_config = {
         .on_recv_callback = usb_receive,
     };
     /* USB host and lwIP bridge are separate L2 peers and require unique MACs. */
     memcpy(ncm_config.mac_addr, ncm_mac, sizeof(ncm_config.mac_addr));
-    ret = tinyusb_net_init(&ncm_config);
+    esp_err_t ret = tinyusb_net_init(&ncm_config);
     if (ret != ESP_OK) {
+        return ret;
+    }
+
+    tinyusb_config_t usb_config = TINYUSB_DEFAULT_CONFIG(usb_device_event);
+    usb_config.descriptor.device = &s_usb_device_descriptor;
+    usb_config.descriptor.string = s_usb_strings;
+    usb_config.descriptor.string_count =
+        sizeof(s_usb_strings) / sizeof(s_usb_strings[0]);
+    ret = tinyusb_driver_install(&usb_config);
+    if (ret != ESP_OK) {
+        tinyusb_net_deinit();
         return ret;
     }
 

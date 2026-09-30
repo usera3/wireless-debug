@@ -58,10 +58,21 @@ firmware's Microsoft OS 2.0 descriptor.
 
 The bridge alone owns `192.168.4.1/24` and the DHCP server. Its USB and SoftAP
 ports have no separate IP address, while WiFi STA remains an independent cloud
-uplink. The local DHCP server publishes no default gateway, so connecting the
-board does not replace the PC's normal Internet route. ESP-IDF advertises the
+uplink. By default, the local DHCP server publishes no default gateway, so
+connecting the board does not replace the PC's normal Internet route. The only
+exception is a client whose DHCP request matches the Android vendor-class prefix
+or the cross-version AOSP NetworkStack parameter-request fingerprint, and whose
+MAC address has also been
+observed on the physical USB NCM ingress: that client receives `192.168.4.1` as
+its router so Android can select the USB network for local Web access. The
+policy does not depend on a phone brand, model, or hostname. WiFi clients and
+non-Android USB clients keep the no-gateway behavior. ESP-IDF advertises the
 bridge itself as DNS; a small proxy forwards requests through the cloud STA
 when available and fails fast when there is no upstream DNS.
+
+For implementation details, wiring, USB descriptors, Android DHCP behavior,
+platform-specific validation limits, and troubleshooting, read the
+[USB network technical guide (Word, Chinese)](docs/USB网络通信技术说明.docx).
 
 ## WiFi Scan Stability
 
@@ -112,6 +123,8 @@ wireless_debug-main/
 │   ├── uart_transport.*    # UART driver, RX frame assembly, TX
 │   ├── wifi_manager.*      # AP/STA mode, scan, connect, NVS credentials
 │   ├── local_access_bridge.* # USB NCM + SoftAP bridge and DHCP owner
+│   ├── local_usb_dhcp_policy.* # identify Android DHCP on physical USB ingress
+│   ├── local_usb_dhcp_hooks.*  # append the Android-only DHCP router option
 │   ├── local_dns_proxy.*   # DNS forwarding through the active cloud STA
 │   ├── usb_ncm_windows.*   # Windows WINNCM descriptors
 │   ├── wifi_transport.*    # WebSocket UART tunnel
