@@ -120,10 +120,9 @@ static bool options_identify_android(const uint8_t *options, size_t length)
     return has_android_vendor || has_android_parameter_list;
 }
 
-bool local_usb_dhcp_policy_should_offer_router(
-    const uint8_t client_mac[6], const uint8_t *options, size_t options_length)
+bool local_usb_dhcp_policy_is_usb_client(const uint8_t client_mac[6])
 {
-    if (client_mac == NULL || options == NULL) {
+    if (client_mac == NULL) {
         return false;
     }
 
@@ -135,6 +134,12 @@ bool local_usb_dhcp_policy_should_offer_router(
     POLICY_UNLOCK();
 
     return usb_host_mac_valid &&
-           memcmp(client_mac, usb_host_mac, sizeof(usb_host_mac)) == 0 &&
+           memcmp(client_mac, usb_host_mac, sizeof(usb_host_mac)) == 0;
+}
+
+bool local_usb_dhcp_policy_should_offer_router(
+    const uint8_t client_mac[6], const uint8_t *options, size_t options_length)
+{
+    return options != NULL && local_usb_dhcp_policy_is_usb_client(client_mac) &&
            options_identify_android(options, options_length);
 }

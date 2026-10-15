@@ -6,3 +6,4 @@ set(EXTRA_COMPONENT_DIRS
 )
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(uart_ble_wifi)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/usb_dhcp_recovery.cmake)

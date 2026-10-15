@@ -10,6 +10,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_netif_defaults.h"
+#include "esp_netif_net_stack.h"
 #include "esp_wifi.h"
 #include "esp_wifi_default.h"
 #include "freertos/FreeRTOS.h"
@@ -22,6 +23,9 @@
 
 #include "local_dns_proxy.h"
 #include "local_usb_dhcp_policy.h"
+#include "local_usb_dhcp_trace.h"
+#include "local_usb_dhcp_recovery.h"
+#include "lwip_hooks/local_usb_dhcp_hooks.h"
 #include "usb_ncm_windows.h"
 
 #define USB_SERIAL_LENGTH 13
@@ -107,10 +111,12 @@ static void usb_device_event(tinyusb_event_t *event, void *arg)
     }
     if (event->id == TINYUSB_EVENT_ATTACHED) {
         local_usb_dhcp_policy_reset();
+        local_usb_dhcp_recovery_reset_client();
         s_usb_attached = true;
         ESP_LOGI(TAG, "USB host attached");
     } else if (event->id == TINYUSB_EVENT_DETACHED) {
         local_usb_dhcp_policy_reset();
+        local_usb_dhcp_recovery_reset_client();
         s_usb_attached = false;
         ESP_LOGI(TAG, "USB host detached; Wi-Fi local access remains active");
     }
@@ -140,8 +146,10 @@ static esp_err_t usb_transmit(void *handle, void *buffer, size_t len)
     if (!tud_mounted()) {
         return ESP_OK;
     }
-    return tinyusb_net_send_sync(buffer, (uint16_t)len, NULL,
-                                 pdMS_TO_TICKS(100));
+    esp_err_t ret = tinyusb_net_send_sync(buffer, (uint16_t)len, NULL,
+                                        pdMS_TO_TICKS(100));
+    local_usb_dhcp_trace_log("TX", buffer, len, ret);
+    return ret;
 }
 
 static esp_err_t usb_receive(void *buffer, uint16_t len, void *context)
@@ -152,6 +160,8 @@ static esp_err_t usb_receive(void *buffer, uint16_t len, void *context)
     }
 
     local_usb_dhcp_policy_note_frame(buffer, len);
+    local_usb_dhcp_recovery_note_frame(buffer, len);
+    local_usb_dhcp_trace_log("RX", buffer, len, ESP_OK);
 
     /* TinyUSB owns its RX buffer; lwIP receives a separately owned copy. */
     void *copy = malloc(len);
@@ -303,6 +313,7 @@ static esp_err_t activate_bridge(void)
         return ret;
     }
 
+    local_usb_dhcps_bind_netif(esp_netif_get_netif_impl(s_bridge_netif));
     ret = esp_netif_dhcps_start(s_bridge_netif);
     if (ret == ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED) {
         ret = ESP_OK;
