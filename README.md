@@ -1,50 +1,56 @@
-# React + TypeScript + Vite
+# Wireless Debug Web
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## PC 串口：浏览器直连
 
-Currently, two official plugins are available:
+在提供 Web Serial API 的桌面 Chrome / Edge 中打开通过 HTTPS 或可信 localhost
+提供的设备控制台 `/index.html`。根路径 `/` 是云平台页面。
+本地串口直接使用浏览器 `navigator.serial`，无需启动 Python 或 Node.js 串口代理。
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+在“连接设置 → 本地串口”点击“选择并授权串口”，通过浏览器选择设备；设置波特率后
+点击“连接串口”。刷新列表只能显示这个站点已经授权的设备，不能扫描所有 COM 端口。
+默认 2000000 baud、8N1、无流控。更改波特率前必须断开连接。
+首次授权与连接由点击触发，页面加载、刷新列表不会自动打开串口。意外断开后，仅本页
+曾成功连接的原浏览器端口对象恢复时自动重连。若浏览器分配了新对象，显示“串口身份待确认”，
+需核对、选择端口并点击“确认所选串口并连接”；不会按相同 VID/PID 猜测设备身份，
+也不沿用旧设备备注。已授权端口无需再次弹窗；无法辨认时可主动打开授权弹窗核对系统名称。
+等待期间可点击“取消自动重连”。
 
-## Expanding the ESLint configuration
+“串口传输已连接”表示浏览器打开了串口，不代表下位机已响应。
+串口模式保留本地 Excel 参数表、示波器与下位机烧录页面；ESP32 Wi-Fi/BLE/设备文件
+操作在此模式不可用。ESP32 和云端仍使用原有 HTTP/WebSocket 入口。
+ESP32 USB NCM 虚拟网卡也走网络入口，与 COM/CDC/USB-UART 串口不同。
+拔出串口设备会停止采样并中止待处理协议请求，恢复连接不会重发旧命令或恢复采样。
+主动断开、烧录中断、权限失效或串口释放失败后需要手动连接。系统未识别出串口时，
+网页只能等待，不能修复 USB 枚举失败。
 
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
+权限、驱动、静态部署和 USB 拔插复验见 [浏览器串口说明](docs/browser-serial.md)。
+请使用独立浏览器打开控制台；IDE 或第三方 iframe 预览可能受到串口权限策略限制。
 
-- Configure the top-level `parserOptions` property like this:
+## 开发与验证
 
-```js
-export default tseslint.config({
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+开发者在项目目录运行 `npm run dev -- --host 127.0.0.1 --port 5679`，打开
+`http://127.0.0.1:5679/index.html`。Vite、Node.js 和构建命令属于开发工具，
+最终用户只需静态网页、支持的浏览器及串口驱动，不需要本地应用后端。
+
+开发者先执行 `npm ci` 安装项目依赖；浏览器测试环境按
+[测试说明](docs/browser-serial.md#可重复的软件验收) 单独准备。已有依赖环境下可运行：
+
+```bash
+npm run test:browser-serial             # transport、store、组件与协议验收；Vite 需先运行
+npm run build:web                      # 类型检查并生成静态 dist，不同步固件资源
+npm run test:browser-serial-static      # dist 的静态服务验收；无需 Vite/串口代理
 ```
 
-- Replace `tseslint.configs.recommended` to `tseslint.configs.recommendedTypeChecked` or `tseslint.configs.strictTypeChecked`
-- Optionally add `...tseslint.configs.stylisticTypeChecked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and update the config:
+浏览器测试复用外部 Playwright（可用 `PLAYWRIGHT_MODULE` 指定），仅替换操作系统串口
+API，使用真实 Streams、应用协议、历史数据和图表。它们是软件边界模拟，不能证明真实
+USB 拔插、驱动兼容性、MCU 采样或 Flash 写入已经通过。
 
-```js
-// eslint.config.js
-import react from 'eslint-plugin-react'
+## 交付范围
 
-export default tseslint.config({
-  // Set the react version
-  settings: { react: { version: '18.3' } },
-  plugins: {
-    // Add the react plugin
-    react,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended rules
-    ...react.configs.recommended.rules,
-    ...react.configs['jsx-runtime'].rules,
-  },
-})
-```
+此分支仅包含浏览器串口方案，不包含本地 Python 串口代理及其专用测试。
+网络 ESP32／云端入口继续保留；设备必须实现相应协议才能读参数、采样或烧录。
+
+网站交付使用完整 `dist/`。Node.js 只用于开发和构建，不是客户串口通信的运行依赖。
+完全离线的 Windows 免安装启动包尚未制作和验收；当前不能把双击 HTML、
+真实下位机烧录或所有 USB 拔插场景列为已验收功能。
+编译产物、依赖和本地诊断记录不提交到源码分支。
