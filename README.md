@@ -74,6 +74,11 @@ For implementation details, wiring, USB descriptors, Android DHCP behavior,
 platform-specific validation limits, and troubleshooting, read the
 [USB network technical guide (Word, Chinese)](docs/USB网络通信技术说明.docx).
 
+For the bounded USB DHCP address-recovery policy and its hardware validation
+limits, see [USB DHCP recovery](docs/USB_DHCP_RECOVERY.md). It preserves the
+shared `.1` address and normal renewal behavior; it is not a guarantee against
+overlapping subnets on the host.
+
 ## WiFi Scan Stability
 
 The WiFi provisioning page scans nearby APs while the PC is connected to the ESP32 SoftAP.
@@ -124,7 +129,8 @@ wireless_debug-main/
 │   ├── wifi_manager.*      # AP/STA mode, scan, connect, NVS credentials
 │   ├── local_access_bridge.* # USB NCM + SoftAP bridge and DHCP owner
 │   ├── local_usb_dhcp_policy.* # identify Android DHCP on physical USB ingress
-│   ├── local_usb_dhcp_hooks.*  # append the Android-only DHCP router option
+│   ├── local_usb_dhcp_hooks.*  # bridge-scoped recovery and Android router option
+│   ├── local_usb_dhcp_recovery.* # bounded USB candidate retry/quarantine policy
 │   ├── local_dns_proxy.*   # DNS forwarding through the active cloud STA
 │   ├── usb_ncm_windows.*   # Windows WINNCM descriptors
 │   ├── wifi_transport.*    # WebSocket UART tunnel
