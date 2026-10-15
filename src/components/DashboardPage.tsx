@@ -7,6 +7,7 @@ import { parseParameterTable } from '../lib/paramParser';
 import { apiFetch, currentConnectionTarget } from '../lib/apiClient';
 import { parameterSourcePolicy } from '../lib/parameterSourcePolicy';
 import { buildParameterUploadRequest } from '../lib/parameterFileUpload';
+import { useConnectionStore } from '../store/connectionStore';
 
 // 数码管风格的只读显示块
 function DigitDisplay({ label, value, unit }: { label: string; value: string; unit?: string }) {
@@ -33,7 +34,9 @@ export function DashboardPage() {
   const [showEspPicker, setShowEspPicker] = useState(false);
   const enabled = useParamStore((s) => s.dashboardEnabled);
   const setDashboardEnabled = useParamStore((s) => s.setDashboardEnabled);
-  const sourcePolicy = parameterSourcePolicy(currentConnectionTarget().kind);
+  const serialMode = useConnectionStore(s => s.serialMode);
+  const capabilities = useConnectionStore(s => s.adapter?.capabilities);
+  const sourcePolicy = parameterSourcePolicy(currentConnectionTarget().kind, serialMode ? { device_files: false } : capabilities);
 
   const { writeParam } = useDashboardPoller(enabled);
 
@@ -41,7 +44,7 @@ export function DashboardPage() {
     setLoading(true);
     try {
       const parsed = await parseParameterTable(file);
-      if (currentConnectionTarget().kind === 'cloud') {
+      if (sourcePolicy.allowRemoteUpload && currentConnectionTarget().kind === 'cloud') {
         const request = await buildParameterUploadRequest('/api/excel/upload', file);
         const { url, ...init } = request;
         const response = await apiFetch(url, init);
@@ -132,11 +135,13 @@ export function DashboardPage() {
   }
 
   async function handleStop() {
+    const revision = useConnectionStore.getState().revision;
     setValue('CmdSpd', 0);
     setValue('CmdTorq', 0);
     setSpdLocal(null);
     setTorqLocal(null);
     await writeParam('CmdSpd', 0);
+    if (useConnectionStore.getState().revision !== revision) return;
     await writeParam('CmdTorq', 0);
   }
 
@@ -173,13 +178,13 @@ export function DashboardPage() {
                 📂 本地参数表
               </button>
             )}
-            <button
+            {sourcePolicy.showRemoteFilePicker && <button
               onClick={() => setShowEspPicker(true)}
               disabled={loading}
               className="flex-1 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm transition-colors disabled:opacity-50"
             >
               📡 {sourcePolicy.remoteButtonLabel}
-            </button>
+            </button>}
           </div>
           {loading && <span className="text-xs text-yellow-400">解析中…</span>}
         </div>
@@ -336,7 +341,7 @@ export function DashboardPage() {
       </div>
 
       {/* ESP32 文件选择弹窗 */}
-      {showEspPicker && (
+      {showEspPicker && sourcePolicy.showRemoteFilePicker && (
         <EspFilePicker
           onFileReady={(file) => loadFile(file)}
           onClose={() => setShowEspPicker(false)}

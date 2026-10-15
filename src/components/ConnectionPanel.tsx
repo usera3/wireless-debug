@@ -4,10 +4,11 @@ import { BaudPicker } from './BaudPicker';
 import { useBootloaderStore } from '../store/bootloaderStore';
 import { evaluateStaConnectAttempt } from '../lib/wifiStaFeedback';
 import { resolveConnectionTarget } from '../lib/connectionTarget';
-import { apiJson, apiPostJson } from '../lib/apiClient';
+import { apiPostJson } from '../lib/apiClient';
 import { probeLocalNetworkAccess, requiresLocalNetworkPermission } from '../lib/localNetworkAccess';
 import {
   buildCloudDeviceUrl,
+  BROWSER_SERIAL_URL,
   cloudDeviceIdFromUrl,
   connectionChoiceFromUrl,
   onlineCloudDevices,
@@ -15,10 +16,12 @@ import {
   type ConnectionChoice,
 } from '../lib/connectionSelection';
 import { platformDeviceDirectoryUrl, remoteConsoleWsUrl } from '../lib/remoteConsole';
+import { LocalSerialPanel } from './LocalSerialPanel';
+import { deviceStatusJson, supportsCapability, type AdapterStatus } from '../lib/deviceCapabilities';
 
 type StatusKind = 'idle' | 'ok' | 'err' | 'ing';
 
-interface DeviceStatus {
+interface DeviceStatus extends AdapterStatus {
   ok?: boolean;
   net?: string;
   comm?: string;
@@ -149,15 +152,16 @@ function Indicator({
 }
 
 function actionButtonClass(active = false): string {
-  return `px-3 py-1.5 rounded text-xs font-medium transition-colors disabled:opacity-45 disabled:cursor-not-allowed ${
+  return `px-3 py-1.5 rounded text-xs font-medium transition-colors enabled:active:brightness-125 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 disabled:opacity-45 disabled:cursor-not-allowed ${
     active
-      ? 'bg-blue-600 text-white'
+      ? 'bg-blue-600 enabled:hover:bg-blue-500 text-white'
       : 'bg-slate-700 hover:bg-slate-600 text-slate-100'
   }`;
 }
 
 export function ConnectionPanel() {
-  const { url, connected, connecting, setUrl, connect, disconnect } = useConnectionStore();
+  const { url, connected, connecting, setUrl, connect, disconnect, serialMode, revision, setAdapter } = useConnectionStore();
+  const flashing = useBootloaderStore(s => s.isFlashing);
   const [showBaudPicker, setShowBaudPicker] = useState(false);
   const { guiConfig, loadGuiConfig, exportGuiConfig, applyGuiConfigText } = useBootloaderStore();
   const configInputRef = useRef<HTMLInputElement>(null);
@@ -176,7 +180,10 @@ export function ConnectionPanel() {
   });
   const [customBaud, setCustomBaud] = useState('');
   const [localAccessGranted, setLocalAccessGranted] = useState(false);
-  const [connectionChoice, setConnectionChoice] = useState<ConnectionChoice>(() => connectionChoiceFromUrl(url));
+  const [connectionChoice, setConnectionChoice] = useState<ConnectionChoice>(() => {
+    const inferred = connectionChoiceFromUrl(url);
+    return serialMode ? 'serial' : inferred === 'serial' ? 'custom' : inferred;
+  });
   const [cloudDevices, setCloudDevices] = useState<CloudDeviceOption[]>([]);
   const [cloudDevicesLoading, setCloudDevicesLoading] = useState(false);
   const [selectedCloudDeviceId, setSelectedCloudDeviceId] = useState(() => cloudDeviceIdFromUrl(url) || '');
@@ -191,6 +198,9 @@ export function ConnectionPanel() {
   const needsLocalPermission = requiresLocalNetworkPermission(target, window.location.protocol);
 
   const loadCloudDevices = useCallback(async () => {
+    if (useConnectionStore.getState().serialMode) return;
+    const revision = useConnectionStore.getState().revision;
+    const current = () => !useConnectionStore.getState().serialMode && useConnectionStore.getState().revision === revision;
     const directoryUrl = platformDeviceDirectoryUrl();
     if (!directoryUrl) {
       setCloudDevices([]);
@@ -201,6 +211,7 @@ export function ConnectionPanel() {
       const response = await fetch(directoryUrl, { cache: 'no-store' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const json = await response.json() as CloudDeviceListResponse;
+      if (!current()) return;
       const devices = onlineCloudDevices(json.devices || []);
       setCloudDevices(devices);
       setSelectedCloudDeviceId((current) => {
@@ -208,22 +219,23 @@ export function ConnectionPanel() {
         return devices[0]?.deviceId || '';
       });
     } catch {
-      setCloudDevices([]);
+      if (current()) setCloudDevices([]);
     } finally {
-      setCloudDevicesLoading(false);
+      if (current()) setCloudDevicesLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (!platformDeviceDirectoryUrl()) return;
+    if (serialMode || !platformDeviceDirectoryUrl()) return;
     void loadCloudDevices();
     const timer = window.setInterval(() => void loadCloudDevices(), 5000);
     return () => window.clearInterval(timer);
-  }, [loadCloudDevices]);
+  }, [loadCloudDevices, serialMode]);
 
   function applyConnectionChoice(choice: ConnectionChoice) {
-    if (connected || connecting) return;
+    if (flashing) return;
     setConnectionChoice(choice);
+    if (choice === 'serial') { setUrl(BROWSER_SERIAL_URL, true); return; }
     if (choice === 'local') {
       setUrl(`http://${DEVICE_AP_IP}`);
       return;
@@ -231,7 +243,10 @@ export function ConnectionPanel() {
     if (choice === 'cloud') {
       const deviceId = selectedCloudDeviceId || cloudDevices[0]?.deviceId;
       if (deviceId) setUrl(buildCloudDeviceUrl(window.location.origin, deviceId, cloudWsTemplate));
+      else { void disconnect(); setUrl(''); }
+      return;
     }
+    if (choice === 'custom') setUrl(url, false);
   }
 
   function selectCloudDevice(deviceId: string) {
@@ -242,6 +257,9 @@ export function ConnectionPanel() {
   }
 
   const refreshStatus = useCallback(async (silent = false) => {
+    if (serialMode || useConnectionStore.getState().serialMode) return;
+    const capturedRevision = useConnectionStore.getState().revision;
+    const current = () => useConnectionStore.getState().revision === capturedRevision;
     if (target.kind === 'invalid') {
       setDeviceStatus(null);
       setWifiStatus(null);
@@ -252,11 +270,14 @@ export function ConnectionPanel() {
     if (needsLocalPermission && !localAccessGranted) return;
     if (!silent) setRefreshing(true);
     try {
-      const [device, wifi, ble] = await Promise.all([
-        apiJson<DeviceStatus>('/api/device/status'),
-        apiJson<WifiStatus>('/api/wifi/status'),
-        apiJson<BleStatus>('/api/ble/status'),
+      const device = await deviceStatusJson<DeviceStatus>(target.apiBase, '/api/device/status');
+      if (!current()) return;
+      setAdapter(url, device);
+      const [wifi, ble] = await Promise.all([
+        supportsCapability(device, 'wifi') ? deviceStatusJson<WifiStatus>(target.apiBase, '/api/wifi/status') : null,
+        supportsCapability(device, 'ble') ? deviceStatusJson<BleStatus>(target.apiBase, '/api/ble/status') : null,
       ]);
+      if (!current()) return;
       setDeviceStatus(device);
       setWifiStatus(wifi);
       setBleStatus(ble);
@@ -264,19 +285,28 @@ export function ConnectionPanel() {
         setActionStatus({ msg: '状态已刷新', kind: 'ok' });
       }
     } catch (err) {
+      if (!current()) return;
       setActionStatus({ msg: `状态刷新失败：${(err as Error).message}`, kind: 'err' });
     } finally {
-      if (!silent) setRefreshing(false);
+      if (!silent && current()) setRefreshing(false);
     }
-  }, [localAccessGranted, needsLocalPermission, target]);
+  }, [localAccessGranted, needsLocalPermission, target, url, serialMode, setAdapter]);
 
   useEffect(() => {
     setLocalAccessGranted(false);
   }, [url]);
 
+  useEffect(() => {
+    if (serialMode) setShowBaudPicker(false);
+  }, [serialMode]);
+
+  useEffect(() => {
+    setDeviceStatus(null); setWifiStatus(null); setBleStatus(null); setRefreshing(false); setActionBusy(null);
+  }, [url, revision]);
+
   async function connectTarget() {
     if (!needsLocalPermission) {
-      connect();
+      void connect();
       return;
     }
 
@@ -286,7 +316,8 @@ export function ConnectionPanel() {
       if (!granted) throw new Error('ESP32 未响应，请确认电脑已连接设备热点');
       setLocalAccessGranted(true);
       setActionStatus({ msg: '局域网访问已授权，正在连接...', kind: 'ok' });
-      connect();
+      if (useConnectionStore.getState().url !== url) return;
+      void connect();
     } catch (err) {
       setLocalAccessGranted(false);
       setActionStatus({ msg: `局域网访问失败：${(err as Error).message}`, kind: 'err' });
@@ -302,10 +333,13 @@ export function ConnectionPanel() {
   }, [refreshStatus]);
 
   async function runAction(label: string, fn: () => Promise<ApiResponse>) {
+    const revision = useConnectionStore.getState().revision;
+    const current = () => useConnectionStore.getState().revision === revision;
     setActionBusy(label);
     setActionStatus({ msg: `${label}...`, kind: 'ing' });
     try {
       const json = await fn();
+      if (!current()) return;
       if (json.ok === false) throw new Error(json.msg || '操作失败');
       if (json.baud) {
         localStorage.setItem('esp32_uart_baud', String(json.baud));
@@ -313,13 +347,16 @@ export function ConnectionPanel() {
       setActionStatus({ msg: `${label}成功`, kind: 'ok' });
       await refreshStatus(true);
     } catch (err) {
+      if (!current()) return;
       setActionStatus({ msg: `${label}失败：${(err as Error).message}`, kind: 'err' });
     } finally {
-      setActionBusy(null);
+      if (current()) setActionBusy(null);
     }
   }
 
   async function connectExternalWifi() {
+    const revision = useConnectionStore.getState().revision;
+    const current = () => useConnectionStore.getState().revision === revision;
     setActionBusy('连接外部 WiFi');
     setActionStatus({ msg: '正在连接外部 WiFi...', kind: 'ing' });
 
@@ -330,16 +367,21 @@ export function ConnectionPanel() {
       }
 
       const json = await apiPostJson<ApiResponse>('/api/wifi/mode', { mode: 'sta' });
+      if (!current()) return;
       if (json.ok === false) throw new Error(json.msg || '操作失败');
 
       const startedAt = Date.now();
       while (true) {
         await sleep(1000);
+        if (!current()) return;
         const elapsedMs = Date.now() - startedAt;
         let nextWifi: WifiStatus;
         try {
-          nextWifi = await apiJson<WifiStatus>('/api/wifi/status');
+          if (target.kind === 'invalid') return;
+          nextWifi = await deviceStatusJson<WifiStatus>(target.apiBase, '/api/wifi/status');
+          if (!current()) return;
         } catch {
+          if (!current()) return;
           if (elapsedMs >= 12000) {
             setActionStatus({
               msg: '连接外部 WiFi失败：设备状态查询超时，请确认 ESP32 热点仍可访问',
@@ -356,10 +398,10 @@ export function ConnectionPanel() {
         if (feedback.done) return;
       }
     } catch (err) {
+      if (!current()) return;
       setActionStatus({ msg: `连接外部 WiFi失败：${(err as Error).message}`, kind: 'err' });
     } finally {
-      setActionBusy(null);
-      await refreshStatus(true);
+      if (current()) { setActionBusy(null); await refreshStatus(true); }
     }
   }
 
@@ -380,7 +422,7 @@ export function ConnectionPanel() {
   }
 
   function applyBaud(baud: number) {
-    if (!baud || baud < 1200 || baud > 5000000) {
+    if (!Number.isInteger(baud) || baud < 1200 || baud > 5000000) {
       setActionStatus({ msg: '波特率范围：1200 ~ 5000000', kind: 'err' });
       return;
     }
@@ -410,36 +452,38 @@ export function ConnectionPanel() {
     <div className="p-6 max-w-6xl">
       <div className="flex items-center gap-3 mb-4">
         <h2 className="text-lg font-semibold text-slate-100">连接设置</h2>
-        <button
+        {!serialMode && <button
           onClick={() => void refreshStatus(false)}
           disabled={refreshing}
           className="ml-auto px-3 py-1.5 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 disabled:opacity-45 disabled:cursor-not-allowed text-slate-100 transition-colors"
         >
           {refreshing ? '刷新中...' : '刷新状态'}
-        </button>
-        <span
+        </button>}
+        {!serialMode && <span
           className={`w-72 shrink-0 truncate text-right text-xs ${statusColor(actionStatus.kind)}`}
           title={actionStatus.msg}
         >
           {actionStatus.msg}
-        </span>
+        </span>}
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <Section title="连接目标">
           <div className="space-y-4">
             <div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 gap-2">
                 {([
                   ['local', '局域网设备'],
                   ['cloud', '云端设备'],
+                  ['serial', '本地串口'],
                   ['custom', '自定义地址'],
                 ] as const).map(([choice, label]) => (
                   <button
                     key={choice}
                     type="button"
                     onClick={() => applyConnectionChoice(choice)}
-                    disabled={connected || connecting}
+                    disabled={flashing}
+                    aria-pressed={connectionChoice === choice}
                     className={actionButtonClass(connectionChoice === choice)}
                   >
                     {label}
@@ -478,11 +522,12 @@ export function ConnectionPanel() {
 
             {connectionChoice === 'custom' && (
               <div>
-                <label className="block text-sm text-slate-400 mb-1">通信入口地址</label>
+                <label htmlFor="connection-entry-url" className="block text-sm text-slate-400 mb-1">通信入口地址</label>
                 <input
+                  id="connection-entry-url"
                   type="text"
                   value={url}
-                  onChange={(event) => setUrl(event.target.value)}
+                  onChange={(event) => setUrl(event.target.value, false)}
                   disabled={connected || connecting}
                   className="w-full bg-slate-800 border border-slate-600 rounded px-3 py-2 text-slate-100
                              text-sm focus:outline-none focus:border-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -494,11 +539,11 @@ export function ConnectionPanel() {
 
             <div>
               <div className="mt-2 flex items-center gap-2 min-w-0">
-                <Indicator tone={targetTone} label={target.label} detail={targetDetail} />
+                <Indicator tone={serialMode ? 'ok' : targetTone} label={serialMode ? '浏览器串口' : target.label} detail={serialMode ? '浏览器直接读写已授权串口' : targetDetail} />
               </div>
             </div>
 
-            <div className="flex items-center gap-4 flex-wrap">
+            {!serialMode && <div className="flex items-center gap-4 flex-wrap">
               <div className="flex items-center gap-2 min-w-24">
                 <StatusDot active={connected} pending={connecting} />
                 <span className="text-sm text-slate-300">
@@ -507,8 +552,8 @@ export function ConnectionPanel() {
               </div>
 
               <button
-                onClick={connected ? disconnect : () => void connectTarget()}
-                disabled={connecting || target.kind === 'invalid'}
+                onClick={connected ? () => void disconnect() : () => void connectTarget()}
+                disabled={connecting || flashing || target.kind === 'invalid'}
                 className={`px-4 py-2 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                   connected
                     ? 'bg-red-600 hover:bg-red-700 text-white'
@@ -517,7 +562,7 @@ export function ConnectionPanel() {
               >
                 {connected ? '断开' : connecting ? '连接中...' : '连接'}
               </button>
-            </div>
+            </div>}
 
             <p className="text-xs text-slate-500">
               局域网设备固定连接当前热点中的 ESP32；云端设备仅显示当前在线设备；自定义地址用于工程调试。
@@ -525,6 +570,8 @@ export function ConnectionPanel() {
           </div>
         </Section>
 
+        {serialMode && <LocalSerialPanel />}
+        {!serialMode && <>
         <Section title="数据转发方式">
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
@@ -684,6 +731,7 @@ export function ConnectionPanel() {
             </div>
           </div>
         </Section>
+        </>}
       </div>
 
       <div className="mt-6 border-t border-slate-700 pt-5 max-w-3xl">
@@ -753,7 +801,7 @@ export function ConnectionPanel() {
         )}
       </div>
 
-      {showBaudPicker && <BaudPicker onClose={() => setShowBaudPicker(false)} />}
+      {showBaudPicker && !serialMode && <BaudPicker onClose={() => setShowBaudPicker(false)} />}
     </div>
   );
 }

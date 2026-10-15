@@ -79,6 +79,7 @@ export function OscilloscoperPage() {
     setReviewEndSeconds,
   } = useOscStore();
   const connected = useConnectionStore((s) => s.connected);
+  const serialMode = useConnectionStore((s) => s.serialMode);
   const url = useConnectionStore((s) => s.url);
   const modbusOscRunning = useModbusOscStore((s) => s.running);
   const { start, stop } = useOscController();
@@ -87,8 +88,8 @@ export function OscilloscoperPage() {
     [url],
   );
   const transport = useMemo(
-    () => describeOscTransport(connectionTarget),
-    [connectionTarget],
+    () => describeOscTransport(connectionTarget, serialMode),
+    [connectionTarget, serialMode],
   );
 
   const [csvError, setCsvError] = useState<string | null>(null);
@@ -96,8 +97,8 @@ export function OscilloscoperPage() {
   const importRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!connected && running && shouldStopOscOnDisconnect(connectionTarget.kind)) stop();
-  }, [connected, running, stop, connectionTarget.kind]);
+    if (!connected && running && shouldStopOscOnDisconnect(transport.mode)) stop();
+  }, [connected, running, stop, transport.mode]);
 
   const configuredChannels = useMemo(() => buildChannelConfigs(configRows, numChannels), [configRows, numChannels]);
   const activeChannels = channels.length > 0 ? channels : configuredChannels;
@@ -252,7 +253,9 @@ export function OscilloscoperPage() {
           <div className="mt-0.5 text-xs opacity-75">{transport.detail}</div>
         </div>
         <span className="shrink-0 text-xs tabular-nums opacity-70">
-          {transport.mode === 'local' ? '低延迟' : transport.mode === 'cloud' ? '公网链路' : '未连接'}
+          {transport.mode === 'serial'
+            ? (connected ? '串口已连接' : '串口未连接')
+            : transport.mode === 'local' ? '低延迟' : transport.mode === 'cloud' ? '公网链路' : '未连接'}
         </span>
       </div>
 

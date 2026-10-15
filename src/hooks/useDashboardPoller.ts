@@ -2,7 +2,8 @@ import { useEffect, useRef, useCallback } from 'react';
 import { wsClient } from '../lib/wsClient';
 import { buildReadHolding, buildWriteSingle, parseReadResponse } from '../lib/modbus';
 import { useParamStore, type ParamDef } from '../store/paramStore';
-import { frameRouter } from '../lib/frameRouter';
+import { waitForMatchingModbusFrame } from '../lib/modbusRequest';
+import { registerConnectionCleanup } from '../lib/connectionLifecycle';
 
 const POLL_INTERVAL_MS = 1000;
 const TIMEOUT_MS = 500;
@@ -18,25 +19,17 @@ export const DASHBOARD_ALIASES = [
 ] as const;
 
 function waitModbusFrame(): Promise<Uint8Array> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      frameRouter.onModbusFrame(() => {});
-      reject(new Error('timeout'));
-    }, TIMEOUT_MS);
-    frameRouter.onModbusFrame((frame) => {
-      clearTimeout(timer);
-      frameRouter.onModbusFrame(() => {});
-      resolve(frame);
-    });
-  });
+  return waitForMatchingModbusFrame({ timeoutMs: TIMEOUT_MS });
 }
 
 async function readOne(param: ParamDef, setValue: (alias: string, val: number) => void): Promise<void> {
+  const generation = wsClient.generation;
   const count = param.isFloat ? 2 : 1;
   const frame = buildReadHolding(param.regAddr, count);
   const waitP = waitModbusFrame();
   wsClient.send(frame);
   const resp = await waitP;
+  if (wsClient.generation !== generation) throw new DOMException('Connection changed', 'AbortError');
   const regs = parseReadResponse(resp);
   if (!regs) return;
 
@@ -57,6 +50,13 @@ async function readOne(param: ParamDef, setValue: (alias: string, val: number) =
 
 let dashTimer: ReturnType<typeof setInterval> | null = null;
 let dashBusy = false;
+let pollEpoch = 0;
+registerConnectionCleanup(() => {
+  pollEpoch++;
+  dashBusy = false;
+  if (dashTimer) clearInterval(dashTimer);
+  dashTimer = null;
+});
 
 export function useDashboardPoller(enabled: boolean = false) {
   const params = useParamStore((s) => s.params);
@@ -72,9 +72,12 @@ export function useDashboardPoller(enabled: boolean = false) {
 
   const pollOnce = useCallback(async () => {
     if (dashBusy) return;
+    const epoch = pollEpoch;
+    const generation = wsClient.generation;
     dashBusy = true;
     try {
       for (const alias of DASHBOARD_ALIASES) {
+        if (epoch !== pollEpoch || generation !== wsClient.generation) return;
         const param = getParamByAlias(alias);
         if (!param) continue;
         try {
@@ -84,17 +87,17 @@ export function useDashboardPoller(enabled: boolean = false) {
         }
       }
     } finally {
-      dashBusy = false;
+      if (epoch === pollEpoch) dashBusy = false;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setValue]);
 
   // 启动/停止轮询（仅在 enabled=true 时运行）
   useEffect(() => {
+    pollEpoch++;
     if (dashTimer) clearInterval(dashTimer);
     dashBusy = false;
 
-    if (!enabled) return;
+    if (!enabled || !connected) return;
 
     // 立即读一次（同步状态）
     pollOnce();
@@ -102,13 +105,13 @@ export function useDashboardPoller(enabled: boolean = false) {
     dashTimer = setInterval(pollOnce, POLL_INTERVAL_MS);
 
     return () => {
+      pollEpoch++;
       if (dashTimer) {
         clearInterval(dashTimer);
         dashTimer = null;
       }
     };
   // pollOnce 是 useCallback 稳定引用，connected/enabled 变化时重启轮询
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pollOnce, connected, enabled]);
 
   /** 写入单个寄存器（实际值） */
@@ -123,7 +126,6 @@ export function useDashboardPoller(enabled: boolean = false) {
       wsClient.send(frame);
       await waitP;
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
 

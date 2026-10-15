@@ -1,4 +1,5 @@
 import { frameRouter } from './frameRouter';
+import { wsClient } from './wsClient';
 
 type ModbusFrameHandler = (frame: Uint8Array) => void;
 type SubscribeModbusFrame = (handler: ModbusFrameHandler) => () => void;
@@ -16,6 +17,7 @@ export function waitForMatchingModbusFrame({
   subscribe = frameRouter.subscribeModbusFrame.bind(frameRouter),
   signal,
 }: WaitForMatchingModbusFrameOptions): Promise<Uint8Array> {
+  const connectionSignal = wsClient.signal;
   return new Promise((resolve, reject) => {
     let settled = false;
     let unsubscribe = () => {};
@@ -24,6 +26,7 @@ export function waitForMatchingModbusFrame({
       clearTimeout(timer);
       unsubscribe();
       signal?.removeEventListener('abort', onAbort);
+      connectionSignal.removeEventListener('abort', onAbort);
     };
     const rejectOnce = (error: unknown) => {
       if (settled) return;
@@ -43,7 +46,10 @@ export function waitForMatchingModbusFrame({
       resolve(frame);
     });
 
-    if (signal?.aborted) onAbort();
-    else signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted || connectionSignal.aborted) onAbort();
+    else {
+      signal?.addEventListener('abort', onAbort, { once: true });
+      connectionSignal.addEventListener('abort', onAbort, { once: true });
+    }
   });
 }

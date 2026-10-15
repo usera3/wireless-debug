@@ -36,7 +36,7 @@ const oscPageSource = readFileSync('src/components/OscilloscoperPage.tsx', 'utf8
 assert.match(oscPageSource, /shouldStopOscOnDisconnect/);
 assert.match(
   oscPageSource,
-  /if \(!connected && running && shouldStopOscOnDisconnect\(connectionTarget\.kind\)\) stop\(\)/,
+  /if \(!connected && running && shouldStopOscOnDisconnect\(transport\.mode\)\) stop\(\)/,
   'cloud address sampling must survive transient browser reconnects',
 );
 

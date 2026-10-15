@@ -24,3 +24,8 @@ dist-ssr
 *.sln
 *.sw?
 .worktrees/
+
+# Local diagnostics and browser-test output
+.superpowers/
+test-results/
+playwright-report/

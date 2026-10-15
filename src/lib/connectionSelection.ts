@@ -1,4 +1,5 @@
-export type ConnectionChoice = 'local' | 'cloud' | 'custom';
+export type ConnectionChoice = 'local' | 'cloud' | 'serial' | 'custom';
+export const BROWSER_SERIAL_URL = 'webserial://local';
 
 export interface CloudDeviceRecord {
   device_id?: string;
@@ -37,6 +38,7 @@ export function buildCloudDeviceUrl(
 }
 
 export function connectionChoiceFromUrl(input: string): ConnectionChoice {
+  if (input === BROWSER_SERIAL_URL) return 'serial';
   try {
     const url = new URL(input);
     if (url.hostname === '192.168.4.1') return 'local';

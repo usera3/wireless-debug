@@ -33,8 +33,6 @@ const RESPONSE_LEN: Record<number, number> = {
   0x75: 5,  // resetDevice
 };
 
-const noop = (_unused: Uint8Array) => { void _unused; };
-
 export class BlModbusClient {
   constructor(
     public slaveId: number = 1,
@@ -52,16 +50,20 @@ export class BlModbusClient {
   }
 
   private async _sendRequest(data: Uint8Array, functionCode: number): Promise<Uint8Array> {
+    const signal = wsClient.signal;
     return new Promise((resolve, reject) => {
       let buf = new Uint8Array(0);
       let expectedLength = RESPONSE_LEN[functionCode] ?? 5;
+      let unsubscribe = () => {};
+      const cleanup = () => { clearTimeout(timeout); unsubscribe(); signal.removeEventListener('abort', onAbort); };
+      const onAbort = () => { cleanup(); reject(new DOMException('Connection changed', 'AbortError')); };
 
       const timeout = setTimeout(() => {
-        frameRouter.onModbusFrame(noop);
+        cleanup();
         reject(new Error('响应超时'));
       }, this.responseTimeoutMs);
 
-      frameRouter.onModbusFrame((frame: Uint8Array) => {
+      unsubscribe = frameRouter.subscribeModbusFrame((frame: Uint8Array) => {
         const merged = new Uint8Array(buf.length + frame.length);
         merged.set(buf);
         merged.set(frame, buf.length);
@@ -74,13 +76,14 @@ export class BlModbusClient {
         }
 
         if (buf.length >= expectedLength) {
-          clearTimeout(timeout);
-          frameRouter.onModbusFrame(noop);
+          cleanup();
           resolve(buf.slice(0, expectedLength));
         }
       });
 
-      wsClient.send(data);
+      if (signal.aborted) { onAbort(); return; }
+      signal.addEventListener('abort', onAbort, { once: true });
+      try { wsClient.send(data); } catch (error) { cleanup(); reject(error); }
     });
   }
 

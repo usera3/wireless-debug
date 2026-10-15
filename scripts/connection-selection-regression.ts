@@ -23,6 +23,8 @@ assert.equal(
   'ws://39.108.83.25:18089/ws/device/wd-online-a',
 );
 assert.equal(connectionChoiceFromUrl('http://192.168.4.1'), 'local');
+assert.equal(connectionChoiceFromUrl('http://127.0.0.1:8000'), 'custom', 'A localhost network service is not a browser serial port');
+assert.equal(connectionChoiceFromUrl('webserial://local'), 'serial');
 assert.equal(connectionChoiceFromUrl('ws://43.153.137.20:18089/ws/device/wd-online-a'), 'cloud');
 assert.equal(connectionChoiceFromUrl('ws://10.0.0.8/ws'), 'custom');
 assert.equal(cloudDeviceIdFromUrl('ws://43.153.137.20:18089/ws/device/wd-online-a'), 'wd-online-a');

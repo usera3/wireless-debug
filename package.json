@@ -53,7 +53,17 @@
     "test:local-network-access": "esbuild scripts/local-network-access-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/local-network-access-regression.mjs && node node_modules/.tmp/local-network-access-regression.mjs",
     "test:sta-feedback": "esbuild scripts/sta-connect-feedback-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/sta-connect-feedback-regression.mjs && node node_modules/.tmp/sta-connect-feedback-regression.mjs",
     "test:ws-client-generation": "esbuild scripts/ws-client-generation-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/ws-client-generation-regression.mjs && node node_modules/.tmp/ws-client-generation-regression.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:browser-serial-reconnect": "esbuild scripts/browser-serial-reconnect-regression.ts --bundle --platform=node --format=esm --define:import.meta.env={} --outfile=node_modules/.tmp/browser-serial-reconnect-regression.mjs && node node_modules/.tmp/browser-serial-reconnect-regression.mjs",
+    "test:browser-serial-transport": "esbuild scripts/browser-serial-transport-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/browser-serial-transport-regression.mjs && node node_modules/.tmp/browser-serial-transport-regression.mjs",
+    "test:browser-serial-store": "esbuild scripts/browser-serial-store-regression.ts --bundle --platform=node --format=esm --define:import.meta.env={} --outfile=node_modules/.tmp/browser-serial-store-regression.mjs && node node_modules/.tmp/browser-serial-store-regression.mjs && node node_modules/.tmp/browser-serial-store-regression.mjs --cloud-runtime",
+    "test:browser-serial-ui": "node scripts/browser-serial-ui-playwright.mjs",
+    "test:browser-serial-acceptance": "node scripts/browser-serial-acceptance-playwright.mjs",
+    "test:browser-serial-static": "STATIC_DIST=dist node scripts/browser-serial-acceptance-playwright.mjs",
+    "test:browser-serial": "npm run test:browser-serial-boundary && npm run test:device-capabilities && npm run test:browser-serial-transport && npm run test:browser-serial-store && npm run test:browser-serial-reconnect && npm run test:browser-serial-ui && npm run test:browser-serial-acceptance",
+    "test:browser-serial-boundary": "node scripts/browser-serial-boundary-regression.mjs",
+    "test:device-capabilities": "esbuild scripts/device-capabilities-regression.ts --bundle --platform=node --format=esm --outfile=node_modules/.tmp/device-capabilities-regression.mjs && node node_modules/.tmp/device-capabilities-regression.mjs",
+    "build:web": "tsc -b && vite build"
   },
   "dependencies": {
     "autoprefixer": "^10.5.0",

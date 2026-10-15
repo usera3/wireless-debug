@@ -20,14 +20,16 @@ export function ParamPage() {
   const [showEspPicker, setShowEspPicker] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const cancelRef = useRef(false);
-  const sourcePolicy = parameterSourcePolicy(currentConnectionTarget().kind);
+  const serialMode = useConnectionStore(s => s.serialMode);
+  const capabilities = useConnectionStore(s => s.adapter?.capabilities);
+  const sourcePolicy = parameterSourcePolicy(currentConnectionTarget().kind, serialMode ? { device_files: false } : capabilities);
 
   // 加载 Excel（本地文件 or ESP32 下载后传入）
   async function loadFile(file: File) {
     setLoading(true);
     try {
       const parsed = await parseParameterTable(file);
-      if (currentConnectionTarget().kind === 'cloud') {
+      if (sourcePolicy.allowRemoteUpload && currentConnectionTarget().kind === 'cloud') {
         const request = await buildParameterUploadRequest('/api/excel/upload', file);
         const { url, ...init } = request;
         const response = await apiFetch(url, init);
@@ -88,8 +90,9 @@ export function ParamPage() {
     setBulkProgress({ done: 0, total: targets.length, mode: 'all' });
     let done = 0;
     let failed = 0;
+    const revision = useConnectionStore.getState().revision;
     for (const page of pages) {
-      if (cancelRef.current) break;
+      if (cancelRef.current || useConnectionStore.getState().revision !== revision) break;
       const pageTargets = targets.filter((target) => target.page === page);
       if (pageTargets.length === 0) continue;
       setActivePage(page);
@@ -131,12 +134,12 @@ export function ParamPage() {
         )}
 
         {/* 从 ESP32 加载 */}
-        <button
+        {sourcePolicy.showRemoteFilePicker && <button
           onClick={() => setShowEspPicker(true)}
           className="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white rounded text-sm transition-colors"
         >
           📡 {sourcePolicy.remoteButtonLabel}
-        </button>
+        </button>}
 
         {loading && <span className="text-sm text-yellow-400">解析中…</span>}
 
@@ -247,7 +250,7 @@ export function ParamPage() {
       )}
 
       {/* ESP32 Excel 文件选择弹窗 */}
-      {showEspPicker && (
+      {showEspPicker && sourcePolicy.showRemoteFilePicker && (
         <EspFilePicker
           onFileReady={(file) => loadFile(file)}
           onClose={() => setShowEspPicker(false)}

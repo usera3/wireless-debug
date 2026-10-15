@@ -16,5 +16,8 @@ export function selectInitialConnectionUrl({
   defaultUrl,
   allowSavedUrl = true,
 }: InitialConnectionUrlOptions): string | null {
-  return clean(remoteUrl) || (allowSavedUrl ? clean(savedUrl) : null) || clean(defaultUrl);
+  const remote = clean(remoteUrl);
+  if (remote) return remote;
+  const saved = allowSavedUrl ? clean(savedUrl) : null;
+  return saved || clean(defaultUrl);
 }

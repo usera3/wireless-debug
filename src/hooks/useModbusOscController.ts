@@ -7,6 +7,7 @@ import { frameRouter } from '../lib/frameRouter';
 import { completeOscSample } from '../lib/modbusOscSample';
 import { resolveConnectionTarget } from '../lib/connectionTarget';
 import { useConnectionStore } from '../store/connectionStore';
+import { registerConnectionCleanup } from '../lib/connectionLifecycle';
 import { waitForMatchingModbusFrame } from '../lib/modbusRequest';
 import {
   modbusOscCycleAction,
@@ -32,6 +33,14 @@ let modbusOscTimer: ReturnType<typeof setInterval> | null = null;
 let modbusOscBusy = false;
 let modbusOscAbortController: AbortController | null = null;
 let modbusOscConsecutiveFailures = 0;
+registerConnectionCleanup(() => {
+  modbusOscAbortController?.abort();
+  modbusOscAbortController = null;
+  modbusOscBusy = false;
+  if (modbusOscTimer) clearInterval(modbusOscTimer);
+  modbusOscTimer = null;
+  useModbusOscStore.getState().setRunning(false);
+});
 
 function registerWidth(param: ParamDef): number {
   return param.isFloat ? 2 : 1;
@@ -86,6 +95,7 @@ export function useModbusOscController() {
     const responseTimeoutMs = modbusOscResponseTimeoutMs(target.kind);
     modbusOscAbortController?.abort();
     modbusOscAbortController = new AbortController();
+    modbusOscBusy = false;
     modbusOscConsecutiveFailures = 0;
     const signal = modbusOscAbortController.signal;
     resetHistory(pageParams.map((param) => param.alias), 1000 / Math.max(100, currentInterval));
@@ -112,6 +122,7 @@ export function useModbusOscController() {
       let cycleError: Error | null = null;
       try {
         for (const chunk of chunks) {
+          if (signal.aborted) return;
           const addrs = chunk.map((p) => p.regAddr);
           const minAddr = Math.min(...addrs);
           const maxAddr = Math.max(...chunk.map((p) => p.regAddr + registerWidth(p) - 1));
@@ -122,6 +133,7 @@ export function useModbusOscController() {
           recordIoRequest();
           wsClient.send(frame);
           const resp = await waitP;
+          if (signal.aborted) return;
           recordIoResponse(resp.length);
           const regs = parseReadResponse(resp, count, { allowBadCrc: true });
           if (!regs) {
@@ -144,7 +156,7 @@ export function useModbusOscController() {
           recordIoError(cycleError.message || '通信错误');
         }
       } finally {
-        modbusOscBusy = false;
+        if (modbusOscAbortController?.signal === signal) modbusOscBusy = false;
         if (!signal.aborted) {
           modbusOscConsecutiveFailures = cycleError ? modbusOscConsecutiveFailures + 1 : 0;
           const cycleAction = modbusOscCycleAction(

@@ -31,12 +31,14 @@ export function useModbusOps() {
     async (param: ParamDef): Promise<number> => {
       if (pendingRef.current) throw new Error('busy');
       pendingRef.current = true;
+      const generation = wsClient.generation;
       try {
         const count = param.isFloat ? 2 : 1;
         const frame = buildReadHolding(param.regAddr, count);
         const waitP = waitReadResponse(count);
         wsClient.send(frame);
         const resp = await waitP;
+        if (wsClient.generation !== generation) throw new DOMException('Connection changed', 'AbortError');
         const regs = parseReadResponse(resp, count, { allowBadCrc: true });
         if (!regs) throw new Error('bad response');
 
@@ -66,13 +68,16 @@ export function useModbusOps() {
     async (params: ParamDef[]): Promise<number> => {
       if (pendingRef.current) throw new Error('busy');
       pendingRef.current = true;
+      const generation = wsClient.generation;
       try {
         let updated = 0;
         for (const batch of buildParamReadBatches(params)) {
+          if (wsClient.generation !== generation) throw new DOMException('Connection changed', 'AbortError');
           const frame = buildReadHolding(batch.startAddr, batch.count);
           const waitP = waitReadResponse(batch.count);
           wsClient.send(frame);
           const resp = await waitP;
+          if (wsClient.generation !== generation) throw new DOMException('Connection changed', 'AbortError');
           const regs = parseReadResponse(resp, batch.count, { allowBadCrc: true });
           if (!regs) throw new Error('bad response');
 

@@ -1,17 +1,25 @@
 import type { ConnectionTarget } from './connectionTarget';
 
 export type OscTransportDescription = {
-  mode: 'local' | 'cloud' | 'invalid';
+  mode: 'local' | 'cloud' | 'serial' | 'invalid';
   title: string;
   detail: string;
   tone: 'fast' | 'cloud' | 'invalid';
 };
 
-export function shouldStopOscOnDisconnect(kind: ConnectionTarget['kind']): boolean {
+export function shouldStopOscOnDisconnect(kind: OscTransportDescription['mode']): boolean {
   return kind !== 'cloud';
 }
 
-export function describeOscTransport(target: ConnectionTarget): OscTransportDescription {
+export function describeOscTransport(target: ConnectionTarget, serialMode = false): OscTransportDescription {
+  if (serialMode) {
+    return {
+      mode: 'serial',
+      title: '浏览器串口直连',
+      detail: '通过本机串口采集波形，无需 ESP32 或本地代理',
+      tone: 'fast',
+    };
+  }
   if (target.kind === 'local') {
     return {
       mode: 'local',

@@ -28,8 +28,8 @@ export default function App() {
     const timer = setTimeout(() => {
       const state = useConnectionStore.getState();
       const target = resolveConnectionTarget(state.url, window.location.origin);
-      if (!state.connected && !requiresLocalNetworkPermission(target, window.location.protocol)) {
-        connect();
+      if (!state.connected && !state.serialMode && !requiresLocalNetworkPermission(target, window.location.protocol)) {
+        void connect(true);
       }
     }, 3000);
     return () => clearTimeout(timer);
@@ -40,7 +40,7 @@ export default function App() {
   useEffect(() => {
     function checkDisconnect() {
       if (connected && wsClient.readyState !== WebSocket.OPEN) {
-        setToast('WebSocket 连接已断开');
+        setToast(useConnectionStore.getState().serialMode ? '串口传输已断开' : 'WebSocket 连接已断开');
         setTimeout(() => setToast(null), 3000);
       }
     }

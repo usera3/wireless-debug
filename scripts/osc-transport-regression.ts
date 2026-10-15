@@ -31,4 +31,16 @@ assert.deepEqual(invalid, {
 });
 assert.equal(shouldStopOscOnDisconnect(invalid.mode), true);
 
+const serialTarget = resolveConnectionTarget('webserial://local');
+assert.equal(serialTarget.kind, 'invalid', 'Serial mode must not create a network/API target');
+const serial = describeOscTransport(serialTarget, true);
+assert.deepEqual(serial, {
+  mode: 'serial',
+  title: '浏览器串口直连',
+  detail: '通过本机串口采集波形，无需 ESP32 或本地代理',
+  tone: 'fast',
+});
+assert.equal(shouldStopOscOnDisconnect(serial.mode), true);
+assert.equal(describeOscTransport(serialTarget, false).mode, 'invalid', 'Invalid network addresses remain invalid outside serial mode');
+
 console.log('osc transport regression passed');

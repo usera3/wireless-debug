@@ -1,4 +1,5 @@
 import { verifyCrc } from './crc16';
+import { wsClient } from './wsClient';
 
 type FrameHandler = (frame: Uint8Array) => void;
 
@@ -8,6 +9,7 @@ export interface OscResponseRequest {
   subscribe: (handler: FrameHandler) => () => void;
   send: (frame: Uint8Array) => void;
   acceptResponse?: (frame: Uint8Array) => boolean;
+  signal?: AbortSignal;
 }
 
 function requestLabel(request: Uint8Array): string {
@@ -48,19 +50,21 @@ export function waitForOscResponse({
   subscribe,
   send,
   acceptResponse = () => true,
+  signal = wsClient.signal,
 }: OscResponseRequest): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
     let unsubscribe = () => {};
+    const cleanup = () => { clearTimeout(timer); unsubscribe(); signal.removeEventListener('abort', onAbort); };
+    const onAbort = () => { cleanup(); reject(new DOMException('Connection changed', 'AbortError')); };
     const timer = setTimeout(() => {
-      unsubscribe();
+      cleanup();
       reject(new Error(`${requestLabel(request)}响应超时`));
     }, timeoutMs);
 
     unsubscribe = subscribe((response) => {
       if (!matchesResponse(request, response)) return;
       if (!acceptResponse(response)) return;
-      clearTimeout(timer);
-      unsubscribe();
+      cleanup();
       if (response[1] === (request[1] | 0x80)) {
         reject(new Error(`${requestLabel(request)}被设备拒绝，异常码 0x${response[2].toString(16).padStart(2, '0')}`));
         return;
@@ -68,7 +72,9 @@ export function waitForOscResponse({
       resolve(response);
     });
 
-    send(request);
+    if (signal.aborted) { onAbort(); return; }
+    signal.addEventListener('abort', onAbort, { once: true });
+    try { send(request); } catch (error) { cleanup(); reject(error); }
   });
 }
 
@@ -80,12 +86,15 @@ export interface OscResponseRetryRequest extends OscResponseRequest {
 export async function waitForOscResponseWithRetry(
   request: OscResponseRetryRequest,
 ): Promise<Uint8Array> {
+  const signal = request.signal ?? wsClient.signal;
   let lastError: unknown;
   for (let attempt = 0; attempt <= request.retries; attempt += 1) {
     try {
-      return await waitForOscResponse(request);
+      if (signal.aborted) throw new DOMException('Connection changed', 'AbortError');
+      return await waitForOscResponse({ ...request, signal });
     } catch (error) {
       lastError = error;
+      if (signal.aborted) throw error;
       if (attempt >= request.retries) break;
       await new Promise((resolve) => setTimeout(resolve, request.retryDelayMs));
     }

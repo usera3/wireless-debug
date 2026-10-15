@@ -22,6 +22,7 @@ import {
   type OscStopBarrierResult,
 } from '../lib/oscStopBarrier';
 import { useConnectionStore } from '../store/connectionStore';
+import { registerConnectionCleanup } from '../lib/connectionLifecycle';
 import { resolveConnectionTarget } from '../lib/connectionTarget';
 import {
   oscCapabilityCache,
@@ -46,6 +47,13 @@ const CLOUD_OSC_TARGET_LATENCY_MS = 300;
 const OSC_HANDSHAKE_TIMEOUT_MS = 8000;
 const OSC_STOP_DRAIN_TIMEOUT_MS = 2500;
 const OSC_QUERY_RETRY_DELAY_MS = 250;
+registerConnectionCleanup(() => {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
+  stopStoreFlushTimer();
+  oscPlaybackBuffer.clear();
+  useOscStore.getState().setRunning(false);
+});
 
 function queueOscStopBarrier(): Promise<OscStopBarrierResult> {
   const expectedGeneration = stopBarrierConnectionGeneration ?? wsClient.generation;
@@ -92,11 +100,14 @@ export function useOscController() {
 
   /** 查询设备能力、确认通道配置，最后开始采样。 */
   const start = useCallback(async (channels: ChannelConfig[]) => {
+    const initialGeneration = wsClient.generation;
     if (stopPromise) await stopPromise;
     else if (lastStopBarrierPromise) await lastStopBarrierPromise;
+    if (wsClient.generation !== initialGeneration) return;
     const target = resolveConnectionTarget(connectionUrl, window.location.origin);
     const targetKey = target.kind === 'invalid' ? connectionUrl : target.wsUrl;
     const connectionGeneration = wsClient.generation;
+    const connectionSignal = wsClient.signal;
     if (
       stopBarrierTargetKey !== targetKey ||
       stopBarrierConnectionGeneration !== connectionGeneration
@@ -117,6 +128,7 @@ export function useOscController() {
       acceptResponse?: (response: Uint8Array) => boolean,
     ): Promise<Uint8Array> {
       return waitForOscResponse({
+        signal: connectionSignal,
         request: frame,
         timeoutMs: OSC_HANDSHAKE_TIMEOUT_MS,
         subscribe: (handler) => frameRouter.subscribeModbusFrame(handler),
@@ -130,6 +142,7 @@ export function useOscController() {
       acceptResponse?: (response: Uint8Array) => boolean,
     ): Promise<Uint8Array> {
       return waitForOscResponseWithRetry({
+        signal: connectionSignal,
         request: frame,
         timeoutMs: OSC_HANDSHAKE_TIMEOUT_MS,
         retries: 1,
@@ -159,6 +172,7 @@ export function useOscController() {
         return;
       }
       await stopping;
+      if (wsClient.generation !== connectionGeneration) throw new DOMException('Connection changed', 'AbortError');
       frameRouter.reset();
     }
 
@@ -241,6 +255,7 @@ export function useOscController() {
         target.kind === 'cloud' ? 'parallel' : 'serial',
         (request) => sendAndWaitOnce(request),
       );
+      if (wsClient.generation !== connectionGeneration) return;
 
       // 4.5 若设置了通讯速率限制，发送 0x73；部分设备不支持该功能码，允许超时/错误
       if (commRateLimit !== 0) {
@@ -249,6 +264,7 @@ export function useOscController() {
         catch { console.warn('[osc] 0x73 not supported by device, ignored'); }
       }
 
+      if (wsClient.generation !== connectionGeneration) return;
       oscPlaybackBuffer.reset({
         channelNos: channels.map((channel) => channel.channelNo),
         sampleRate: capabilities.sampleRate,
@@ -270,6 +286,7 @@ export function useOscController() {
         wsClient.send(buildHeartbeat());
       }, 1000);
     } catch (err) {
+      if (wsClient.generation !== connectionGeneration) return;
       console.error('[osc] start failed', err);
       queueOscStopBarrier();
       stopStoreFlushTimer();
@@ -288,7 +305,9 @@ export function useOscController() {
       heartbeatTimer = null;
     }
 
+    const generation = wsClient.generation;
     stopPromise = queueOscStopBarrier().then(() => {
+      if (wsClient.generation !== generation) return;
       setRunning(false);
       stopStoreFlushTimer();
       const playbackTail = oscPlaybackBuffer.drainAll();
