@@ -1585,11 +1585,11 @@ def react_load_fallback_script():
           const root = document.getElementById('root');
           if (!root || root.childElementCount > 0) return;
           document.body.innerHTML = `
-            <main style="min-height:100vh;display:grid;place-items:center;background:#0f172a;color:#e2e8f0;font-family:system-ui,sans-serif;padding:24px">
-              <section style="max-width:520px;text-align:center">
-                <h1 style="font-size:20px;margin:0 0 12px">无线调试页面加载失败</h1>
-                <p style="color:#94a3b8;margin:0 0 18px">页面资源可能仍在使用旧缓存，请刷新后重试。</p>
-                <button onclick="location.reload()" style="border:0;border-radius:6px;padding:9px 16px;background:#2563eb;color:white;cursor:pointer">重新加载</button>
+            <main style="min-height:100vh;display:grid;place-items:center;background:#f4f6f9;color:#15273c;font-family:system-ui,sans-serif;padding:24px;box-sizing:border-box">
+              <section style="max-width:520px;text-align:center;background:#fff;border:1px solid #e1e7ee;border-radius:5px;padding:32px 24px">
+                <h1 style="font-size:20px;font-weight:600;margin:0 0 12px">GMCC · 设备调试台加载失败</h1>
+                <p style="color:#748294;margin:0 0 18px">页面资源可能仍在使用旧缓存，请刷新后重试。</p>
+                <button onclick="location.reload()" style="border:0;border-radius:5px;padding:9px 16px;background:#117d99;color:white;cursor:pointer">重新加载</button>
               </section>
             </main>`;
         }, 2500);
