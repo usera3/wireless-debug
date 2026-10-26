@@ -26,6 +26,7 @@
     button:hover, .entry:hover { background: #0d6b84; }
     :focus-visible { outline: 2px solid #117d99; outline-offset: 3px; }
     #message { margin: 16px 0; color: #748294; }
+    #message:empty { display: none; }
     #message[role="alert"] { color: #b42336; padding: 14px 16px; border: 1px solid #f0cdd3; border-radius: 5px; background: #fff; }
     #devices { border: 1px solid #e1e7ee; border-radius: 5px; background: white; overflow: hidden; }
     .columns, .device { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(180px, 1.2fr) 90px minmax(180px, 1.4fr) 120px; gap: 16px; align-items: center; padding: 18px 20px; }
@@ -66,10 +67,9 @@
   </header>
   <main>
     <h1>设备列表</h1>
-    <p class="hint">选择设备，打开调试控制台</p>
     <div class="toolbar">
       <input id="search" type="search" aria-label="搜索设备" placeholder="搜索设备名 / 设备 ID / IP">
-      <select id="state" aria-label="在线状态"><option value="all">全部状态</option><option value="online">在线</option><option value="offline">离线</option></select>
+      <select id="state" aria-label="设备状态"><option value="all">全部状态</option><option value="online">在线</option><option value="offline">离线</option><option value="unknown">未知</option></select>
       <button id="refresh" type="button">刷新</button>
     </div>
     <p id="message" role="status" aria-live="polite">正在加载设备...</p>
@@ -86,6 +86,7 @@
       let available = false;
       let pending = false;
       const text = value => value == null ? '' : String(value);
+      const addressValue = (device, key) => device.status?.[key] || device[key] || device.last_status_json?.[key];
       function element(tag, className, value) {
         const node = document.createElement(tag);
         if (className) node.className = className;
@@ -97,11 +98,12 @@
         if (!available) return;
         const query = search.value.trim().toLocaleLowerCase();
         const rows = devices.filter(device => {
-          const matchesState = state.value === 'all' || device.cloud_state === state.value;
-          return matchesState && [device.display_name, device.device_id, device.sta_ip, device.ap_ip].some(value => text(value).toLocaleLowerCase().includes(query));
+          const cloudState = device.cloud_state === 'online' || device.cloud_state === 'offline' ? device.cloud_state : 'unknown';
+          const matchesState = state.value === 'all' || cloudState === state.value;
+          return matchesState && [device.display_name, device.device_id, addressValue(device, 'sta_ip'), addressValue(device, 'ap_ip')].some(value => text(value).toLocaleLowerCase().includes(query));
         });
         message.setAttribute('role', 'status');
-        message.textContent = rows.length ? rows.length + ' 台设备' : devices.length ? '没有匹配的设备' : '暂无设备';
+        message.textContent = rows.length ? '' : devices.length ? '没有匹配的设备' : '暂无设备';
         if (!rows.length) return;
         const columns = element('div', 'columns');
         columns.setAttribute('aria-hidden', 'true');
@@ -119,7 +121,7 @@
           stateNode.append(element('span', 'state ' + cloudState, cloudState === 'online' ? '在线' : cloudState === 'offline' ? '离线' : '未知'));
           row.append(stateNode);
           const address = element('div', 'address');
-          address.append(element('div', '', 'STA: ' + (text(device.sta_ip) || '--')), element('div', '', 'AP: ' + (text(device.ap_ip) || '--')));
+          address.append(element('div', '', 'STA: ' + (text(addressValue(device, 'sta_ip')) || '--')), element('div', '', 'AP: ' + (text(addressValue(device, 'ap_ip')) || '--')));
           row.append(address);
           if (id) {
             const link = element('a', 'entry', '打开控制台');
