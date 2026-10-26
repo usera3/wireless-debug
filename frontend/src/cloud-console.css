@@ -1,75 +1,54 @@
-/* Cloud console styles remain isolated from the local device console. */
-.wd-cloud {
-  color: #15273c;
-  background: #f4f6f9;
-  font-family: Inter, "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
-  font-size: 14px;
-  font-weight: 400;
-  min-width: 320px;
-}
+/* Single cloud device directory. Device-console styles remain independent. */
+.wd-cloud { min-height: 100vh; min-width: 320px; background: #f4f6f9; color: #15273c; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 14px; }
 .wd-cloud *, .wd-cloud *::before, .wd-cloud *::after { box-sizing: border-box; }
-.wd-cloud .font-black { font-weight: 600; }
-.wd-cloud .font-bold { font-weight: 500; }
-.wd-cloud [class*="shadow-"] { box-shadow: none; }
-.wd-cloud [class*="rounded-lg"] { border-radius: 5px; }
-.wd-cloud [class*="border-slate-"] { border-color: #e1e7ee; }
-.wd-cloud [class*="text-slate-9"], .wd-cloud [class*="text-slate-8"] { color: #15273c; }
-.wd-cloud [class*="text-slate-5"] { color: #748294; }
-.wd-cloud h1 { font-size: 18px; line-height: 1.4; font-weight: 600; }
-.wd-cloud h2 { font-size: 23px; line-height: 1.4; font-weight: 600; }
-.wd-cloud h3 { font-size: 16px; line-height: 1.5; font-weight: 600; }
-.wd-cloud .wd-cloud-main { background: #f4f6f9; }
-.wd-cloud .wd-cloud-main > section { max-width: 1600px; }
-.wd-cloud .wd-cloud-topbar { min-height: 72px; }
-.wd-cloud .wd-cloud-topbar h1 + p { margin-top: 3px; font-size: 12px; }
-.wd-cloud .wd-cloud-sidebar {
-  background: #142438;
-  color: #d8e0eb;
-  border-color: #26364a;
-}
-.wd-cloud .wd-cloud-sidebar > div:first-child { min-height: 145px; padding: 26px 22px; gap: 10px; border-color: #26364a; flex-direction: column; align-items: flex-start; }
-.wd-cloud .wd-cloud-wordmark { position: relative; color: #fff; font-size: 31px; line-height: 34px; font-weight: 750; font-style: italic; letter-spacing: -1.4px; }
-.wd-cloud .wd-cloud-wordmark > span { position: absolute; right: -11px; top: 3px; width: 7px; height: 7px; background: #2cc3d7; transform: skewX(-15deg); }
-.wd-cloud .wd-cloud-sidebar .text-lg { font-size: 14px; color: #fff; }
-.wd-cloud .wd-cloud-sidebar [class*="bg-slate-100"] { background: transparent; color: #91a3b9; padding-left: 0; }
-.wd-cloud .wd-cloud-sidebar nav { padding: 20px 12px; }
-.wd-cloud .wd-cloud-sidebar nav .text-slate-400 { color: #7f94ae; font-size: 11px; font-weight: 400; }
-.wd-cloud .wd-cloud-sidebar nav button { height: 44px; color: #b6c5d7; border-radius: 4px; font-weight: 400; gap: 10px; }
-.wd-cloud .wd-cloud-sidebar nav button:hover { background: #21364c; color: #fff; }
-.wd-cloud .wd-cloud-sidebar nav button[class*="bg-teal-50"] { background: #244155; color: #67d3df; }
-.wd-cloud .wd-cloud-sidebar nav button span { background: transparent; color: inherit; }
-.wd-cloud .wd-cloud-metric { position: relative; min-height: 110px; border-top: 2px solid #117d99; }
-.wd-cloud .wd-cloud-metric > div:last-child { font-size: 30px; font-weight: 500; font-variant-numeric: tabular-nums; }
-.wd-cloud .wd-cloud-main button[class*="bg-slate-900"],
-.wd-cloud .wd-cloud-main button[class*="bg-teal-"],
-.wd-cloud .wd-cloud-main a[class*="bg-slate-900"] { background: #117d99; color: #fff; }
-.wd-cloud button:hover, .wd-cloud a:hover { transform: none; }
-.wd-cloud button[class*="bg-slate-900"]:hover { background: #0d6b84; }
-.wd-cloud input, .wd-cloud select, .wd-cloud textarea { min-width: 0; max-width: 100%; color: #22374e; border-color: #dbe2eb; border-radius: 5px; background: #fff; font-weight: 400; }
-.wd-cloud input:focus, .wd-cloud select:focus, .wd-cloud textarea:focus { border-color: #117d99; box-shadow: 0 0 0 2px #117d9918; }
+.wd-cloud-topbar { min-height: 88px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 32px; background: #142438; color: #fff; }
+.wd-cloud-brand { display: flex; align-items: center; gap: 28px; }
+.wd-cloud-wordmark { position: relative; color: #fff; font-size: 31px; font-weight: 750; font-style: italic; letter-spacing: -1.4px; line-height: 1.2; }
+.wd-cloud-wordmark > span { position: absolute; right: -11px; top: 3px; width: 7px; height: 7px; background: #2cc3d7; transform: skewX(-15deg); }
+.wd-cloud-product { font-size: 16px; font-weight: 500; }
+.wd-cloud-logout { color: #d8e0eb; text-decoration: none; white-space: nowrap; padding: 10px 0; }
+.wd-cloud-logout:hover { color: #fff; }
+.wd-cloud-main { max-width: 1440px; margin: auto; padding: 32px; }
+.wd-cloud h1 { margin: 0; font-size: 23px; font-weight: 600; }
+.wd-cloud-toolbar { display: flex; align-items: center; gap: 12px; margin: 24px 0; }
+.wd-cloud-toolbar :is(input, select, button) { min-height: 40px; border: 1px solid #d6e0ea; border-radius: 5px; padding: 0 12px; background: #fff; color: #263f57; font: inherit; }
+.wd-cloud-toolbar input { flex: 1; min-width: 0; max-width: 420px; }
+.wd-cloud-toolbar button, .wd-cloud-entry { background: #117d99; color: #fff; border-color: #117d99; }
+.wd-cloud-toolbar button:hover, .wd-cloud-entry:hover { background: #0d6b84; }
+.wd-cloud-toolbar button:disabled { opacity: .6; cursor: wait; }
 .wd-cloud :focus-visible { outline: 2px solid #117d99; outline-offset: 3px; }
-.wd-cloud table { border-collapse: collapse; font-size: 12px; }
-.wd-cloud thead { background: #f5f7fa; color: #748294; }
-.wd-cloud th { font-size: 11px; font-weight: 500; padding-top: 13px; padding-bottom: 13px; }
-.wd-cloud td { padding-top: 15px; padding-bottom: 15px; }
-.wd-cloud tbody tr:hover { background: #f2f8fa; }
-.wd-cloud .user-menu > div { box-shadow: 0 8px 24px #14243814; }
-.wd-cloud .wd-cloud-drawer { overflow-y: auto; }
-@media (min-width: 1024px) {
-  .wd-cloud .wd-cloud-sidebar:not(.wd-cloud-drawer) { min-height: 100vh; }
-  .wd-cloud .wd-cloud-topbar { height: 72px; gap: 12px; }
-  .wd-cloud .wd-cloud-topbar > div:last-child { gap: 8px; }
-  .wd-cloud .wd-cloud-topbar > div:last-child > span { padding: 7px 10px; font-size: 11px; }
+.wd-cloud-error { margin: 16px 0; padding: 16px; border: 1px solid #ebcdd1; border-radius: 6px; background: #fff; color: #a23a40; overflow-wrap: anywhere; }
+.wd-cloud-list { background: #fff; border: 1px solid #e1e7ee; border-radius: 7px; overflow: hidden; }
+.wd-cloud-columns, .wd-cloud-row { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(180px, 1.2fr) 90px minmax(160px, 1.2fr) 120px; align-items: center; gap: 16px; padding: 18px 20px; }
+.wd-cloud-columns { background: #f7f9fb; color: #66778d; font-size: 12px; }
+.wd-cloud-row { border-top: 1px solid #e1e7ee; }
+.wd-cloud-row:hover { background: #f8fbfc; }
+.wd-cloud-row h2 { margin: 0; min-width: 0; font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.wd-cloud-id, .wd-cloud-address { min-width: 0; overflow-wrap: anywhere; font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.7; }
+.wd-cloud-address { color: #66778d; }
+.wd-cloud-state { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 4px; background: #f0f2f5; color: #596679; font-size: 12px; white-space: nowrap; }
+.wd-cloud-state::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.wd-cloud-state[data-state='online'] { background: #e8f7f0; color: #146d4b; }
+.wd-cloud-state[data-state='offline'] { background: #fff0f1; color: #ab3545; }
+.wd-cloud-entry { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; text-decoration: none; white-space: nowrap; font-size: 13px; }
+.wd-cloud-empty { margin: 0; padding: 60px 20px; border: 1px solid #e1e7ee; border-radius: 7px; background: #fff; color: #66778d; text-align: center; }
+.wd-cloud-mobile-label { display: none; }
+@media (max-width: 900px) {
+  .wd-cloud-main { padding: 24px 18px; }
+  .wd-cloud-topbar { padding: 20px 18px; }
+  .wd-cloud-columns { display: none; }
+  .wd-cloud-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 20px 16px; }
+  .wd-cloud-row:first-of-type { border-top: 0; }
+  .wd-cloud-id, .wd-cloud-address { grid-column: 1 / -1; }
+  .wd-cloud-state-cell { grid-column: 2; grid-row: 1; }
+  .wd-cloud-entry, .wd-cloud-missing-id { grid-column: 1 / -1; }
+  .wd-cloud-mobile-label { display: inline; margin-right: 10px; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: #66778d; }
 }
-@media (max-width: 1023px) {
-  .wd-cloud .wd-cloud-topbar { gap: 12px; }
-  .wd-cloud .wd-cloud-main { min-height: calc(100vh - 140px); }
-}
-@media (max-width: 639px) {
-  .wd-cloud h1 { font-size: 16px; }
-  .wd-cloud h2 { font-size: 21px; }
-  .wd-cloud .wd-cloud-main { padding: 20px 14px; }
-  .wd-cloud .wd-cloud-main [class*="min-w-[260px]"] { min-width: 0; width: 100%; }
-  .wd-cloud .wd-cloud-main .p-5 { padding: 16px; }
-  .wd-cloud .wd-cloud-metric { min-height: 102px; }
+@media (max-width: 480px) {
+  .wd-cloud-brand { gap: 22px; }
+  .wd-cloud-wordmark { font-size: 26px; }
+  .wd-cloud-product { font-size: 14px; }
+  .wd-cloud-toolbar { flex-wrap: wrap; }
+  .wd-cloud-toolbar input { flex-basis: 100%; max-width: none; }
+  .wd-cloud-toolbar select { flex: 1; min-width: 0; }
 }
