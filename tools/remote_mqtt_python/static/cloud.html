@@ -1291,6 +1291,12 @@
       :root { --bg: #f4f6f9; --text: #15273c; --line: #e1e7ee; --blue: #117d99; --shadow: none; }
       body, .workspace { background: #f4f6f9; }
       .sidebar { background: #142438; color: #d8e0eb; box-shadow: none; }
+      .sidebar .tab, .sidebar .sidebar-footer .tab { color: #b6c5d7; }
+      .sidebar .tab::before { color: inherit; background: transparent; }
+      .sidebar .tab:hover { background: #21364c; color: #ffffff; }
+      .sidebar .tab[data-active="true"] { background: #244155; color: #67d3df; }
+      .sidebar .tab[data-active="true"]::before { color: inherit; background: transparent; }
+      .sidebar .nav-section { color: #91a3b9; }
       .sidebar-brand { flex-direction: column; align-items: flex-start; }
       .brand-mark { position: relative; display: inline-block; width: auto; height: auto; background: none; box-shadow: none; color: white; font-size: 31px; font-style: italic; font-weight: 750; letter-spacing: -1.4px; }
       .brand-mark::after { content: ''; position: absolute; right: -11px; top: 3px; width: 7px; height: 7px; background: #2cc3d7; transform: skewX(-15deg); }
