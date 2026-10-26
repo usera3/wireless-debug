@@ -65,6 +65,7 @@ export function ParamPage() {
 
   // 批量读取
   async function handleReadPage() {
+    if (!useConnectionStore.getState().connected) return;
     const targets = params.filter((p) => !p.hidden && p.page === activePage);
     cancelRef.current = false;
     setBulkStatus(null);
@@ -82,6 +83,7 @@ export function ParamPage() {
   }
 
   async function handleReadAll() {
+    if (!useConnectionStore.getState().connected) return;
     const targets = params.filter((p) => !p.hidden);
     cancelRef.current = false;
     setBulkStatus(null);
@@ -89,7 +91,7 @@ export function ParamPage() {
     let done = 0;
     let failed = 0;
     for (const page of pages) {
-      if (cancelRef.current) break;
+      if (cancelRef.current || !useConnectionStore.getState().connected) break;
       const pageTargets = targets.filter((target) => target.page === page);
       if (pageTargets.length === 0) continue;
       setActivePage(page);
@@ -101,8 +103,10 @@ export function ParamPage() {
       }
       setBulkProgress({ done, total: targets.length, mode: 'all' });
     }
-    if (!cancelRef.current && failed === 0) {
+    if (!cancelRef.current && failed === 0 && done === targets.length) {
       setBulkStatus({ type: 'info', message: `所有页已读取 ${done}/${targets.length}` });
+    } else if (!cancelRef.current && !useConnectionStore.getState().connected) {
+      setBulkStatus({ type: 'info', message: `读取已中断：${done}/${targets.length}` });
     }
     setBulkProgress(null);
   }
@@ -132,7 +136,8 @@ export function ParamPage() {
 
         {/* 从 ESP32 加载 */}
         <button
-          onClick={() => setShowEspPicker(true)}
+          onClick={() => { if (currentConnectionTarget().kind !== 'invalid') setShowEspPicker(true); }}
+          disabled={currentConnectionTarget().kind === 'invalid'}
           className="px-3 py-1.5 bg-slate-600 hover:bg-slate-500 text-white rounded text-sm transition-colors"
         >
           📡 {sourcePolicy.remoteButtonLabel}
@@ -146,7 +151,7 @@ export function ParamPage() {
             <span className="text-sm text-slate-400 mr-1">读取：</span>
             <button
               onClick={bulkProgress?.mode === 'page' ? () => { cancelRef.current = true; } : handleReadPage}
-              disabled={!connected || bulkProgress?.mode === 'all'}
+              disabled={bulkProgress?.mode !== 'page' && (!connected || bulkProgress?.mode === 'all')}
               className={`px-3 py-1.5 text-white rounded text-sm transition-colors text-center disabled:opacity-40
                 ${bulkProgress?.mode === 'page'
                   ? 'bg-red-700 hover:bg-red-600'
@@ -158,7 +163,7 @@ export function ParamPage() {
             </button>
             <button
               onClick={bulkProgress?.mode === 'all' ? () => { cancelRef.current = true; } : handleReadAll}
-              disabled={!connected || bulkProgress?.mode === 'page'}
+              disabled={bulkProgress?.mode !== 'all' && (!connected || bulkProgress?.mode === 'page')}
               className={`px-3 py-1.5 text-white rounded text-sm transition-colors text-center disabled:opacity-40
                 ${bulkProgress?.mode === 'all'
                   ? 'bg-red-700 hover:bg-red-600'

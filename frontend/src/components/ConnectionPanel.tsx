@@ -302,6 +302,7 @@ export function ConnectionPanel() {
   }, [refreshStatus]);
 
   async function runAction(label: string, fn: () => Promise<ApiResponse>) {
+    if (!useConnectionStore.getState().connected || target.kind === 'invalid') return;
     setActionBusy(label);
     setActionStatus({ msg: `${label}...`, kind: 'ing' });
     try {
@@ -320,6 +321,7 @@ export function ConnectionPanel() {
   }
 
   async function connectExternalWifi() {
+    if (!useConnectionStore.getState().connected || target.kind === 'invalid') return;
     setActionBusy('连接外部 WiFi');
     setActionStatus({ msg: '正在连接外部 WiFi...', kind: 'ing' });
 
@@ -380,6 +382,7 @@ export function ConnectionPanel() {
   }
 
   function applyBaud(baud: number) {
+    if (!useConnectionStore.getState().connected || target.kind === 'invalid') return;
     if (!baud || baud < 1200 || baud > 5000000) {
       setActionStatus({ msg: '波特率范围：1200 ~ 5000000', kind: 'err' });
       return;
@@ -411,7 +414,7 @@ export function ConnectionPanel() {
       <div className="wd-connection-toolbar">
         <button
           onClick={() => void refreshStatus(false)}
-          disabled={refreshing}
+          disabled={refreshing || target.kind === 'invalid'}
           className="shrink-0 px-3 py-1.5 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 disabled:opacity-45 disabled:cursor-not-allowed text-slate-100 transition-colors"
         >
           {refreshing ? '刷新中...' : '刷新状态'}
@@ -536,7 +539,7 @@ export function ConnectionPanel() {
                 <button
                   key={mode}
                   onClick={() => void runAction(`切换通信 ${mode}`, () => apiPostJson<ApiResponse>('/api/comm/mode', { mode: mode.toLowerCase() }))}
-                  disabled={busy || target.kind === 'invalid'}
+                  disabled={!connected || busy || target.kind === 'invalid'}
                   className={actionButtonClass(currentComm === mode)}
                 >
                   {mode}
@@ -586,14 +589,14 @@ export function ConnectionPanel() {
             <div className="flex gap-2 flex-wrap">
               <button
                 onClick={() => void connectExternalWifi()}
-                disabled={busy || target.kind === 'invalid' || staConnecting || staConnected || !wifiStatus?.sta_configured}
+                disabled={!connected || busy || target.kind === 'invalid' || staConnecting || staConnected || !wifiStatus?.sta_configured}
                 className={actionButtonClass(staConnecting || staConnected)}
               >
                 连接外部 WiFi
               </button>
               <button
                 onClick={() => void runAction('断开外部 WiFi', () => apiPostJson<ApiResponse>('/api/wifi/mode', { mode: 'ap' }))}
-                disabled={busy || target.kind === 'invalid' || !staActive}
+                disabled={!connected || busy || target.kind === 'invalid' || !staActive}
                 className={actionButtonClass(false)}
               >
                 断开外部 WiFi
@@ -625,7 +628,7 @@ export function ConnectionPanel() {
             <div className="flex gap-2 flex-wrap">
               <button
                 onClick={() => void runAction('启动 BLE', () => apiPostJson<ApiResponse>('/api/ble/start', {}))}
-                disabled={busy || target.kind === 'invalid' || Boolean(bleStatus?.started)}
+                disabled={!connected || busy || target.kind === 'invalid' || Boolean(bleStatus?.started)}
                 className={actionButtonClass(Boolean(bleStatus?.started))}
               >
                 启动 BLE
@@ -646,7 +649,7 @@ export function ConnectionPanel() {
                 <button
                   key={baud}
                   onClick={() => applyBaud(baud)}
-                  disabled={busy || target.kind === 'invalid'}
+                  disabled={!connected || busy || target.kind === 'invalid'}
                   className={actionButtonClass(currentBaud === baud)}
                 >
                   {baud >= 1000000 ? `${baud / 1000000}M` : baud.toLocaleString()}
@@ -675,7 +678,7 @@ export function ConnectionPanel() {
               />
               <button
                 onClick={() => applyBaud(Number(customBaud))}
-                disabled={busy || target.kind === 'invalid' || customBaud.trim() === ''}
+                disabled={!connected || busy || target.kind === 'invalid' || customBaud.trim() === ''}
                 className="px-3 py-1.5 rounded text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:opacity-45 disabled:cursor-not-allowed text-white transition-colors"
               >
                 应用

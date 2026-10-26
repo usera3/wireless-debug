@@ -46,7 +46,7 @@ export function Layout({ activeTab, onTabChange, children }: LayoutProps) {
         <nav className="wd-nav" aria-label="设备导航">
           {visibleTabs.map(tab => (
             <button key={tab.id} type="button" onClick={() => onTabChange(tab.id)}
-              disabled={needsDevice && tab.id !== 'devices'} aria-label={tab.label}
+              aria-label={tab.label}
               className="wd-nav-item" aria-current={activeTab === tab.id ? 'page' : undefined} title={tab.label}>
               <ConsoleIcon name={tab.id} /><span>{tab.label}</span>
             </button>
@@ -59,7 +59,7 @@ export function Layout({ activeTab, onTabChange, children }: LayoutProps) {
           <div className="wd-breadcrumb"><span>{workspace}</span><span aria-hidden="true">›</span><strong>{title}</strong></div>
           <div className="wd-topbar-actions">
             {runtime.deviceId && <span className="wd-selected-device" title={runtime.deviceId}>{runtime.deviceId}</span>}
-            {!needsDevice && <div className="wd-connection" role="status">
+            {(!needsDevice || connected || connecting) && <div className="wd-connection" role="status">
               <i data-state={connected ? 'connected' : connecting ? 'connecting' : 'disconnected'} />{status}
             </div>}
             {cloud && <a className="wd-logout" href="/logout">退出登录</a>}

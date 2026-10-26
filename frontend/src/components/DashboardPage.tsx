@@ -7,6 +7,7 @@ import { parseParameterTable } from '../lib/paramParser';
 import { apiFetch, currentConnectionTarget } from '../lib/apiClient';
 import { parameterSourcePolicy } from '../lib/parameterSourcePolicy';
 import { buildParameterUploadRequest } from '../lib/parameterFileUpload';
+import { useConnectionStore } from '../store/connectionStore';
 
 // Read-only measurements retain the values and units supplied by the parameter table.
 function DigitDisplay({ label, value, unit }: { label: string; value: string; unit?: string }) {
@@ -19,6 +20,7 @@ function DigitDisplay({ label, value, unit }: { label: string; value: string; un
 }
 
 export function DashboardPage() {
+  const connected = useConnectionStore((s) => s.connected);
   const params = useParamStore((s) => s.params);
   const values = useParamStore((s) => s.values);
   const loadParams = useParamStore((s) => s.loadParams);
@@ -112,23 +114,27 @@ export function DashboardPage() {
   }
 
   async function handleModeChange(nextMode: 1 | 2) {
+    if (!useConnectionStore.getState().connected) return;
     await writeParam('CmdMode', nextMode);
     setValue('CmdMode', nextMode);
    }
 
   async function handleSpdCommit(v: number) {
+    if (!useConnectionStore.getState().connected) return;
     setValue('CmdSpd', v);
     setSpdLocal(null);
     await writeParam('CmdSpd', v);
   }
 
   async function handleTorqCommit(v: number) {
+    if (!useConnectionStore.getState().connected) return;
     setValue('CmdTorq', v);
     setTorqLocal(null);
     await writeParam('CmdTorq', v);
   }
 
   async function handleStop() {
+    if (!useConnectionStore.getState().connected) return;
     setValue('CmdSpd', 0);
     setValue('CmdTorq', 0);
     setSpdLocal(null);
@@ -174,8 +180,8 @@ export function DashboardPage() {
               </button>
             )}
             <button
-              onClick={() => setShowEspPicker(true)}
-              disabled={loading}
+              onClick={() => { if (currentConnectionTarget().kind !== 'invalid') setShowEspPicker(true); }}
+              disabled={loading || currentConnectionTarget().kind === 'invalid'}
               className="flex-1 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm transition-colors disabled:opacity-50"
             >
               📡 {sourcePolicy.remoteButtonLabel}
@@ -201,6 +207,7 @@ export function DashboardPage() {
       <div className={`wd-dashboard-grid${!enabled ? ' pointer-events-none opacity-40 select-none' : ''}`}>
         <button
           className="wd-dashboard-stop py-3 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-500 transition-colors"
+          disabled={!connected || !enabled}
           onClick={() => {
             void handleStop();
           }}
@@ -211,6 +218,7 @@ export function DashboardPage() {
         {/* 控制模式按钮组 */}
         <div className="wd-dashboard-modes">
           <button
+            disabled={!connected || !enabled}
             className={`flex-1 py-3 rounded-lg text-sm font-semibold transition-colors ${
               modeValue === 1
                 ? 'bg-blue-600 text-white'
@@ -223,6 +231,7 @@ export function DashboardPage() {
             转速模式
           </button>
           <button
+            disabled={!connected || !enabled}
             className={`flex-1 py-3 rounded-lg text-sm font-semibold transition-colors ${
               modeValue === 2
                 ? 'bg-blue-600 text-white'
@@ -264,6 +273,7 @@ export function DashboardPage() {
               </div>
               <input
                 type="range"
+                disabled={!connected || !enabled}
                 className="w-full accent-blue-500 h-2"
                 min={cmdSpd?.min ?? -6000}
                 max={cmdSpd?.max ?? 6000}
@@ -299,6 +309,7 @@ export function DashboardPage() {
             </div>
             <input
               type="range"
+              disabled={!connected || !enabled}
               className="w-full accent-blue-500 h-2"
               min={cmdTorq?.min ?? -100}
               max={cmdTorq?.max ?? 100}

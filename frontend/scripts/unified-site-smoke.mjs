@@ -75,8 +75,12 @@ try {
     assert.equal(await page.locator('.wd-sidebar').count(), 1, 'one sidebar');
     await page.getByRole('navigation', { name: '设备导航' }).waitFor();
     for (const label of ['仪表盘', '地址示波器', '参数示波器', '参数编辑', '固件烧录', '连接设置']) {
-      assert.equal(await page.getByRole('button', { name: label, exact: true }).isDisabled(), true, label + ' needs a selected device');
+      const nav = page.getByRole('button', { name: label, exact: true });
+      assert.equal(await nav.isDisabled(), false, label + ' supports offline browsing');
+      await nav.click();
+      await page.getByRole('heading', { name: label, exact: true, level: 1 }).waitFor();
     }
+    await page.getByRole('button', { name: '设备列表', exact: true }).click();
     assert.equal(await page.locator('.wd-connection').count(), 0, 'no device connection status before selection');
     await page.getByRole('heading', { name: '设备列表', exact: true }).waitFor();
     for (const removed of ['诊断摘要', '系统资源', '备注', '设备总数', '消息中心', '能力清单', '系统设置', '查看详情']) {
@@ -196,5 +200,5 @@ try {
   assert.equal(await compact.locator('.wd-selected-device').getAttribute('title'), longId);
   assert.equal(await compact.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false, 'long device ID fits mobile header');
   await compact.close();
-  console.log('unified site smoke passed: shared index shell, disabled controls, production API rewrite, device switch, local isolation, search/filter, safe links, errors, auth and 3 viewports');
+  console.log('unified site smoke passed: shared index shell, offline navigation, production API rewrite, device switch, local isolation, search/filter, safe links, errors, auth and 3 viewports');
 } finally { await browser.close(); server.close(); }

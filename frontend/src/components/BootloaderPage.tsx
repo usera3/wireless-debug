@@ -3,6 +3,7 @@ import { useBootloaderStore } from '../store/bootloaderStore';
 import { Flasher } from '../lib/flasher';
 import { loadFirmwareDocument } from '../lib/firmwareDocument';
 import { currentConnectionTarget } from '../lib/apiClient';
+import { useConnectionStore } from '../store/connectionStore';
 import { bootloaderResponseTimeoutMs } from '../lib/blModbusClient';
 
 // ── Modals ────────────────────────────────────────────────────────────────────
@@ -83,6 +84,7 @@ function EraseModal({
   onErase: (targetCode: number, start: number, end: number) => void;
 }) {
   const [targetCode, setTargetCode] = useState(0);
+  const connected = useConnectionStore((s) => s.connected);
   const [startHex, setStartHex] = useState('0xFFFFFFFF');
   const [endHex, setEndHex] = useState('0xFFFFFFFF');
 
@@ -98,6 +100,7 @@ function EraseModal({
   }, [targetCode]);
 
   const handleErase = () => {
+    if (!useConnectionStore.getState().connected) return;
     const start = parseInt(startHex, 16);
     const end = parseInt(endHex, 16);
     onErase(targetCode, start, end - start);
@@ -148,6 +151,7 @@ function EraseModal({
         <div className="flex gap-2">
           <button
             onClick={handleErase}
+            disabled={!connected}
             className="px-4 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded text-xs font-medium"
           >
             执行擦除
@@ -175,6 +179,7 @@ function logColor(type: string) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function BootloaderPage() {
+  const connected = useConnectionStore((s) => s.connected);
   const {
     guiConfig,
     firmwareFormat, setFirmwareFormat,
@@ -238,6 +243,7 @@ export function BootloaderPage() {
   // ── Flash ──────────────────────────────────────────────────────────────────
 
   const handleFlash = useCallback(async () => {
+    if (!useConnectionStore.getState().connected) return;
     if (isFlashing) return;
     if (!firmwareDocument) {
       addLog('请先加载固件文件', 'error');
@@ -259,6 +265,7 @@ export function BootloaderPage() {
     flasherRef.current = flasher;
 
     for (const target of sortedTargets) {
+      if (!useConnectionStore.getState().connected) break;
       const image = firmwareDocument.getTarget(target.firmwareTarget);
       if (!image) {
         addLog(`目标 ${target.displayName} 的固件镜像不存在，跳过`, 'warning');
@@ -279,6 +286,7 @@ export function BootloaderPage() {
   // ── Quick ops ──────────────────────────────────────────────────────────────
 
   const handleEnterBL = useCallback(async () => {
+    if (!useConnectionStore.getState().connected) return;
     const f = makeFlasher();
     try {
       const r = await f.enterBootloaderMode();
@@ -289,6 +297,7 @@ export function BootloaderPage() {
   }, [makeFlasher, addLog]);
 
   const handleJumpToApp = useCallback(async () => {
+    if (!useConnectionStore.getState().connected) return;
     const f = makeFlasher();
     try {
       const r = await f.jumpToApplication();
@@ -299,6 +308,7 @@ export function BootloaderPage() {
   }, [makeFlasher, addLog]);
 
   const handleReadSysInfo = useCallback(async () => {
+    if (!useConnectionStore.getState().connected) return;
     const activeTarget = guiConfig.targets.find((t) => t.id === activeTargetId);
     const targetCode = activeTarget?.protocolTargetCode ?? 0;
     const f = makeFlasher();
@@ -312,6 +322,7 @@ export function BootloaderPage() {
   }, [makeFlasher, addLog, guiConfig, activeTargetId]);
 
   const handleErase = useCallback(async (targetCode: number, start: number, length: number) => {
+    if (!useConnectionStore.getState().connected) return;
     const f = makeFlasher();
     addLog(`开始擦除 Flash (目标=${targetCode}, 起始=0x${start.toString(16)}, 长度=${length})...`);
     try {
@@ -500,7 +511,7 @@ export function BootloaderPage() {
           {!isFlashing ? (
             <button
               onClick={handleFlash}
-              disabled={!firmwareDocument}
+              disabled={!connected || !firmwareDocument}
               className="w-full px-3 py-2 rounded text-xs font-semibold bg-green-600 hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors"
             >
               🚀 开始烧录
@@ -520,16 +531,16 @@ export function BootloaderPage() {
         {/* 快捷操作 */}
         <div className="px-4 py-2 space-y-1.5">
           <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">快捷操作</div>
-          <button onClick={handleEnterBL} className="w-full text-left px-3 py-1.5 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors">
+          <button onClick={handleEnterBL} disabled={!connected} className="w-full text-left px-3 py-1.5 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors">
             进入 Bootloader 模式
           </button>
-          <button onClick={handleJumpToApp} className="w-full text-left px-3 py-1.5 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors">
+          <button onClick={handleJumpToApp} disabled={!connected} className="w-full text-left px-3 py-1.5 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors">
             跳转到应用程序
           </button>
-          <button onClick={handleReadSysInfo} className="w-full text-left px-3 py-1.5 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors">
+          <button onClick={handleReadSysInfo} disabled={!connected} className="w-full text-left px-3 py-1.5 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors">
             查看 MCU 信息
           </button>
-          <button onClick={() => setShowEraseModal(true)} className="w-full text-left px-3 py-1.5 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors">
+          <button onClick={() => { if (useConnectionStore.getState().connected) setShowEraseModal(true); }} disabled={!connected} className="w-full text-left px-3 py-1.5 rounded text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors">
             擦除 Flash...
           </button>
         </div>

@@ -11,7 +11,7 @@ function initialWsUrl(): string {
   return selectInitialConnectionUrl({
     remoteUrl: runtime.mode === 'cloud-device' ? runtime.defaultConnectionUrl : null,
     savedUrl: localStorage.getItem(URL_LS_KEY),
-    defaultUrl: import.meta.env.VITE_WS_URL ?? runtime.defaultConnectionUrl,
+    defaultUrl: runtime.mode === 'cloud-platform' ? null : import.meta.env.VITE_WS_URL ?? runtime.defaultConnectionUrl,
     allowSavedUrl: runtime.mode !== 'cloud-platform',
   }) || '';
 }

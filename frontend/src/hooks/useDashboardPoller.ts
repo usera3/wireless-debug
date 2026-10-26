@@ -3,6 +3,7 @@ import { wsClient } from '../lib/wsClient';
 import { buildReadHolding, buildWriteSingle, parseReadResponse } from '../lib/modbus';
 import { useParamStore, type ParamDef } from '../store/paramStore';
 import { frameRouter } from '../lib/frameRouter';
+import { useConnectionStore } from '../store/connectionStore';
 
 const POLL_INTERVAL_MS = 1000;
 const TIMEOUT_MS = 500;
@@ -32,6 +33,7 @@ function waitModbusFrame(): Promise<Uint8Array> {
 }
 
 async function readOne(param: ParamDef, setValue: (alias: string, val: number) => void): Promise<void> {
+  if (!useConnectionStore.getState().connected) return;
   const count = param.isFloat ? 2 : 1;
   const frame = buildReadHolding(param.regAddr, count);
   const waitP = waitModbusFrame();
@@ -61,7 +63,7 @@ let dashBusy = false;
 export function useDashboardPoller(enabled: boolean = false) {
   const params = useParamStore((s) => s.params);
   const setValue = useParamStore((s) => s.setValue);
-  const connected = wsClient.readyState === WebSocket.OPEN;
+  const connected = useConnectionStore((s) => s.connected);
   const paramsRef = useRef(params);
   paramsRef.current = params;
 
@@ -71,10 +73,11 @@ export function useDashboardPoller(enabled: boolean = false) {
   }
 
   const pollOnce = useCallback(async () => {
-    if (dashBusy) return;
+    if (dashBusy || !useConnectionStore.getState().connected) return;
     dashBusy = true;
     try {
       for (const alias of DASHBOARD_ALIASES) {
+        if (!useConnectionStore.getState().connected) break;
         const param = getParamByAlias(alias);
         if (!param) continue;
         try {
@@ -94,7 +97,7 @@ export function useDashboardPoller(enabled: boolean = false) {
     if (dashTimer) clearInterval(dashTimer);
     dashBusy = false;
 
-    if (!enabled) return;
+    if (!enabled || !connected) return;
 
     // 立即读一次（同步状态）
     pollOnce();
@@ -114,6 +117,7 @@ export function useDashboardPoller(enabled: boolean = false) {
   /** 写入单个寄存器（实际值） */
   const writeParam = useCallback(
     async (alias: string, actual: number): Promise<void> => {
+      if (!useConnectionStore.getState().connected) return;
       const param = getParamByAlias(alias);
       if (!param) return;
       const raw = Math.round(actual * Math.pow(10, param.decimals));

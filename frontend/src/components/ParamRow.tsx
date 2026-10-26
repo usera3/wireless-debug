@@ -2,12 +2,14 @@ import { useState } from 'react';
 import type { ParamDef } from '../store/paramStore';
 import { useParamStore } from '../store/paramStore';
 import { useModbusOps } from '../hooks/useModbusOps';
+import { useConnectionStore } from '../store/connectionStore';
 
 interface ParamRowProps {
   param: ParamDef;
 }
 
 export function ParamRow({ param }: ParamRowProps) {
+  const connected = useConnectionStore((s) => s.connected);
   const currentVal = useParamStore((s) => s.values[param.alias]);
   const flashSeq = useParamStore((s) => s.flashSeq[param.alias] ?? 0);
   const setValue = useParamStore((s) => s.setValue);
@@ -24,6 +26,7 @@ export function ParamRow({ param }: ParamRowProps) {
       : '--';
 
   async function handleRead() {
+    if (!useConnectionStore.getState().connected) return;
     setStatus('reading');
     setErrMsg('');
     try {
@@ -39,6 +42,7 @@ export function ParamRow({ param }: ParamRowProps) {
   }
 
   async function handleWrite() {
+    if (!useConnectionStore.getState().connected) return;
     const v = parseFloat(inputVal);
     if (isNaN(v)) return;
     setStatus('writing');
@@ -76,7 +80,7 @@ export function ParamRow({ param }: ParamRowProps) {
         <div className="flex items-center gap-1">
           <button
             onClick={handleRead}
-            disabled={status === 'reading' || status === 'writing'}
+            disabled={!connected || status === 'reading' || status === 'writing'}
             className="px-3 py-1.5 sm:px-2 sm:py-0.5 bg-slate-600 hover:bg-slate-500 disabled:opacity-40
                        text-white rounded text-xs transition-colors"
           >
@@ -85,7 +89,7 @@ export function ParamRow({ param }: ParamRowProps) {
           {!param.readOnly && (
             <button
               onClick={handleWrite}
-              disabled={status === 'reading' || status === 'writing' || inputVal === ''}
+              disabled={!connected || status === 'reading' || status === 'writing' || inputVal === ''}
               className="px-3 py-1.5 sm:px-2 sm:py-0.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40
                          text-white rounded text-xs transition-colors"
             >
