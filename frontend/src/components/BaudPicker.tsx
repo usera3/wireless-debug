@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { apiJson, apiPostJson } from '../lib/apiClient';
+import { apiJson, apiPostJson, currentConnectionTarget } from '../lib/apiClient';
+import { useConnectionStore } from '../store/connectionStore';
 
 interface Props {
   onClose: () => void;
@@ -11,6 +12,8 @@ const BAUD_PRESETS = [9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600,
 const BAUD_LS_KEY = 'esp32_uart_baud';
 
 export function BaudPicker({ onClose }: Props) {
+  const { connected, url } = useConnectionStore();
+  const validTarget = currentConnectionTarget().kind !== 'invalid';
   const [currentBaud, setCurrentBaud] = useState<number | null>(() => {
     const cached = parseInt(localStorage.getItem(BAUD_LS_KEY) ?? '');
     return isNaN(cached) ? null : cached;
@@ -26,6 +29,10 @@ export function BaudPicker({ onClose }: Props) {
 
   /* 弹窗打开时向 ESP32 查询实时波特率 */
   useEffect(() => {
+    if (currentConnectionTarget().kind === 'invalid') {
+      if (currentBaud !== null) setSelectedBaud(currentBaud);
+      return;
+    }
     apiJson<{ baud?: number }>('/api/uart/baud')
       .then((json: { baud?: number }) => {
         if (!json.baud) return;
@@ -38,9 +45,10 @@ export function BaudPicker({ onClose }: Props) {
         if (currentBaud !== null) setSelectedBaud(currentBaud);
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [url]);
 
   async function applyBaud() {
+    if (!useConnectionStore.getState().connected || currentConnectionTarget().kind === 'invalid') return;
     const baud = parseInt(customValue) || selectedBaud;
     if (!baud) { st('⚠️ 请选择或输入波特率', 'err'); return; }
     if (baud < 1200 || baud > 5000000) { st('⚠️ 超出范围，有效值：1200 ~ 5000000', 'err'); return; }
@@ -138,7 +146,7 @@ export function BaudPicker({ onClose }: Props) {
         {/* 应用按钮 */}
         <button
           onClick={applyBaud}
-          disabled={applying || customRangeErr}
+          disabled={!connected || !validTarget || applying || customRangeErr}
           className="w-full bg-indigo-600 hover:opacity-85 disabled:opacity-40 disabled:cursor-not-allowed
                      text-white rounded-lg py-2.5 text-sm transition-opacity"
         >

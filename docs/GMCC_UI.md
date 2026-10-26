@@ -54,6 +54,7 @@ npm run preview -- --host 127.0.0.1 --port 5688 --strictPort
 node scripts/console-ui-playwright.mjs
 node scripts/unified-site-smoke.mjs
 node scripts/offline-actions-playwright.mjs
+node scripts/dashboard-reconnect-playwright.mjs
 python3 scripts/backend-entry-regression.py
 ```
 
@@ -62,6 +63,8 @@ python3 scripts/backend-entry-regression.py
 统一入口浏览器测试和后端入口测试还需要 Python 3 与 Flask（已有云端依赖）。测试通过 AST 抽取当前仓库真实 Flask 入口、身份校验和远程重写函数，在隔离环境验证，既不导入启动 MQTT/数据库的模块顶层，也不连接外部服务。浏览器测试覆盖三种尺寸的共享布局、未选设备的六项菜单浏览、目录→设备→目录→另一设备、连接目标保持与新设备重置、生产重写脚本、查询参数/片段、错误/空列表/未登录、XSS 安全链接，以及本地页面等待超过一次轮询周期后仍无目录请求。
 
 离线操作回归使用隔离 HTTP 与 WebSocket 边界测试数据：记录所有 HTTP 尝试及设备帧，确认无目标浏览零设备请求；验证待写值输入与 Enter、成功解析 CPU1 HEX2 后的烧录禁用、已打开擦除弹窗断线、批读/烧录取消、仪表盘挂载期间随连接变化停止/恢复轮询，以及本地保存目标与远程注入目标的优先级。这是浏览器模拟连接验证，未验证真实硬件通信。
+
+波特率弹窗保持离线浏览和编辑；无目标时不查询设备，有效目标断开时保留只读查询，应用按钮及 Enter 均受连接守卫约束。仪表盘快速重连回归覆盖小于 500ms 的断开/重连，确保旧轮询不继续、不更新旧结果，且旧请求清理不会移除新请求的响应订阅。
 
 统一入口更新已分别通过两端前端构建与上述浏览器测试、运行模式、云端组件/API、连接面板、HTML 外壳及后端入口测试；两端共享源码和生成网页内容一致。独立验证完成 ESP-IDF 6.0 `ninja -C build -j1` 增量打包（5/5 步，重新生成 `storage.bin`），应用镜像仍为 `0x1a91b0`、应用分区剩余 34%，bootloader `0x5240`、分区剩余 36%；固件网页资源回归 4/4 通过。未修改固件控制源码、SDK 配置或本地入口重定向。本次无云端部署、推送或硬件烧录。
 

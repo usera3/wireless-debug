@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { wsClient } from '../lib/wsClient';
 import { buildReadHolding, buildWriteSingle, parseReadResponse } from '../lib/modbus';
 import { useParamStore, type ParamDef } from '../store/paramStore';
-import { frameRouter } from '../lib/frameRouter';
+import { waitForMatchingModbusFrame } from '../lib/modbusRequest';
 import { useConnectionStore } from '../store/connectionStore';
 
 const POLL_INTERVAL_MS = 1000;
@@ -18,27 +18,23 @@ export const DASHBOARD_ALIASES = [
   'AlmCode',
 ] as const;
 
-function waitModbusFrame(): Promise<Uint8Array> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      frameRouter.onModbusFrame(() => {});
-      reject(new Error('timeout'));
-    }, TIMEOUT_MS);
-    frameRouter.onModbusFrame((frame) => {
-      clearTimeout(timer);
-      frameRouter.onModbusFrame(() => {});
-      resolve(frame);
-    });
-  });
+function waitModbusFrame(signal?: AbortSignal): Promise<Uint8Array> {
+  return waitForMatchingModbusFrame({ timeoutMs: TIMEOUT_MS, signal });
 }
 
-async function readOne(param: ParamDef, setValue: (alias: string, val: number) => void): Promise<void> {
-  if (!useConnectionStore.getState().connected) return;
+async function readOne(
+  param: ParamDef,
+  setValue: (alias: string, val: number) => void,
+  signal: AbortSignal,
+  isCurrent: () => boolean,
+): Promise<void> {
+  if (!isCurrent()) return;
   const count = param.isFloat ? 2 : 1;
   const frame = buildReadHolding(param.regAddr, count);
-  const waitP = waitModbusFrame();
+  const waitP = waitModbusFrame(signal);
   wsClient.send(frame);
   const resp = await waitP;
+  if (!isCurrent()) return;
   const regs = parseReadResponse(resp);
   if (!regs) return;
 
@@ -57,9 +53,6 @@ async function readOne(param: ParamDef, setValue: (alias: string, val: number) =
   setValue(param.alias, actual);
 }
 
-let dashTimer: ReturnType<typeof setInterval> | null = null;
-let dashBusy = false;
-
 export function useDashboardPoller(enabled: boolean = false) {
   const params = useParamStore((s) => s.params);
   const setValue = useParamStore((s) => s.setValue);
@@ -72,47 +65,46 @@ export function useDashboardPoller(enabled: boolean = false) {
     return paramsRef.current.find((p) => p.alias === alias);
   }
 
-  const pollOnce = useCallback(async () => {
-    if (dashBusy || !useConnectionStore.getState().connected) return;
-    dashBusy = true;
-    try {
-      for (const alias of DASHBOARD_ALIASES) {
-        if (!useConnectionStore.getState().connected) break;
-        const param = getParamByAlias(alias);
-        if (!param) continue;
-        try {
-          await readOne(param, setValue);
-        } catch {
-          // 单个参数读失败不中断整个轮询
-        }
-      }
-    } finally {
-      dashBusy = false;
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setValue]);
-
   // 启动/停止轮询（仅在 enabled=true 时运行）
   useEffect(() => {
-    if (dashTimer) clearInterval(dashTimer);
-    dashBusy = false;
-
     if (!enabled || !connected) return;
+
+    const controller = new AbortController();
+    const generation = wsClient.generation;
+    const isCurrent = () => !controller.signal.aborted
+      && useConnectionStore.getState().connected && wsClient.generation === generation;
+    let busy = false;
+    const pollOnce = async () => {
+      if (busy || !isCurrent()) return;
+      busy = true;
+      try {
+        for (const alias of DASHBOARD_ALIASES) {
+          if (!isCurrent()) break;
+          const param = getParamByAlias(alias);
+          if (!param) continue;
+          try {
+            await readOne(param, setValue, controller.signal, isCurrent);
+          } catch {
+            // 单个参数读失败不中断当前连接的轮询
+          }
+        }
+      } finally {
+        busy = false;
+      }
+    };
 
     // 立即读一次（同步状态）
     pollOnce();
 
-    dashTimer = setInterval(pollOnce, POLL_INTERVAL_MS);
+    const timer = setInterval(pollOnce, POLL_INTERVAL_MS);
 
     return () => {
-      if (dashTimer) {
-        clearInterval(dashTimer);
-        dashTimer = null;
-      }
+      controller.abort();
+      clearInterval(timer);
     };
-  // pollOnce 是 useCallback 稳定引用，connected/enabled 变化时重启轮询
+  // 参数通过 paramsRef 读取，连接/使能变化时独立重建轮询生命周期。
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pollOnce, connected, enabled]);
+  }, [connected, enabled, setValue]);
 
   /** 写入单个寄存器（实际值） */
   const writeParam = useCallback(

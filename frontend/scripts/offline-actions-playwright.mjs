@@ -111,6 +111,24 @@ try {
   await button('取消').click();
   assert.equal(await page.getByRole('button', { name: /导入 gui-config/ }).isEnabled(), true, 'config import available');
   assert.equal(await button('导出').isEnabled(), true, 'config export available');
+  const openBaudPicker = async () => {
+    await button('更多波特率').click();
+    return page.getByRole('heading', { name: '⚙️ UART1 波特率设置', exact: true }).locator('..');
+  };
+  const assertOfflineBaudPicker = async (dialog, reason) => {
+    const input = dialog.getByPlaceholder('输入任意波特率（1200 ~ 5000000）');
+    assert.equal(await input.isEditable(), true, reason + ' local baud value editable');
+    await input.fill('57600');
+    await disabled(dialog.getByRole('button', { name: '✅ 应用', exact: true }), reason + ' baud dialog apply disabled');
+    const before = requests.filter(r => r.method === 'POST').length;
+    await input.press('Enter');
+    await forcedClick(dialog.getByRole('button', { name: '✅ 应用', exact: true }));
+    await page.waitForTimeout(50);
+    assert.equal(requests.filter(r => r.method === 'POST').length, before, reason + ' baud dialog handlers send no writes');
+  };
+  const noTargetBaud = await openBaudPicker();
+  await assertOfflineBaudPicker(noTargetBaud, 'no target');
+  await noTargetBaud.getByRole('button', { name: '✕ 关闭', exact: true }).click();
   await disabled(button('连接'), 'empty target cannot connect');
   await button('自定义地址').click();
   assert.equal(await page.getByRole('textbox').first().inputValue(), '', 'production default URL cannot populate cloud platform target');
@@ -121,12 +139,25 @@ try {
   assert.deepEqual(await page.evaluate(() => window.fixtureSends), [], 'offline browsing sends no frames');
   // Give the real UI a valid manual target and drive its socket open/close callbacks.
   await page.getByRole('textbox').first().fill(base.replace('http:', 'ws:') + '/ws');
+  const baudReadsBefore = requests.filter(r => r.path === '/api/uart/baud' && r.method === 'GET').length;
+  const disconnectedBaud = await openBaudPicker();
+  await assertOfflineBaudPicker(disconnectedBaud, 'valid disconnected target');
+  assert.ok(requests.filter(r => r.path === '/api/uart/baud' && r.method === 'GET').length > baudReadsBefore, 'valid disconnected target retains read-only baud query');
+  await disconnectedBaud.getByRole('button', { name: '✕ 关闭', exact: true }).click();
   assert.equal(await button('连接').isEnabled(), true, 'manual connection setup available');
   await button('连接').click();
   await page.evaluate(() => window.fixtureSockets.at(-1).open());
   await page.locator('.wd-connection').filter({ hasText: '已连接' }).waitFor();
   const comm = page.getByRole('button', { name: 'AUTO', exact: true });
   assert.equal(await comm.isEnabled(), true, 'device mutations enabled after socket open');
+  const liveBaud = await openBaudPicker();
+  await liveBaud.getByPlaceholder('输入任意波特率（1200 ~ 5000000）').fill('57600');
+  assert.equal(await liveBaud.getByRole('button', { name: '✅ 应用', exact: true }).isEnabled(), true, 'connected baud dialog apply enabled');
+  await page.evaluate(() => window.fixtureSockets.at(-1).close());
+  await assertOfflineBaudPicker(liveBaud, 'open dialog after transport close');
+  await liveBaud.getByRole('button', { name: '✕ 关闭', exact: true }).click();
+  await page.waitForFunction(() => window.fixtureSockets.at(-1).readyState === 0);
+  await page.evaluate(() => window.fixtureSockets.at(-1).open());
   await nav('参数编辑');
   assert.equal(await row.getByRole('button', { name: '读', exact: true }).isEnabled(), true, 'read enabled reactively');
   await button('所有页').click();
