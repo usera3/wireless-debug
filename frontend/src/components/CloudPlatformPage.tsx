@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
+import '../cloud-console.css';
 import {
   cloudDeviceConsolePath,
   cloudPlatformApiUrl,
@@ -100,6 +101,20 @@ const SECTION_COPY: Record<PlatformSection, { title: string; desc: string }> = {
     desc: '查看云端控制台运行状态、入口策略和登录会话',
   },
 };
+
+function CloudNavIcon({ section }: { section: PlatformSection }) {
+  const paths: Record<PlatformSection, ReactNode> = {
+    overview: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
+    devices: <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></>,
+    connections: <><path d="M8 12h8M6 9v6M18 9v6M9 6a6 6 0 0 0 0 12M15 6a6 6 0 0 1 0 12" /></>,
+    history: <><path d="M3 11a9 9 0 1 1 2 7M3 4v7h7M12 7v5l3 2" /></>,
+    messages: <><path d="M4 4h16v12H9l-5 4V4Z" /><path d="M8 8h8M8 12h5" /></>,
+    capabilities: <><path d="m12 3 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5" /></>,
+    events: <><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M9 8h6M9 12h6M9 16h4" /></>,
+    settings: <><path d="M4 7h16M4 17h16" /><circle cx="9" cy="7" r="3" /><circle cx="15" cy="17" r="3" /></>,
+  };
+  return <svg aria-hidden="true" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">{paths[section]}</svg>;
+}
 
 async function fetchJson<T>(path: string): Promise<T> {
   const response = await fetch(cloudPlatformApiUrl(path), { cache: 'no-store' });
@@ -412,17 +427,17 @@ export function CloudPlatformPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-950">
+    <div className="wd-cloud min-h-screen bg-slate-50 text-slate-950">
       <div className="flex min-h-screen">
-        <aside className="hidden w-[248px] shrink-0 border-r border-slate-200 bg-white lg:flex lg:flex-col">
+        <aside className="wd-cloud-sidebar hidden w-[208px] shrink-0 border-r border-slate-200 lg:flex lg:flex-col">
           <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-8">
-            <div className="grid h-10 w-10 place-items-center rounded-lg bg-gradient-to-br from-slate-900 to-teal-500 text-sm font-black text-white">
-              WD
+            <div className="wd-cloud-wordmark" aria-label="GMCC">
+              GMCC<span aria-hidden="true" />
             </div>
             <div>
-              <div className="whitespace-nowrap text-lg font-black leading-tight">Wireless Debug</div>
+              <div className="whitespace-nowrap text-lg font-black leading-tight">设备调试台</div>
               <div className="mt-1 inline-flex rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">
-                Cloud Console
+                云平台
               </div>
             </div>
           </div>
@@ -444,7 +459,7 @@ export function CloudPlatformPage() {
                       }`}
                     >
                       <span className="grid h-6 w-6 place-items-center rounded bg-slate-100 text-[11px] font-black text-slate-500">
-                        {item.code}
+                        <CloudNavIcon section={item.id} />
                       </span>
                       {item.label}
                     </button>
@@ -463,15 +478,15 @@ export function CloudPlatformPage() {
               aria-label="关闭导航"
               onClick={() => setMobileNavOpen(false)}
             />
-            <aside className="relative h-full w-[292px] max-w-[82vw] border-r border-slate-200 bg-white shadow-2xl">
+            <aside className="wd-cloud-sidebar wd-cloud-drawer relative h-full w-[292px] max-w-[82vw] border-r border-slate-200 shadow-2xl">
               <div className="flex items-center gap-3 border-b border-slate-200 px-5 py-6">
-                <div className="grid h-10 w-10 place-items-center rounded-lg bg-gradient-to-br from-slate-900 to-teal-500 text-sm font-black text-white">
-                  WD
+                <div className="wd-cloud-wordmark" aria-label="GMCC">
+                  GMCC<span aria-hidden="true" />
                 </div>
                 <div>
-                  <div className="whitespace-nowrap text-lg font-black leading-tight">Wireless Debug</div>
+                  <div className="whitespace-nowrap text-lg font-black leading-tight">设备调试台</div>
                   <div className="mt-1 inline-flex rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-500">
-                    Cloud Console
+                    云平台
                   </div>
                 </div>
               </div>
@@ -492,7 +507,7 @@ export function CloudPlatformPage() {
                           }`}
                         >
                           <span className="grid h-6 w-6 place-items-center rounded bg-slate-100 text-[11px] font-black text-slate-500">
-                            {item.code}
+                            <CloudNavIcon section={item.id} />
                           </span>
                           {item.label}
                         </button>
@@ -506,7 +521,7 @@ export function CloudPlatformPage() {
         )}
 
         <div className="min-w-0 flex-1">
-          <header className="flex min-h-[104px] flex-col gap-4 border-b border-slate-200 bg-white px-4 py-4 sm:px-6 lg:h-[104px] lg:flex-row lg:items-center lg:justify-between lg:px-10 lg:py-0">
+          <header className="wd-cloud-topbar flex flex-col gap-4 border-b border-slate-200 bg-white px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8 lg:py-0">
             <div className="flex w-full min-w-0 items-start gap-3 lg:w-auto">
               <button
                 type="button"
@@ -514,10 +529,10 @@ export function CloudPlatformPage() {
                 aria-label="打开导航"
                 onClick={() => setMobileNavOpen(true)}
               >
-                ☰
+                <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
               </button>
               <div className="min-w-0">
-                <h1 className="text-xl font-black tracking-tight sm:text-2xl">无线调试云端观测台</h1>
+                <h1 className="text-xl font-black tracking-tight sm:text-2xl">GMCC · 设备调试台</h1>
                 <p className="mt-2 text-sm text-slate-500">多设备状态、历史事件、诊断回执集中查看</p>
               </div>
             </div>
@@ -559,7 +574,7 @@ export function CloudPlatformPage() {
             </div>
           </header>
 
-          <main className="min-h-[calc(100vh-104px)] bg-gradient-to-br from-teal-50 via-slate-50 to-blue-50 px-4 py-5 sm:px-5 lg:px-9 lg:py-8">
+          <main className="wd-cloud-main min-h-[calc(100vh-72px)] px-4 py-5 sm:px-5 lg:px-8 lg:py-7">
             <section className="mx-auto max-w-[1380px]">
               <div className="mb-7">
                 <h2 className="text-2xl font-black">{activeCopy.title}</h2>
@@ -1495,7 +1510,7 @@ function Panel({
 
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/60 transition hover:-translate-y-0.5 hover:shadow-xl">
+    <div className="wd-cloud-metric rounded-lg border border-slate-200 bg-white p-5">
       <div className="text-sm font-bold text-slate-500">{label}</div>
       <div className="mt-3 text-3xl font-black">{value}</div>
     </div>

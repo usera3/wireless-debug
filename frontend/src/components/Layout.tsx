@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import { useConnectionStore } from '../store/connectionStore';
+import { currentRuntimeInfo } from '../lib/runtimeMode';
+import { ConsoleIcon } from './ConsoleIcon';
 
 type Tab = 'dashboard' | 'osc' | 'modbusOsc' | 'params' | 'connection' | 'debug' | 'bootloader';
 
@@ -11,89 +13,61 @@ interface LayoutProps {
   variant?: 'device' | 'platform';
 }
 
-const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: 'dashboard', label: '仪表盘', icon: '🎛️' },
-  { id: 'osc', label: '地址示波器', icon: '📈' },
-  { id: 'modbusOsc', label: '参数示波器', icon: '📉' },
-  { id: 'params', label: '参数编辑', icon: '⚙️' },
-  { id: 'bootloader', label: '固件烧录', icon: '🚀' },
-  { id: 'connection', label: '连接设置', icon: '🔌' },
-  { id: 'debug', label: '调试信息', icon: '🐛' },
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'dashboard', label: '仪表盘' },
+  { id: 'osc', label: '地址示波器' },
+  { id: 'modbusOsc', label: '参数示波器' },
+  { id: 'params', label: '参数编辑' },
+  { id: 'bootloader', label: '固件烧录' },
+  { id: 'connection', label: '连接设置' },
+  { id: 'debug', label: '调试信息' },
 ];
 
 export function Layout({ activeTab, onTabChange, children, variant = 'device' }: LayoutProps) {
   const connected = useConnectionStore((s) => s.connected);
   const connecting = useConnectionStore((s) => s.connecting);
   const [showDebug, setShowDebug] = useState(false);
-
-  const visibleTabs = variant === 'platform'
-    ? [{ id: 'dashboard' as Tab, label: '仪表盘', icon: 'OV' }]
-    : (showDebug ? TABS : TABS.filter((t) => t.id !== 'debug'));
+  const runtime = currentRuntimeInfo();
+  const visibleTabs = variant === 'platform' ? TABS.slice(0, 1) : TABS.filter(t => showDebug || t.id !== 'debug');
+  const title = TABS.find(t => t.id === activeTab)?.label || '仪表盘';
+  const status = connected ? '已连接' : connecting ? '连接中…' : '未连接';
+  const workspace = runtime.mode === 'cloud-device' ? '云端设备' : '设备调试台';
 
   return (
-    <div className="flex flex-col h-screen bg-slate-900 text-slate-100">
-      {/* 顶部 Header */}
-      <header className="flex items-center justify-between px-4 py-2 bg-slate-800 border-b border-slate-700 shrink-0">
-        <h1
-          className="text-base font-bold tracking-wide text-blue-400 select-none cursor-default"
-          onDoubleClick={() => setShowDebug((v) => !v)}
-        >
-          Wireless Debug
-        </h1>
-        <div className="flex items-center gap-2 text-sm">
-          <span
-            className={`inline-block w-2 h-2 rounded-full ${
-              connected ? 'bg-green-400' : connecting ? 'bg-yellow-400 animate-pulse' : 'bg-red-500'
-            }`}
-          />
-          <span className="text-slate-400">
-            {connected ? '已连接' : connecting ? '连接中...' : '未连接'}
-          </span>
+    <div className="wd-device">
+      <aside className="wd-sidebar">
+        <div className="wd-brand" onDoubleClick={() => setShowDebug(v => !v)}>
+          <span className="wd-brand-mark">GMCC<span>′</span></span>
+          <span className="wd-brand-name">设备调试台</span>
         </div>
-      </header>
-
-      <div className="flex flex-1 overflow-hidden">
-        {/* 左侧侧边栏（桌面） */}
-        <nav className="hidden md:flex w-36 shrink-0 bg-slate-800 border-r border-slate-700 flex-col pt-2">
-          {visibleTabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => onTabChange(tab.id)}
-              className={`flex items-center gap-2 px-4 py-3 text-sm text-left transition-colors ${
-                activeTab === tab.id
-                  ? 'bg-blue-600 text-white'
-                  : 'text-slate-300 hover:bg-slate-700'
-              }`}
-            >
-              <span>{tab.icon}</span>
-              <span>{tab.label}</span>
+        <span className="wd-nav-caption">工作空间</span>
+        <nav className="wd-nav" aria-label="设备导航">
+          {visibleTabs.map(tab => (
+            <button key={tab.id} type="button" onClick={() => onTabChange(tab.id)}
+              className="wd-nav-item" aria-current={activeTab === tab.id ? 'page' : undefined} title={tab.label}>
+              <ConsoleIcon name={tab.id} /><span>{tab.label}</span>
             </button>
           ))}
         </nav>
-
-        {/* 内容区（手机底部留出 Tab Bar 的空间） */}
-        <main className="flex-1 overflow-auto min-h-0">
-          {children}
+        <div className="wd-sidebar-footer">GMCC CONSOLE</div>
+      </aside>
+      <div className="wd-workspace">
+        <header className="wd-topbar">
+          <div className="wd-breadcrumb"><span>{workspace}</span><span aria-hidden="true">›</span><strong>{title}</strong></div>
+          <div className="wd-connection" role="status">
+            <i data-state={connected ? 'connected' : connecting ? 'connecting' : 'disconnected'} />{status}
+          </div>
+        </header>
+        <main className="wd-main">
+          <section className={`wd-page wd-page--${activeTab}`}>
+            <div className="wd-page-heading">
+              <div><span className="wd-eyebrow">{workspace}</span><h1>{title}</h1></div>
+              <div className="wd-heading-mark" aria-hidden="true">GMCC</div>
+            </div>
+            <div className="wd-page-content">{children}</div>
+          </section>
         </main>
       </div>
-
-      {/* 底部 Tab Bar（手机） */}
-      <nav className="md:hidden shrink-0 flex bg-slate-800 border-t border-slate-700">
-        {visibleTabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => onTabChange(tab.id)}
-            className={`flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-xs transition-colors ${
-              activeTab === tab.id
-                ? 'text-blue-400'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <span className="text-lg leading-none">{tab.icon}</span>
-            <span className="leading-tight">{tab.label}</span>
-          </button>
-        ))}
-      </nav>
     </div>
   );
 }

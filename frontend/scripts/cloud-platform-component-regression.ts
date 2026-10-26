@@ -27,7 +27,7 @@ for (const marker of [
   '最近事件',
   '最近命令',
   '打开控制台',
-  'Cloud Console',
+  '设备调试台',
   'MQTT',
   '硬件 MAC',
   'AP 名称',

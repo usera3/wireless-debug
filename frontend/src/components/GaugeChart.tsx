@@ -112,7 +112,7 @@ export function GaugeChart({
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="block overflow-visible">
       {/* 背景轨道 */}
-      <path d={trackPath} fill="none" stroke="#1e293b" strokeWidth={strokeW} strokeLinecap="round" />
+      <path d={trackPath} fill="none" stroke="#e5edf3" strokeWidth={strokeW} strokeLinecap="round" />
 
       {/* 单向填充 */}
       {fillPath && (
@@ -153,7 +153,7 @@ export function GaugeChart({
           textAnchor="middle"
           dominantBaseline="middle"
           fontSize={size * 0.07}
-          fill="#94a3b8"
+          fill="#66778d"
         >
           0
         </text>
@@ -167,7 +167,7 @@ export function GaugeChart({
         dominantBaseline="middle"
         fontSize={fontSize}
         fontWeight="700"
-        fill={isBidirectional && clamped < 0 ? '#fb923c' : '#f1f5f9'}
+        fill={isBidirectional && clamped < 0 ? '#b96519' : '#263f57'}
         fontFamily="ui-monospace, monospace"
       >
         {displayValue}
@@ -181,7 +181,7 @@ export function GaugeChart({
           textAnchor="middle"
           dominantBaseline="middle"
           fontSize={unitFontSize}
-          fill="#94a3b8"
+          fill="#66778d"
         >
           {unit}
         </text>

@@ -199,9 +199,9 @@ export function OscChannelConfig() {
       </div>
 
       {/* 手机单栏 / 桌面双栏 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
+      <div className="wd-channel-grid grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
         {activeRows.map((row, i) => (
-          <div key={i} className="grid grid-cols-[1.2rem_minmax(4rem,0.7fr)_minmax(6.5rem,0.9fr)_minmax(7rem,1.5fr)] gap-1 items-center">
+          <div key={i} className="wd-channel-row grid grid-cols-[1.2rem_minmax(4rem,0.7fr)_minmax(6.5rem,0.9fr)_minmax(7rem,1.5fr)] gap-1 items-center">
             <span className="text-slate-500 text-xs text-right">{i + 1}</span>
             <div className="min-w-0">
               <input

@@ -8,15 +8,12 @@ import { apiFetch, currentConnectionTarget } from '../lib/apiClient';
 import { parameterSourcePolicy } from '../lib/parameterSourcePolicy';
 import { buildParameterUploadRequest } from '../lib/parameterFileUpload';
 
-// 数码管风格的只读显示块
+// Read-only measurements retain the values and units supplied by the parameter table.
 function DigitDisplay({ label, value, unit }: { label: string; value: string; unit?: string }) {
   return (
-    <div className="flex flex-col items-center bg-slate-800 rounded-lg px-3 py-2 gap-1 min-w-0">
-      <span className="text-xs text-slate-500 truncate w-full text-center">{label}</span>
-      <span className="font-mono text-lg font-bold text-green-400 tabular-nums leading-tight">
-        {value}
-      </span>
-      {unit && <span className="text-xs text-slate-500">{unit}</span>}
+    <div className="wd-metric">
+      <span className="wd-metric-label">{label}</span>
+      <span className="wd-metric-value">{value}{unit && <small>{unit}</small>}</span>
     </div>
   );
 }
@@ -141,11 +138,14 @@ export function DashboardPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4 max-w-md mx-auto">
+    <div className="wd-dashboard">
       {/* 使能开关 */}
-      <div className="flex items-center justify-between bg-slate-800 rounded-lg px-4 py-3">
-        <span className="text-sm text-slate-300 font-medium">仪表盘使能</span>
+      <div className="wd-dashboard-setup">
+        <div><strong>仪表盘使能</strong><small>{enabled ? '已启用' : '未启用'}</small></div>
         <button
+          type="button"
+          aria-label="仪表盘使能"
+          aria-pressed={enabled}
           onClick={() => setDashboardEnabled(!enabled)}
           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
             enabled ? 'bg-blue-600' : 'bg-slate-600'
@@ -198,9 +198,9 @@ export function DashboardPage() {
       )}
 
       {/* 控制区（使能后才可交互） */}
-      <div className={`flex flex-col gap-4${!enabled ? ' pointer-events-none opacity-40 select-none' : ''}`}>
+      <div className={`wd-dashboard-grid${!enabled ? ' pointer-events-none opacity-40 select-none' : ''}`}>
         <button
-          className="py-3 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-500 transition-colors"
+          className="wd-dashboard-stop py-3 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-500 transition-colors"
           onClick={() => {
             void handleStop();
           }}
@@ -209,7 +209,7 @@ export function DashboardPage() {
         </button>
 
         {/* 控制模式按钮组 */}
-        <div className="flex gap-2">
+        <div className="wd-dashboard-modes">
           <button
             className={`flex-1 py-3 rounded-lg text-sm font-semibold transition-colors ${
               modeValue === 1
@@ -237,14 +237,15 @@ export function DashboardPage() {
         </div>
 
         {/* 圆形转速仪表盘（双向，0居中） */}
-        <div className="flex justify-center">
+        <div className="wd-dashboard-gauge">
+          <h2>转速监测</h2>
           <GaugeChart
             value={motorSpd ?? 0}
             min={gaugeMin}
             max={gaugeMax}
             unit="rpm"
             label="MotorSpd"
-            size={220}
+            size={240}
             targetValue={spdValue}
             showTargetMarker={modeValue === 1}
           />
@@ -252,7 +253,8 @@ export function DashboardPage() {
 
         {/* 速度设定滑动条（仅转速模式） */}
         {modeValue === 1 && (
-          <div className="flex flex-col gap-2">
+          <div className="wd-dashboard-control">
+            <h2>速度设定</h2>
             <div className="flex flex-col gap-1">
               <div className="flex justify-between text-xs text-slate-400">
                 <span>速度设定 CmdSpd</span>
@@ -287,7 +289,8 @@ export function DashboardPage() {
 
         {/* 转矩设定滑动条（仅转矩模式） */}
         {modeValue === 2 && (
-          <div className="flex flex-col gap-1">
+          <div className="wd-dashboard-control">
+            <h2>转矩设定</h2>
             <div className="flex justify-between text-xs text-slate-400">
               <span>转矩设定 CmdTorq</span>
               <span className="font-mono text-slate-200">
@@ -319,7 +322,7 @@ export function DashboardPage() {
         )}
 
         {/* 只读数码管区 */}
-        <div className="grid grid-cols-4 gap-2">
+        <div className="wd-dashboard-metrics">
           <DigitDisplay label="母线电压" value={formatVal('Vdc')} unit={unitOf('Vdc')} />
           <DigitDisplay label="功率" value={formatVal('MotorPower')} unit={unitOf('MotorPower')} />
           <DigitDisplay label="PCB温度" value={formatVal('PcbTemp')} unit={unitOf('PcbTemp')} />
@@ -327,7 +330,7 @@ export function DashboardPage() {
         </div>
 
         {/* 故障码（全宽） */}
-        <div className="bg-slate-800 rounded-lg px-4 py-3 flex items-center justify-between">
+        <div className="wd-dashboard-fault bg-slate-800 rounded-lg px-4 py-3 flex items-center justify-between">
           <span className="text-xs text-slate-500">故障码 AlmCode</span>
           <span className="font-mono text-lg font-bold text-red-400 tabular-nums">
             {values['AlmCode'] !== undefined ? values['AlmCode'] : '--'}

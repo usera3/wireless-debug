@@ -1,11 +1,17 @@
 #!/usr/bin/env node
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { extname, join, resolve } from 'node:path';
-import playwright from '/tmp/wireless_debug_playwright_runner/node_modules/playwright/index.js';
+import { pathToFileURL } from 'node:url';
+
+const runner = process.env.PLAYWRIGHT_MODULE || '/tmp/wireless_debug_playwright_runner/node_modules/playwright/index.js';
+const playwrightModule = await import(pathToFileURL(resolve(runner)).href);
+const playwright = playwrightModule.default || playwrightModule;
 
 const { chromium } = playwright;
 const root = resolve('dist');
+const screenshots = process.env.CLOUD_SCREENSHOTS || '/tmp/wd-cloud-ui';
+mkdirSync(screenshots, { recursive: true });
 const mime = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -212,13 +218,13 @@ try {
 
   await page.goto(`http://127.0.0.1:${port}/orig/i.html`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(500);
-  if (!(await page.getByText('Wireless Debug').count())) {
-    throw new Error('local mode did not render Wireless Debug shell');
+  if (!(await page.locator('.wd-brand').getByText('GMCC', { exact: false }).count())) {
+    throw new Error('local mode did not render GMCC shell');
   }
 
   await page.goto(`http://127.0.0.1:${port}/cloud.html`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(1200);
-  if (!(await page.getByText('无线调试云端观测台').count())) {
+  if (!(await page.getByText('GMCC · 设备调试台').count())) {
     throw new Error('cloud platform mode did not render dashboard');
   }
   if (!(await page.getByText('ESP32-001').count())) {
@@ -261,7 +267,7 @@ try {
   if (logoutHref !== '/logout') {
     throw new Error(`cloud platform logout href mismatch: ${logoutHref}`);
   }
-  await page.getByRole('heading', { name: '无线调试云端观测台' }).click();
+  await page.getByRole('heading', { name: 'GMCC · 设备调试台' }).click();
   await page.waitForTimeout(120);
   if (await logout.isVisible()) {
     throw new Error('cloud platform user menu did not close after clicking outside');
@@ -294,6 +300,63 @@ try {
   await mobileDeviceNav.click();
   if (!(await page.getByRole('heading', { name: '设备管理' }).count())) {
     throw new Error('mobile cloud platform navigation did not switch sections');
+  }
+
+  // Exercise the same real controls at desktop, compact desktop and phone widths.
+  for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : width === 1024 ? 768 : 1024 });
+    await page.goto(`http://127.0.0.1:${port}/cloud.html`, { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { name: '设备总览' }).waitFor();
+    async function checkOverflow(section) {
+      const size = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth }));
+      if (size.document > size.viewport) throw new Error(`${width}px ${section} document overflow: ${size.document}`);
+    }
+    async function navigate(label) {
+      if (width < 1024) {
+        await page.getByRole('button', { name: '打开导航' }).click();
+        await page.getByRole('dialog', { name: '移动端导航' }).getByRole('button', { name: label, exact: true }).click();
+        if (await page.getByRole('dialog', { name: '移动端导航' }).count()) throw new Error('mobile drawer stayed open after navigation');
+      } else {
+        await page.getByRole('navigation').getByRole('button', { name: label, exact: true }).click();
+      }
+      await page.getByRole('heading', { name: label, exact: true, level: 2 }).waitFor();
+      await checkOverflow(label);
+    }
+    await checkOverflow('overview');
+    await page.screenshot({ path: join(screenshots, `${width}-overview.png`), fullPage: true });
+    const search = page.getByPlaceholder('搜索设备 ID / MAC / 备注 / IP');
+    const deviceName = page.getByText('ESP32-001', { exact: true }).locator('visible=true');
+    await search.fill('no-such-device');
+    if (await deviceName.count()) throw new Error(`${width}px search did not hide nonmatching device`);
+    await search.fill('ESP32-001');
+    await deviceName.first().waitFor({ state: 'visible' });
+    const stateFilter = page.locator('main select');
+    await stateFilter.selectOption('offline');
+    if (await deviceName.count()) throw new Error(`${width}px state filter retained online device`);
+    await stateFilter.selectOption('online');
+    await deviceName.first().waitFor({ state: 'visible' });
+    await stateFilter.selectOption('all');
+    await search.fill('');
+    const openConsole = page.locator('a[href="/remote/wd-ac276eab7c9c/orig/i.html"]:visible');
+    const consoleHref = await openConsole.first().getAttribute('href');
+    if (consoleHref !== '/remote/wd-ac276eab7c9c/orig/i.html') throw new Error(`device console href mismatch: ${consoleHref}`);
+    for (const label of ['设备管理', '连接管理', '连接历史', '消息中心', '能力清单', '事件记录', '系统设置', '仪表盘']) {
+      await navigate(label);
+      if (label === '设备管理') {
+        await page.getByText('保存设备名', { exact: true }).waitFor();
+        await page.screenshot({ path: join(screenshots, `${width}-device-management.png`), fullPage: true });
+      }
+    }
+    await page.locator('.user-menu > button').click();
+    await logout.waitFor({ state: 'visible' });
+    if (await logout.getAttribute('href') !== '/logout') throw new Error('logout link changed');
+    await page.getByRole('heading', { name: 'GMCC · 设备调试台' }).click();
+    if (await logout.isVisible()) throw new Error(`${width}px user menu did not close`);
+    if (width < 1024) {
+      await page.getByRole('button', { name: '打开导航' }).click();
+      await page.keyboard.press('Escape');
+      if (await page.getByRole('dialog', { name: '移动端导航' }).count()) throw new Error('Escape did not close drawer');
+    }
   }
 
   if (errors.length) throw new Error(`browser errors: ${errors.join('\n')}`);

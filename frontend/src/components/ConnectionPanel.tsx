@@ -407,18 +407,17 @@ export function ConnectionPanel() {
   const targetTone = target.kind === 'invalid' ? 'err' : target.kind === 'cloud' ? 'warn' : 'ok';
 
   return (
-    <div className="p-6 max-w-6xl">
-      <div className="flex items-center gap-3 mb-4">
-        <h2 className="text-lg font-semibold text-slate-100">连接设置</h2>
+    <div className="wd-connection-page">
+      <div className="wd-connection-toolbar">
         <button
           onClick={() => void refreshStatus(false)}
           disabled={refreshing}
-          className="ml-auto px-3 py-1.5 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 disabled:opacity-45 disabled:cursor-not-allowed text-slate-100 transition-colors"
+          className="shrink-0 px-3 py-1.5 rounded text-xs font-medium bg-slate-700 hover:bg-slate-600 disabled:opacity-45 disabled:cursor-not-allowed text-slate-100 transition-colors"
         >
           {refreshing ? '刷新中...' : '刷新状态'}
         </button>
         <span
-          className={`w-72 shrink-0 truncate text-right text-xs ${statusColor(actionStatus.kind)}`}
+          className={`min-w-0 break-words text-xs ${statusColor(actionStatus.kind)}`}
           title={actionStatus.msg}
         >
           {actionStatus.msg}

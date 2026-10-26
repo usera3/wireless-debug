@@ -5,9 +5,9 @@ import { getPlotRelativePosition, zoomRange } from '../lib/oscZoom';
 import { formatOscAxisValue, formatOscHoverTime, formatOscValue } from '../lib/oscDisplay';
 
 const CHANNEL_COLORS = [
-  '#4ade80', '#60a5fa', '#f97316', '#e879f9',
-  '#facc15', '#34d399', '#f87171', '#a78bfa',
-  '#fb923c', '#38bdf8', '#4ade80', '#f472b6',
+  '#2d82e7', '#d98125', '#148363', '#9454c6',
+  '#9d7900', '#117d99', '#c84e54', '#6157c2',
+  '#b55d27', '#28769e', '#477e30', '#b54483',
 ];
 
 type AlignedSeries = number[] | (number | null)[];
@@ -911,18 +911,18 @@ export function OscChart({
         },
         axes: [
           {
-            stroke: '#94a3b8',
-            grid: { stroke: 'rgba(148, 163, 184, 0.12)' },
-            ticks: { stroke: '#475569' },
+            stroke: '#66778d',
+            grid: { stroke: '#e7edf4' },
+            ticks: { stroke: '#d4dfeb' },
             label: 'Time (s)',
             values: (_self, splits, _axisIdx, _foundSpace, foundIncr) => (
               splits.map((value) => formatOscAxisValue(value, foundIncr))
             ),
           },
           {
-            stroke: '#94a3b8',
-            grid: { stroke: 'rgba(148, 163, 184, 0.12)' },
-            ticks: { stroke: '#475569' },
+            stroke: '#66778d',
+            grid: { stroke: '#e7edf4' },
+            ticks: { stroke: '#d4dfeb' },
           },
         ],
         series: [
