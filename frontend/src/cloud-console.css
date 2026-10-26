@@ -1,16 +1,7 @@
-/* Single cloud device directory. Device-console styles remain independent. */
-.wd-cloud { min-height: 100vh; min-width: 320px; background: #f4f6f9; color: #15273c; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 14px; }
+/* Device directory content inside the shared console workspace. */
+.wd-cloud { min-width: 0; color: #15273c; font-size: 14px; }
 .wd-cloud *, .wd-cloud *::before, .wd-cloud *::after { box-sizing: border-box; }
-.wd-cloud-topbar { min-height: 88px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 32px; background: #142438; color: #fff; }
-.wd-cloud-brand { display: flex; align-items: center; gap: 28px; }
-.wd-cloud-wordmark { position: relative; color: #fff; font-size: 31px; font-weight: 750; font-style: italic; letter-spacing: -1.4px; line-height: 1.2; }
-.wd-cloud-wordmark > span { position: absolute; right: -11px; top: 3px; width: 7px; height: 7px; background: #2cc3d7; transform: skewX(-15deg); }
-.wd-cloud-product { font-size: 16px; font-weight: 500; }
-.wd-cloud-logout { color: #d8e0eb; text-decoration: none; white-space: nowrap; padding: 10px 0; }
-.wd-cloud-logout:hover { color: #fff; }
-.wd-cloud-main { max-width: 1440px; margin: auto; padding: 32px; }
-.wd-cloud h1 { margin: 0; font-size: 23px; font-weight: 600; }
-.wd-cloud-toolbar { display: flex; align-items: center; gap: 12px; margin: 24px 0; }
+.wd-cloud-toolbar { display: flex; align-items: center; gap: 12px; margin: 0 0 24px; }
 .wd-cloud-toolbar :is(input, select, button) { min-height: 40px; border: 1px solid #d6e0ea; border-radius: 5px; padding: 0 12px; background: #fff; color: #263f57; font: inherit; }
 .wd-cloud-toolbar input { flex: 1; min-width: 0; max-width: 420px; }
 .wd-cloud-toolbar button, .wd-cloud-entry { background: #117d99; color: #fff; border-color: #117d99; }
@@ -33,9 +24,7 @@
 .wd-cloud-entry { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; border-radius: 5px; text-decoration: none; white-space: nowrap; font-size: 13px; }
 .wd-cloud-empty { margin: 0; padding: 60px 20px; border: 1px solid #e1e7ee; border-radius: 7px; background: #fff; color: #66778d; text-align: center; }
 .wd-cloud-mobile-label { display: none; }
-@media (max-width: 900px) {
-  .wd-cloud-main { padding: 24px 18px; }
-  .wd-cloud-topbar { padding: 20px 18px; }
+@media (max-width: 1200px) {
   .wd-cloud-columns { display: none; }
   .wd-cloud-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 20px 16px; }
   .wd-cloud-row:first-of-type { border-top: 0; }
@@ -45,9 +34,6 @@
   .wd-cloud-mobile-label { display: inline; margin-right: 10px; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: #66778d; }
 }
 @media (max-width: 480px) {
-  .wd-cloud-brand { gap: 22px; }
-  .wd-cloud-wordmark { font-size: 26px; }
-  .wd-cloud-product { font-size: 14px; }
   .wd-cloud-toolbar { flex-wrap: wrap; }
   .wd-cloud-toolbar input { flex-basis: 100%; max-width: none; }
   .wd-cloud-toolbar select { flex: 1; min-width: 0; }

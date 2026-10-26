@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Layout } from './components/Layout';
+import { Layout, type Tab } from './components/Layout';
 import { ConnectionPanel } from './components/ConnectionPanel';
 import { OscilloscoperPage } from './components/OscilloscoperPage';
 import { ParamPage } from './components/ParamPage';
@@ -14,13 +14,11 @@ import { requiresLocalNetworkPermission } from './lib/localNetworkAccess';
 import { currentRuntimeInfo } from './lib/runtimeMode';
 import { CloudPlatformPage } from './components/CloudPlatformPage';
 
-type Tab = 'dashboard' | 'osc' | 'modbusOsc' | 'params' | 'connection' | 'debug' | 'bootloader';
-
 export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const runtime = useMemo(() => currentRuntimeInfo(), []);
+  const [activeTab, setActiveTab] = useState<Tab>(() => runtime.mode === 'cloud-platform' ? 'devices' : 'dashboard');
   const { connected, connect } = useConnectionStore();
   const [toast, setToast] = useState<string | null>(null);
-  const runtime = useMemo(() => currentRuntimeInfo(), []);
 
   // 页面加载 3s 后自动尝试连接默认地址
   useEffect(() => {
@@ -49,6 +47,7 @@ export default function App() {
   }, [connected]);
 
   const content = {
+    devices: <CloudPlatformPage />,
     dashboard: <DashboardPage />,
     osc: <OscilloscoperPage />,
     modbusOsc: <ModbusOscPage />,
@@ -57,10 +56,6 @@ export default function App() {
     debug: <DebugPage />,
     bootloader: <BootloaderPage />,
   }[activeTab];
-
-  if (runtime.mode === 'cloud-platform') {
-    return <CloudPlatformPage />;
-  }
 
   return (
     <Layout activeTab={activeTab} onTabChange={setActiveTab}>

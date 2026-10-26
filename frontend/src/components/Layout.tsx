@@ -4,16 +4,16 @@ import { useConnectionStore } from '../store/connectionStore';
 import { currentRuntimeInfo } from '../lib/runtimeMode';
 import { ConsoleIcon } from './ConsoleIcon';
 
-type Tab = 'dashboard' | 'osc' | 'modbusOsc' | 'params' | 'connection' | 'debug' | 'bootloader';
+export type Tab = 'devices' | 'dashboard' | 'osc' | 'modbusOsc' | 'params' | 'connection' | 'debug' | 'bootloader';
 
 interface LayoutProps {
   activeTab: Tab;
   onTabChange: (tab: Tab) => void;
   children: ReactNode;
-  variant?: 'device' | 'platform';
 }
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: 'devices', label: '设备列表' },
   { id: 'dashboard', label: '仪表盘' },
   { id: 'osc', label: '地址示波器' },
   { id: 'modbusOsc', label: '参数示波器' },
@@ -23,15 +23,17 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'debug', label: '调试信息' },
 ];
 
-export function Layout({ activeTab, onTabChange, children, variant = 'device' }: LayoutProps) {
+export function Layout({ activeTab, onTabChange, children }: LayoutProps) {
   const connected = useConnectionStore((s) => s.connected);
   const connecting = useConnectionStore((s) => s.connecting);
   const [showDebug, setShowDebug] = useState(false);
   const runtime = currentRuntimeInfo();
-  const visibleTabs = variant === 'platform' ? TABS.slice(0, 1) : TABS.filter(t => showDebug || t.id !== 'debug');
+  const cloud = runtime.mode !== 'local-device';
+  const needsDevice = runtime.mode === 'cloud-platform';
+  const visibleTabs = TABS.filter(t => (cloud || t.id !== 'devices') && (showDebug || t.id !== 'debug'));
   const title = TABS.find(t => t.id === activeTab)?.label || '仪表盘';
   const status = connected ? '已连接' : connecting ? '连接中…' : '未连接';
-  const workspace = runtime.mode === 'cloud-device' ? '云端设备' : '设备调试台';
+  const workspace = cloud ? '云端设备' : '设备调试台';
 
   return (
     <div className="wd-device">
@@ -44,6 +46,7 @@ export function Layout({ activeTab, onTabChange, children, variant = 'device' }:
         <nav className="wd-nav" aria-label="设备导航">
           {visibleTabs.map(tab => (
             <button key={tab.id} type="button" onClick={() => onTabChange(tab.id)}
+              disabled={needsDevice && tab.id !== 'devices'} aria-label={tab.label}
               className="wd-nav-item" aria-current={activeTab === tab.id ? 'page' : undefined} title={tab.label}>
               <ConsoleIcon name={tab.id} /><span>{tab.label}</span>
             </button>
@@ -54,8 +57,12 @@ export function Layout({ activeTab, onTabChange, children, variant = 'device' }:
       <div className="wd-workspace">
         <header className="wd-topbar">
           <div className="wd-breadcrumb"><span>{workspace}</span><span aria-hidden="true">›</span><strong>{title}</strong></div>
-          <div className="wd-connection" role="status">
-            <i data-state={connected ? 'connected' : connecting ? 'connecting' : 'disconnected'} />{status}
+          <div className="wd-topbar-actions">
+            {runtime.deviceId && <span className="wd-selected-device" title={runtime.deviceId}>{runtime.deviceId}</span>}
+            {!needsDevice && <div className="wd-connection" role="status">
+              <i data-state={connected ? 'connected' : connecting ? 'connecting' : 'disconnected'} />{status}
+            </div>}
+            {cloud && <a className="wd-logout" href="/logout">退出登录</a>}
           </div>
         </header>
         <main className="wd-main">

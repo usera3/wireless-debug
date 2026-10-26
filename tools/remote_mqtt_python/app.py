@@ -1478,12 +1478,12 @@ def health():
 
 @app.get('/')
 def root():
-    return redirect('/cloud')
+    return redirect('/index.html' + ('?' + request.query_string.decode('utf-8', errors='ignore') if request.query_string else ''))
 
 
 @app.get('/cloud')
 def cloud():
-    return redirect('/cloud.html')
+    return root()
 
 
 @app.get('/legacy-cloud.html')
@@ -1620,6 +1620,11 @@ def render_react_app(runtime_mode, device_id=None):
 
 @app.get('/cloud.html')
 def cloud_html():
+    return root()
+
+
+@app.get('/index.html')
+def index_html():
     return render_react_app('cloud-platform')
 
 

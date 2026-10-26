@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import '../cloud-console.css';
+import { platformDeviceDirectoryUrl } from '../lib/remoteConsole';
 import {
   cloudDeviceConsolePath,
-  cloudPlatformApiUrl,
   isAuthRequiredResponse,
   normalizeCloudDevice,
   type CloudDeviceRecord,
@@ -29,13 +29,13 @@ export function CloudPlatformPage() {
       pending = true;
       setLoading(true);
       try {
-        const response = await fetch(cloudPlatformApiUrl('/api/devices'), {
+        const response = await fetch(platformDeviceDirectoryUrl() || '/api/devices', {
           cache: 'no-store',
           credentials: 'same-origin',
           signal: controller.signal,
         });
         if (isAuthRequiredResponse(response.status)) {
-          window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname + window.location.hash);
+          window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
           return;
         }
         if (!response.ok) throw new Error('HTTP ' + response.status);
@@ -76,15 +76,6 @@ export function CloudPlatformPage() {
 
   return (
     <div className="wd-cloud">
-      <header className="wd-cloud-topbar">
-        <div className="wd-cloud-brand">
-          <span className="wd-cloud-wordmark" aria-label="GMCC">GMCC<span aria-hidden="true" /></span>
-          <span className="wd-cloud-product">设备调试台</span>
-        </div>
-        <a className="wd-cloud-logout" href="/logout">退出登录</a>
-      </header>
-      <main className="wd-cloud-main">
-        <h1>设备列表</h1>
         <div className="wd-cloud-toolbar">
           <input type="search" aria-label="搜索设备" placeholder="搜索设备名 / 设备 ID / IP"
             value={query} onChange={event => setQuery(event.target.value)} />
@@ -127,7 +118,6 @@ export function CloudPlatformPage() {
             {loading ? '正在加载设备…' : devices.length ? '没有匹配的设备' : '暂无设备'}
           </p>
         )}
-      </main>
     </div>
   );
 }

@@ -21,13 +21,18 @@
 .wd-nav-item { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 48px; padding: 12px 16px; border: 0; border-radius: 6px; color: #bac8d9; background: transparent; text-align: left; transition: background .15s, color .15s; }
 .wd-nav-item > svg { flex-shrink: 0; }
 .wd-nav-item:hover { color: #fff; background: #20354c; }
+.wd-nav-item:disabled { opacity: .4; background: transparent; }
 .wd-nav-item[aria-current='page'] { color: #fff; background: #14536a; font-weight: 600; }
 .wd-nav-item[aria-current='page'] > svg { color: #6cdeea; }
 .wd-nav-item[aria-current='page']::after { content: ''; width: 5px; height: 5px; margin-left: auto; border-radius: 50%; background: #6cdeea; }
 .wd-sidebar-footer { margin: auto 8px 0; padding-top: 20px; border-top: 1px solid #2a3b50; color: #7e93ae; font-size: 9px; letter-spacing: 1px; }
 .wd-workspace { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .wd-topbar { height: 72px; flex: 0 0 72px; padding: 0 32px; display: flex; align-items: center; justify-content: space-between; gap: 16px; background: #fff; border-bottom: 1px solid var(--wd-border); }
-.wd-breadcrumb { display: flex; gap: 20px; color: var(--wd-muted); font-size: 12px; }
+.wd-breadcrumb { display: flex; flex-shrink: 0; gap: 20px; color: var(--wd-muted); font-size: 12px; }
+.wd-topbar-actions { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 16px; }
+.wd-selected-device { min-width: 0; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--wd-muted); font-size: 12px; }
+.wd-logout { flex-shrink: 0; color: var(--wd-primary); font-size: 12px; white-space: nowrap; text-decoration: none; }
+.wd-logout:hover { text-decoration: underline; }
 .wd-breadcrumb strong { color: var(--wd-ink); font-weight: 500; }
 .wd-connection { display: flex; align-items: center; gap: 8px; color: var(--wd-muted); font-size: 12px; white-space: nowrap; }
 .wd-connection i { width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; }
@@ -149,6 +154,8 @@
   .wd-sidebar { width: 58px; flex-basis: 58px; padding: 20px 6px; }
   .wd-nav-item { padding: 12px; min-height: 44px; }
   .wd-topbar { height: 60px; flex-basis: 60px; padding: 0 16px; }
+  .wd-topbar-actions { flex-wrap: wrap; gap: 3px 8px; }
+  .wd-selected-device { flex-basis: 100%; max-width: 130px; text-align: right; }
   .wd-breadcrumb { gap: 8px; }
   .wd-breadcrumb > span { display: none; }
   .wd-page { padding: 16px 12px 24px; }
