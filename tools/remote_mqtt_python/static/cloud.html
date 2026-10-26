@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>无线调试云端观测台</title>
+    <title>GMCC · 设备调试台</title>
     <style>
       :root {
         color-scheme: light;
@@ -1287,15 +1287,25 @@
           grid-template-columns: 1fr;
         }
       }
+      /* GMCC identity; fallback controls and scripting remain unchanged. */
+      :root { --bg: #f4f6f9; --text: #15273c; --line: #e1e7ee; --blue: #117d99; --shadow: none; }
+      body, .workspace { background: #f4f6f9; }
+      .sidebar { background: #142438; color: #d8e0eb; box-shadow: none; }
+      .sidebar-brand { flex-direction: column; align-items: flex-start; }
+      .brand-mark { position: relative; display: inline-block; width: auto; height: auto; background: none; box-shadow: none; color: white; font-size: 31px; font-style: italic; font-weight: 750; letter-spacing: -1.4px; }
+      .brand-mark::after { content: ''; position: absolute; right: -11px; top: 3px; width: 7px; height: 7px; background: #2cc3d7; transform: skewX(-15deg); }
+      .brand-title { color: #d8e0eb; }
+      .brand-version { color: #91a3b9; background: transparent; }
+      .topbar { background: white; box-shadow: none; }
     </style>
   </head>
   <body>
     <div class="app-shell">
       <aside class="sidebar" aria-label="主导航">
         <div class="sidebar-brand">
-          <div class="brand-mark">WD</div>
+          <div class="brand-mark">GMCC</div>
           <div>
-            <h1 class="brand-title">Wireless Debug</h1>
+            <h1 class="brand-title">设备调试台</h1>
             <span class="brand-version">Cloud Console</span>
           </div>
         </div>
@@ -1320,7 +1330,7 @@
       <section class="workspace">
         <header class="topbar">
           <div class="brand">
-            <h1>无线调试云端观测台</h1>
+            <h1>设备调试台</h1>
             <p>多设备状态、历史事件、诊断回执集中查看</p>
           </div>
           <div class="actions">

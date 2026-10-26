@@ -1223,16 +1223,16 @@ def render_login_page(error='', status=200):
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>无线调试云端观测台 - 登录</title>
+  <title>GMCC · 设备调试台 - 登录</title>
   <style>
     :root {{
       color-scheme: light;
-      --text: #0f172a;
-      --muted: #64748b;
-      --line: #dbe7f0;
-      --field: #eaf1fb;
-      --brand: #14b8a6;
-      --brand-dark: #0f766e;
+      --text: #15273c;
+      --muted: #748294;
+      --line: #e1e7ee;
+      --field: #ffffff;
+      --brand: #117d99;
+      --brand-dark: #0d6b84;
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -1240,13 +1240,7 @@ def render_login_page(error='', status=200):
       min-height: 100vh;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
       color: var(--text);
-      background:
-        linear-gradient(rgba(214, 245, 240, .58) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(214, 245, 240, .58) 1px, transparent 1px),
-        radial-gradient(circle at 80% 8%, rgba(45, 212, 191, .20), transparent 28%),
-        radial-gradient(circle at 12% 78%, rgba(45, 212, 191, .18), transparent 30%),
-        #f8fbfd;
-      background-size: 64px 64px, 64px 64px, auto, auto, auto;
+      background: #f4f6f9;
     }}
     main {{
       min-height: 100vh;
@@ -1259,17 +1253,25 @@ def render_login_page(error='', status=200):
       text-align: center;
     }}
     .logo {{
-      width: 64px;
-      height: 64px;
-      margin: 0 auto 18px;
-      display: grid;
-      place-items: center;
-      border-radius: 8px;
-      color: #ecfeff;
-      font-weight: 800;
-      letter-spacing: 0;
-      background: linear-gradient(145deg, #172554, #14b8a6);
-      box-shadow: 0 16px 36px rgba(15, 118, 110, .20);
+      position: relative;
+      display: inline-block;
+      margin: 0 auto 10px;
+      color: #142438;
+      font-size: 42px;
+      line-height: 1.2;
+      font-style: italic;
+      font-weight: 750;
+      letter-spacing: -2px;
+    }}
+    .logo::after {{
+      content: '';
+      position: absolute;
+      right: -14px;
+      top: 4px;
+      width: 8px;
+      height: 8px;
+      background: #2cc3d7;
+      transform: skewX(-15deg);
     }}
     .brand {{
       margin: 0;
@@ -1285,9 +1287,9 @@ def render_login_page(error='', status=200):
     }}
     .card {{
       padding: 34px 32px 28px;
-      border-radius: 8px;
-      background: rgba(255, 255, 255, .88);
-      box-shadow: 0 22px 48px rgba(15, 23, 42, .10);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: #fff;
       text-align: left;
     }}
     .card h1 {{
@@ -1295,7 +1297,7 @@ def render_login_page(error='', status=200):
       text-align: center;
       font-size: 24px;
       line-height: 1.25;
-      font-weight: 800;
+      font-weight: 600;
     }}
     .card p {{
       margin: 10px 0 28px;
@@ -1328,8 +1330,8 @@ def render_login_page(error='', status=200):
       width: 100%;
       height: 42px;
       border: 1px solid #d5e0ee;
-      border-radius: 8px;
-      padding: 0 14px 0 44px;
+      border-radius: 5px;
+      padding: 0 44px;
       background: var(--field);
       color: var(--text);
       font-size: 15px;
@@ -1339,7 +1341,7 @@ def render_login_page(error='', status=200):
     input:focus {{
       border-color: var(--brand);
       background: #fff;
-      box-shadow: 0 0 0 3px rgba(20, 184, 166, .16);
+      box-shadow: 0 0 0 2px rgba(17, 125, 153, .12);
     }}
     .password-toggle {{
       position: absolute;
@@ -1370,12 +1372,11 @@ def render_login_page(error='', status=200):
       height: 42px;
       border: 0;
       border-radius: 8px;
-      background: linear-gradient(90deg, #14b8a6, #0f9f8f);
+      background: var(--brand);
       color: white;
       font-size: 15px;
       font-weight: 700;
       cursor: pointer;
-      box-shadow: 0 12px 22px rgba(20, 184, 166, .24);
     }}
     button[type="submit"]:hover {{ filter: brightness(.98); transform: translateY(-1px); }}
     footer {{
@@ -1389,9 +1390,8 @@ def render_login_page(error='', status=200):
 <body>
   <main>
     <section class="shell">
-      <div class="logo">WD</div>
-      <h2 class="brand">Wireless Debug</h2>
-      <div class="subtitle">无线调试云端观测台</div>
+      <div class="logo" aria-label="GMCC">GMCC</div>
+      <div class="subtitle">设备调试台</div>
       <form class="card" method="post" action="/login" autocomplete="on">
         <h1>欢迎回来</h1>
         <p>登录您的账户以继续</p>
@@ -1412,7 +1412,7 @@ def render_login_page(error='', status=200):
         </div>
         <button type="submit">登录</button>
       </form>
-      <footer>© 2026 Wireless Debug. All rights reserved.</footer>
+      <footer>© 2026 GMCC · 设备调试台</footer>
     </section>
   </main>
   <script>
