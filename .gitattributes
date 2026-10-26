@@ -1,0 +1,5 @@
+# Keep SPIFFS sources byte-identical to their gzip companions on Windows.
+dist/**/*.html text eol=lf
+dist/**/*.js text eol=lf
+dist/**/*.css text eol=lf
+dist/**/*.gz binary

@@ -7,6 +7,13 @@ engineering documentation, configuration, and the active top-level `dist/` SPIFF
 web assets required by firmware builds. Product source and required runtime assets
 belong in the repository; generated build output and local runtime state do not.
 
+The USB maintenance branch also tracks its matching React project under
+`frontend/`, including source, build configuration, protocol references, software
+simulator, and regression scripts. `frontend/dist/`, `frontend/node_modules/`,
+and local caches remain ignored; the active firmware web bundle remains under
+the top-level `dist/orig/`. This is the product's editable frontend, not an
+archived duplicate firmware/cloud tree.
+
 ## Excluded release and recovery content
 
 Release packages, firmware binaries, recovery captures, deployment captures, and
@@ -24,6 +31,12 @@ allowed only under the top-level `dist/` runtime-asset tree; and tracked files o
 2 MiB. It also rejects common credential filenames and recognizable private-key,
 GitLab, GitHub, and AWS token signatures. These checks reduce accidental exposure;
 they do not make credentials safe to commit. Never put a credential in Git.
+
+Two named gzip files are additionally allowed as regression input:
+`frontend/fixtures/osc-c52c-local-30s.json.gz` and
+`frontend/fixtures/cloud-waveform-integrity-20260729-144603.bin.gz`.
+They are consumed by waveform replay tests. This exception does not permit
+other archives or gzip files under `frontend/`; the 2 MiB limit still applies.
 
 Every GitLab release manifest must include: source SHA, artifact version, artifact
 URL, artifact size in bytes, and SHA-256 checksum. Include any target or compatibility

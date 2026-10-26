@@ -35,6 +35,7 @@ def main() -> None:
         (("firmware.tar.xz", 10), "forbidden release extension: firmware.tar.xz"),
         (("firmware.txz", 10), "forbidden release extension: firmware.txz"),
         (("backup/firmware.gz", 10), "forbidden release extension: backup/firmware.gz"),
+        (("frontend/fixtures/private-key.gz", 10), "forbidden release extension: frontend/fixtures/private-key.gz"),
         (("firmware.7z", 10), "forbidden release extension: firmware.7z"),
         (("firmware.rar", 10), "forbidden release extension: firmware.rar"),
         (("firmware.hex", 10), "forbidden release extension: firmware.hex"),
@@ -66,6 +67,8 @@ def main() -> None:
         (".env.example", 10),
         ("config/.env.sample", 10),
         ("config/.env.template", 10),
+        ("frontend/fixtures/osc-c52c-local-30s.json.gz", 100),
+        ("frontend/fixtures/cloud-waveform-integrity-20260729-144603.bin.gz", 100),
         ("./docs/guide.md", MAX_FILE_SIZE),
     ]
     assert scan_paths(allowed) == []

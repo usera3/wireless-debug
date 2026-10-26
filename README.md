@@ -44,6 +44,33 @@ same URLs; no Web UI mode selector is required:
 
 The root path redirects to `/orig/i.html`.
 
+### React source and local build
+
+This USB branch includes its matching React project in `frontend/`. The firmware
+base is `9d1900a`; the frontend source comes from the web repository's
+`feature/team-monorepo-usb-wifi` commit `5ddbefe`. See
+[frontend source and build instructions](docs/FRONTEND_SOURCE.md) for the exact
+source provenance and Windows workflow.
+
+Use Node.js 22.x (22.13.0 or later). From the repository root:
+
+```text
+cd frontend
+npm ci
+npm run build:firmware-assets
+```
+
+This builds the React UI and prepares the root `dist/orig/` directory, including
+renaming `index.html` and its gzip companion to `i.html` and `i.html.gz`. Other
+device pages such as `dist/index.html` and `dist/wifi.html` are retained. Continue
+with the ESP-IDF firmware build below to include the new UI in `storage.bin`.
+
+For live editing, open `frontend/` in VS Code, run `npm run dev`, and open
+`http://127.0.0.1:5679/index.html` (use the actual port reported by Vite). The
+included software simulator is started separately with
+`node mock-server/server.mjs`; it provides HTTP on 8766 and WebSocket on 8765.
+UI preview alone does not establish a connection to physical hardware.
+
 ### USB and OLED wiring on ESP32-S3 DevKit
 
 - Connect the PC data cable to the board's native USB/OTG connector for NCM.

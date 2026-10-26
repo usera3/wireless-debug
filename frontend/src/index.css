@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  background-color: #0f172a;
+  color: #e2e8f0;
+}
+
+@keyframes value-flash {
+  0%   { background-color: rgba(74, 222, 128, 0.35); }
+  100% { background-color: transparent; }
+}
+
+.value-flash {
+  animation: value-flash 0.8s ease-out;
+}
+
+.osc-uplot {
+  color: #e2e8f0;
+}
+
+.osc-uplot .u-legend {
+  display: block;
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  z-index: 12;
+  color: #e2e8f0;
+  font-size: 12px;
+  margin-top: 0;
+  padding: 4px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.82);
+  backdrop-filter: blur(4px);
+}
+
+.osc-uplot .u-series > * {
+  padding: 2px 6px;
+}
+
+.osc-uplot .u-marker {
+  border: 1px solid rgba(226, 232, 240, 0.35);
+  border-radius: 9999px;
+}
+
+.osc-uplot .u-value {
+  color: #f8fafc;
+}
+
+.osc-uplot .u-cursor-x,
+.osc-uplot .u-cursor-y {
+  opacity: 0.95;
+}
+
+.osc-uplot .u-select {
+  display: block;
+  background: rgba(96, 165, 250, 0.18);
+  border: 1px solid rgba(96, 165, 250, 0.75);
+}

@@ -40,6 +40,10 @@ CREDENTIAL_FILENAMES = frozenset(
     {"credentials.json", "service-account.json", "id_rsa", "id_ed25519"}
 )
 ENV_TEMPLATE_FILENAMES = frozenset({".env.example", ".env.sample", ".env.template"})
+COMPRESSED_TEST_FIXTURES = frozenset({
+    "frontend/fixtures/osc-c52c-local-30s.json.gz",
+    "frontend/fixtures/cloud-waveform-integrity-20260729-144603.bin.gz",
+})
 SECRET_PATTERNS = (
     (
         "possible private key",
@@ -74,7 +78,11 @@ def scan_paths(paths: list[tuple[str, int]]) -> list[str]:
         if any(RUNTIME_SNAPSHOT_COMPONENT.match(part) for part in components):
             violations.append(f"forbidden runtime snapshot path: {normalized}")
         forbidden_archive = lower_path.endswith(FORBIDDEN_EXTENSIONS)
-        forbidden_gzip = lower_path.endswith(".gz") and not lower_path.startswith("dist/")
+        forbidden_gzip = (
+            lower_path.endswith(".gz")
+            and not lower_path.startswith("dist/")
+            and lower_path not in COMPRESSED_TEST_FIXTURES
+        )
         if forbidden_archive or forbidden_gzip:
             violations.append(f"forbidden release extension: {normalized}")
         if any(marker in f"/{lower_path}" for marker in COPIED_SOURCE_MARKERS):

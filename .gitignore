@@ -79,6 +79,10 @@ Desktop.ini
 *.sln.docstates # Visual Studio
 
 /.cache/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/*.local
 /.devcontainer/
 /.vscode/*
 !/.vscode/tasks.json
@@ -107,6 +111,8 @@ runtime-snapshot-*/
 *.uf2
 !/dist/*.gz
 !/dist/**/*.gz
+!/frontend/fixtures/osc-c52c-local-30s.json.gz
+!/frontend/fixtures/cloud-waveform-integrity-20260729-144603.bin.gz
 *.tar.gz
 
 # Local credentials and private deployment configuration.
