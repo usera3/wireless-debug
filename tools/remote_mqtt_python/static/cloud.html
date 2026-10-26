@@ -32,7 +32,7 @@
     .columns, .device { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(180px, 1.2fr) 90px minmax(180px, 1.4fr) 120px; gap: 16px; align-items: center; padding: 18px 20px; }
     .columns { background: #f8fafc; color: #748294; font-size: 12px; }
     .device { border-top: 1px solid #e1e7ee; }
-    .name { font-weight: 600; }
+    .name { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
     .id, .address { overflow-wrap: anywhere; font-size: 13px; line-height: 1.7; }
     .state { display: inline-block; padding: 4px 9px; border-radius: 4px; background: #f0f2f5; color: #596679; font-size: 12px; }
     .state.online { background: #e8f7f0; color: #146d4b; }
