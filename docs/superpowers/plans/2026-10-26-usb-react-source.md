@@ -1,6 +1,6 @@
 # USB 修复版补齐 React 工程 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. This task is already authorized for inline execution; keep the result local and do not push.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. 原计划仅本地开发；用户随后明确授权，将结果接入 `fix/usb-dhcp-recovery` 并提交、推送。继续在该分支的既有独立工作目录操作，不改其他工作目录。
 
 **Goal:** 在 `9d1900a` 的 USB 修复版上补齐可构建的 React 工程，单仓库完成网页修改、打包及固件资源准备。
 
@@ -15,7 +15,7 @@
 - Node.js 新安装使用 22.x，至少 22.13.0；保留原依赖锁文件。
 - 不修改 `main/`、`cmake/`、`sdkconfig`、分区表和已有硬件配置。
 - 不纳入 node_modules、构建缓存、安装包、固件二进制或账号凭据。
-- 本次在独立本地分支提交，不推送，不操作硬件。
+- 初次恢复在独立本地分支提交；本轮按用户授权接入并推送 `fix/usb-dhcp-recovery`。不操作硬件，不改写已有提交或强制推送。
 
 ## Task 1: 恢复可构建前端
 
@@ -48,3 +48,15 @@
 - [x] 运行恢复工程中不依赖外部硬件/服务的协议、参数、连接和示波器回归。
 - [x] 验证 gzip 配对、固件源文件未改动、忽略规则和仓库规范；执行 `git diff --check`。
 - [x] 提交前自查；提交本地 `fix/usb-react-source` 并确认状态干净。远端分支保持原提交。
+
+## Task 4: 接入用户指定分支并发布
+
+**Files:** 复用已有恢复提交 `9df4761`；修改本计划及 `docs/FRONTEND_SOURCE.md` 的发布记录，不重复复制源码。
+
+- [x] 核对远端 `fix/usb-dhcp-recovery` 仍为 `9d1900a`，目标工作目录干净，主目录的未提交内容不在本次提交范围。
+- [x] 先确认目标分支缺少 `frontend/src/main.tsx` 的检查失败，再快进接入已有恢复提交，确认检查通过。
+- [x] 逐个比对 79 个 React 源码文件与来源提交，除行尾空格外一致；确认固件源码、配置及补丁未改动。
+- [x] 在目标工作目录重新安装前端依赖，构建并运行 44 项离线回归、资源准备及仓库规范检查。USB 相关 28 项主机回归及 MCU 缓冲区回归通过。
+- [x] 在目标工作目录重新编译固件，保留现有硬件配置，不执行烧录。`ninja -C build -j2` 续编退出 0，应用镜像大小 `0x1a91b0`，分区剩余 34%。
+- [x] 独立审查本次发布差异，未发现阻碍发布的问题；模拟服务默认对外监听为来源已有行为，README 增补其无认证、不得映射到公网的使用限制。
+- 普通推送到 `midea/fix/usb-dhcp-recovery` 后，用远端引用及重新下载的提交核对 `frontend/src` 与构建配置；交付的实际远端提交号以发布完成时的回读结果为准。
