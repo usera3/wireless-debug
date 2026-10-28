@@ -12,7 +12,7 @@ import { OscChart } from './OscChart';
 import { useOscController } from '../hooks/useOscController';
 import { exportCsv, importCsv } from '../lib/csvWave';
 import { resolveConnectionTarget } from '../lib/connectionTarget';
-import { describeOscTransport, shouldStopOscOnDisconnect } from '../lib/oscTransport';
+import { shouldStopOscOnDisconnect } from '../lib/oscTransport';
 import { oscPlotPointBudget } from '../lib/oscRenderBudget';
 import { getOscChannelType } from '../lib/oscChannelTypes';
 
@@ -85,10 +85,6 @@ export function OscilloscoperPage() {
   const connectionTarget = useMemo(
     () => resolveConnectionTarget(url, window.location.origin),
     [url],
-  );
-  const transport = useMemo(
-    () => describeOscTransport(connectionTarget),
-    [connectionTarget],
   );
 
   const [csvError, setCsvError] = useState<string | null>(null);
@@ -238,24 +234,6 @@ export function OscilloscoperPage() {
 
   return (
     <div className="flex flex-col gap-4 p-4 h-full">
-      <div
-        className={`flex items-center justify-between gap-3 border px-3 py-2 text-sm rounded-lg ${
-          transport.tone === 'fast'
-            ? 'border-emerald-700/70 bg-emerald-950/35 text-emerald-200'
-            : transport.tone === 'cloud'
-              ? 'border-cyan-700/70 bg-cyan-950/30 text-cyan-200'
-              : 'border-red-800/70 bg-red-950/30 text-red-200'
-        }`}
-      >
-        <div className="min-w-0">
-          <div className="font-medium">{transport.title}</div>
-          <div className="mt-0.5 text-xs opacity-75">{transport.detail}</div>
-        </div>
-        <span className="shrink-0 text-xs tabular-nums opacity-70">
-          {transport.mode === 'local' ? '低延迟' : transport.mode === 'cloud' ? '公网链路' : '未连接'}
-        </span>
-      </div>
-
       <div className="bg-slate-800 rounded-lg p-3 border border-slate-700">
         <OscChannelConfig />
       </div>

@@ -53,8 +53,8 @@ try {
         assert.equal(await button.getAttribute('aria-current'), 'page', `${label} selected navigation`);
         await page.getByRole('heading', { name: label, exact: true, level: 1 }).waitFor();
         if (name === 'dashboard') {
-          await page.getByRole('button', { name: '仪表盘使能', exact: true }).click();
-          assert.equal(await page.getByRole('button', { name: '仪表盘使能', exact: true }).getAttribute('aria-pressed'), 'true');
+          await page.getByRole('button', { name: '实时监测', exact: true }).click();
+          assert.equal(await page.getByRole('button', { name: '实时监测', exact: true }).getAttribute('aria-pressed'), 'true');
           if (width === 390) {
             const stop = await page.getByRole('button', { name: '停止', exact: true }).boundingBox();
             assert.ok(stop && stop.width >= 200 && stop.height >= 40, 'mobile Stop has a full-width touch target');

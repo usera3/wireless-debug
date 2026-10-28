@@ -25,7 +25,6 @@ const requiredCopy = [
   '局域网直连',
   '云端通道',
   '地址无效',
-  '局域网设备固定连接当前热点中的 ESP32',
   '正在请求局域网访问权限',
   '局域网访问已授权',
   'probeLocalNetworkAccess',
@@ -36,6 +35,9 @@ for (const copy of requiredCopy) {
 }
 
 const forbiddenCopy = [
+  '局域网设备固定连接当前热点中的 ESP32',
+  '云端设备仅显示当前在线设备',
+  '自定义地址用于工程调试',
   'AP 模式',
   'STA 模式',
   'STA SSID',

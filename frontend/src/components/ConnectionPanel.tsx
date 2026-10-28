@@ -88,13 +88,20 @@ function statusColor(kind: StatusKind): string {
 function Section({
   title,
   children,
+  className = '',
+  actions,
 }: {
   title: string;
   children: React.ReactNode;
+  className?: string;
+  actions?: React.ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-slate-700 bg-slate-900/35 p-4">
-      <h3 className="text-sm font-semibold text-slate-200 mb-3">{title}</h3>
+    <section className={`rounded-lg border border-slate-700 bg-slate-900/35 p-4 ${className}`}>
+      <div className="wd-connection-section-heading">
+        <h3 className="text-sm font-semibold text-slate-200 mb-3">{title}</h3>
+        {actions}
+      </div>
       {children}
     </section>
   );
@@ -411,7 +418,8 @@ export function ConnectionPanel() {
 
   return (
     <div className="wd-connection-page">
-      <div className="wd-connection-toolbar">
+      <div className="wd-connection-grid">
+        <Section title="连接目标" className="wd-connection-target" actions={<div className="wd-connection-toolbar">
         <button
           onClick={() => void refreshStatus(false)}
           disabled={refreshing || target.kind === 'invalid'}
@@ -425,12 +433,9 @@ export function ConnectionPanel() {
         >
           {actionStatus.msg}
         </span>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <Section title="连接目标">
-          <div className="space-y-4">
-            <div>
+      </div>}>
+          <div className="wd-connection-target-fields">
+            <div className="wd-connection-choices">
               <div className="grid grid-cols-3 gap-2">
                 {([
                   ['local', '局域网设备'],
@@ -451,15 +456,16 @@ export function ConnectionPanel() {
             </div>
 
             {connectionChoice === 'local' && (
-              <div className="rounded border border-slate-700 bg-slate-950/25 px-3 py-3">
+              <div className="wd-connection-entry rounded border border-slate-700 bg-slate-950/25 px-3 py-3">
                 <Field label="设备" value="当前直连 ESP32" />
               </div>
             )}
 
             {connectionChoice === 'cloud' && (
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">在线设备</label>
+              <div className="wd-connection-entry">
+                <label htmlFor="connection-cloud-device" className="block text-sm text-slate-400 mb-1">在线设备</label>
                 <select
+                  id="connection-cloud-device"
                   value={selectedCloudDeviceId}
                   onChange={(event) => selectCloudDevice(event.target.value)}
                   disabled={connected || connecting || cloudDevicesLoading || cloudDevices.length === 0}
@@ -479,9 +485,10 @@ export function ConnectionPanel() {
             )}
 
             {connectionChoice === 'custom' && (
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">通信入口地址</label>
+              <div className="wd-connection-entry">
+                <label htmlFor="connection-custom-address" className="block text-sm text-slate-400 mb-1">通信入口地址</label>
                 <input
+                  id="connection-custom-address"
                   type="text"
                   value={url}
                   onChange={(event) => setUrl(event.target.value)}
@@ -494,13 +501,13 @@ export function ConnectionPanel() {
               </div>
             )}
 
-            <div>
+            <div className="wd-connection-target-detail">
               <div className="mt-2 flex items-center gap-2 min-w-0">
                 <Indicator tone={targetTone} label={target.label} detail={targetDetail} />
               </div>
             </div>
 
-            <div className="flex items-center gap-4 flex-wrap">
+            <div className="wd-connection-connect flex items-center gap-4 flex-wrap">
               <div className="flex items-center gap-2 min-w-24">
                 <StatusDot active={connected} pending={connecting} />
                 <span className="text-sm text-slate-300">
@@ -521,13 +528,10 @@ export function ConnectionPanel() {
               </button>
             </div>
 
-            <p className="text-xs text-slate-500">
-              局域网设备固定连接当前热点中的 ESP32；云端设备仅显示当前在线设备；自定义地址用于工程调试。
-            </p>
           </div>
         </Section>
 
-        <Section title="数据转发方式">
+        <Section title="数据转发方式" className="wd-connection-routing">
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <Field label="当前模式" value={<span className="font-mono">{currentComm}</span>} />
@@ -549,7 +553,7 @@ export function ConnectionPanel() {
           </div>
         </Section>
 
-        <Section title="WiFi 状态">
+        <Section title="WiFi 状态" className="wd-connection-wifi">
           <div className="space-y-4">
             <div className="space-y-3">
               <div className="rounded border border-slate-700/80 bg-slate-950/25 p-3">
@@ -612,7 +616,7 @@ export function ConnectionPanel() {
           </div>
         </Section>
 
-        <Section title="蓝牙">
+        <Section title="蓝牙" className="wd-connection-ble">
           <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Indicator
@@ -637,7 +641,7 @@ export function ConnectionPanel() {
           </div>
         </Section>
 
-        <Section title="串口">
+        <Section title="串口" className="wd-connection-serial">
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <Field label="当前波特率" value={<span className="font-mono">{formatBaud(currentBaud)} bps</span>} />
@@ -688,7 +692,7 @@ export function ConnectionPanel() {
         </Section>
       </div>
 
-      <div className="mt-6 border-t border-slate-700 pt-5 max-w-3xl">
+      <div className="wd-connection-config border-t border-slate-700">
         <h3 className="text-sm font-semibold text-slate-300 mb-2">烧录配置</h3>
         <p className="text-xs text-slate-500 mb-2">
           当前目标：{guiConfig.targets.map((t) => t.displayName).join(' / ')}
@@ -726,7 +730,7 @@ export function ConnectionPanel() {
         </div>
 
         {editingJson && (
-          <div className="mt-3 space-y-2">
+          <div className="wd-connection-json mt-3 space-y-2">
             <textarea
               value={jsonText}
               onChange={(e) => { setJsonText(e.target.value); setJsonError(null); }}

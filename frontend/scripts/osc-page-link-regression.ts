@@ -6,12 +6,13 @@ const page = readFileSync(resolve(process.cwd(), 'src/components/OscilloscoperPa
 const controller = readFileSync(resolve(process.cwd(), 'src/hooks/useOscController.ts'), 'utf8');
 
 for (const token of [
-  'describeOscTransport',
-  'transport.title',
-  'transport.detail',
   'const url = useConnectionStore((s) => s.url)',
 ]) {
   assert.ok(page.includes(token), `address oscilloscope page missing transport behavior: ${token}`);
+}
+
+for (const token of ['describeOscTransport', 'transport.title', 'transport.detail', '通信地址无效', '请先在连接设置中选择局域网设备或云端设备']) {
+  assert.ok(!page.includes(token), `address oscilloscope page must remove the transport banner: ${token}`);
 }
 
 assert.ok(

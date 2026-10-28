@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState, useSyncExternalStore } from 'react';
 import { wsClient } from '../lib/wsClient';
 import { buildReadHolding, buildWriteSingle, parseReadResponse } from '../lib/modbus';
 import { useParamStore, type ParamDef } from '../store/paramStore';
@@ -7,6 +7,16 @@ import { useConnectionStore } from '../store/connectionStore';
 
 const POLL_INTERVAL_MS = 1000;
 const TIMEOUT_MS = 500;
+const HISTORY_WINDOW_MS = 60_000;
+const MAX_HISTORY_POINTS = 240;
+
+export type DashboardReading = { value: number; receivedAt: number };
+export type DashboardPoint = { receivedAt: number; value: number | null };
+type Identity = { params: ParamDef[]; url: string; generation: number };
+type Telemetry = Pick<Identity, 'params' | 'url'> & {
+  readings: Record<string, DashboardReading>;
+  speedHistory: DashboardPoint[];
+};
 
 // 需要轮询的 alias 列表（仅状态显示）
 export const DASHBOARD_ALIASES = [
@@ -18,26 +28,15 @@ export const DASHBOARD_ALIASES = [
   'AlmCode',
 ] as const;
 
-function waitModbusFrame(signal?: AbortSignal): Promise<Uint8Array> {
-  return waitForMatchingModbusFrame({ timeoutMs: TIMEOUT_MS, signal });
+function appendPoint(history: DashboardPoint[], point: DashboardPoint): DashboardPoint[] {
+  const recent = history.filter(item => item.receivedAt >= point.receivedAt - HISTORY_WINDOW_MS);
+  if (point.value === null && recent[recent.length - 1]?.value === null) return recent;
+  return [...recent, point].slice(-MAX_HISTORY_POINTS);
 }
 
-async function readOne(
-  param: ParamDef,
-  setValue: (alias: string, val: number) => void,
-  signal: AbortSignal,
-  isCurrent: () => boolean,
-): Promise<void> {
-  if (!isCurrent()) return;
-  const count = param.isFloat ? 2 : 1;
-  const frame = buildReadHolding(param.regAddr, count);
-  const waitP = waitModbusFrame(signal);
-  wsClient.send(frame);
-  const resp = await waitP;
-  if (!isCurrent()) return;
-  const regs = parseReadResponse(resp);
-  if (!regs) return;
-
+function readValue(param: ParamDef, response: Uint8Array): number | null {
+  const regs = parseReadResponse(response, param.isFloat ? 2 : 1);
+  if (response[0] !== 0xff || !regs) return null;
   let raw: number;
   if (param.isFloat) {
     const buf = new ArrayBuffer(4);
@@ -48,44 +47,147 @@ async function readOne(
   } else {
     raw = param.signed ? (regs[0] >= 0x8000 ? regs[0] - 0x10000 : regs[0]) : regs[0];
   }
-
   const actual = param.isFloat ? raw : raw / Math.pow(10, param.decimals);
-  setValue(param.alias, actual);
+  return Number.isFinite(actual) ? actual : null;
 }
 
 export function useDashboardPoller(enabled: boolean = false) {
   const params = useParamStore((s) => s.params);
   const setValue = useParamStore((s) => s.setValue);
   const connected = useConnectionStore((s) => s.connected);
-  const paramsRef = useRef(params);
-  paramsRef.current = params;
+  const url = useConnectionStore((s) => s.url);
+  // A close/open in one React batch may leave connected=true throughout the
+  // render. Observe the socket generation separately so the new loop starts.
+  const generation = useSyncExternalStore(useCallback(notify => {
+    const unreset = wsClient.onConnectionReset(notify);
+    const unconnection = useConnectionStore.subscribe(notify);
+    return () => { unreset(); unconnection(); };
+  }, []), () => wsClient.generation);
+  const [telemetry, setTelemetry] = useState<Telemetry>(() => ({ params, url, readings: {}, speedHistory: [] }));
+  const active = useRef(true);
+  const requests = useRef(new Set<AbortController>());
+  const queue = useRef<(Identity & { tail: Promise<void> }) | null>(null);
 
-  // 解析 alias → ParamDef 映射
-  function getParamByAlias(alias: string): ParamDef | undefined {
-    return paramsRef.current.find((p) => p.alias === alias);
-  }
+  useEffect(() => {
+    active.current = true;
+    return () => {
+      active.current = false;
+      requests.current.forEach(controller => controller.abort());
+    };
+  }, []);
+
+  useEffect(() => {
+    setTelemetry(previous => previous.params === params && previous.url === url
+      ? previous : { params, url, readings: {}, speedHistory: [] });
+  }, [params, url]);
+
+  const isCurrent = useCallback((identity: Identity) => active.current
+    && useConnectionStore.getState().connected
+    && useConnectionStore.getState().url === identity.url
+    && useParamStore.getState().params === identity.params
+    && wsClient.generation === identity.generation, []);
+
+  // Only this mounted dashboard's reads/writes are serialized. Modbus RTU read
+  // responses contain no requested address; this is not global bus arbitration.
+  const request = useCallback(async (
+    identity: Identity,
+    frame: Uint8Array,
+    matches: (response: Uint8Array) => boolean,
+    signal?: AbortSignal,
+  ): Promise<Uint8Array> => {
+    if (!queue.current || queue.current.params !== identity.params
+      || queue.current.url !== identity.url || queue.current.generation !== identity.generation) {
+      queue.current = { ...identity, tail: Promise.resolve() };
+    }
+    const session = queue.current;
+    const task = session.tail.then(async () => {
+      if (!isCurrent(identity) || signal?.aborted) throw new Error('连接或参数表已变更，请重试');
+      const controller = new AbortController();
+      requests.current.add(controller);
+      const abort = () => controller.abort();
+      signal?.addEventListener('abort', abort, { once: true });
+      const unreset = wsClient.onConnectionReset(abort);
+      const unparams = useParamStore.subscribe(state => {
+        if (state.params !== identity.params) abort();
+      });
+      const unconnection = useConnectionStore.subscribe(state => {
+        if (!state.connected || state.url !== identity.url) abort();
+      });
+      const wait = waitForMatchingModbusFrame({ timeoutMs: TIMEOUT_MS, signal: controller.signal, matches });
+      try {
+        try {
+          if (!wsClient.send(frame)) throw new Error('发送失败，请检查连接');
+        } catch (error) {
+          controller.abort();
+          await wait.catch(() => {});
+          throw error;
+        }
+        const response = await wait;
+        if (!isCurrent(identity) || controller.signal.aborted || signal?.aborted) {
+          throw new Error('连接或参数表已变更，请重试');
+        }
+        return response;
+      } finally {
+        signal?.removeEventListener('abort', abort);
+        unreset(); unparams(); unconnection();
+        requests.current.delete(controller);
+      }
+    });
+    session.tail = task.then(() => {}, () => {});
+    return task;
+  }, [isCurrent]);
+
+  const addGap = useCallback((identity: Pick<Identity, 'params' | 'url'>) => {
+    const receivedAt = Date.now();
+    setTelemetry(previous => previous.params === identity.params && previous.url === identity.url
+      ? { ...previous, speedHistory: appendPoint(previous.speedHistory, { receivedAt, value: null }) }
+      : previous);
+  }, []);
+
+  useEffect(() => wsClient.onConnectionReset(() => addGap({ params, url })), [params, url, addGap]);
+
+  useEffect(() => {
+    if (!enabled || !connected) {
+      setTelemetry(previous => previous.params === params && previous.url === url && previous.speedHistory.length > 0
+        ? { ...previous, speedHistory: appendPoint(previous.speedHistory, { receivedAt: Date.now(), value: null }) }
+        : previous);
+    }
+  }, [enabled, connected, params, url]);
 
   // 启动/停止轮询（仅在 enabled=true 时运行）
   useEffect(() => {
     if (!enabled || !connected) return;
 
     const controller = new AbortController();
-    const generation = wsClient.generation;
-    const isCurrent = () => !controller.signal.aborted
-      && useConnectionStore.getState().connected && wsClient.generation === generation;
+    const identity = { params, url, generation };
+    const canRead = () => !controller.signal.aborted && isCurrent(identity);
     let busy = false;
     const pollOnce = async () => {
-      if (busy || !isCurrent()) return;
+      if (busy || !canRead()) return;
       busy = true;
       try {
         for (const alias of DASHBOARD_ALIASES) {
-          if (!isCurrent()) break;
-          const param = getParamByAlias(alias);
+          if (!canRead()) break;
+          const param = params.find(item => item.alias === alias);
           if (!param) continue;
           try {
-            await readOne(param, setValue, controller.signal, isCurrent);
+            const response = await request(identity,
+              buildReadHolding(param.regAddr, param.isFloat ? 2 : 1),
+              frame => readValue(param, frame) !== null, controller.signal);
+            if (!canRead()) break;
+            const value = readValue(param, response);
+            if (value === null) continue;
+            const receivedAt = Date.now();
+            setValue(alias, value);
+            setTelemetry(previous => {
+              const current = previous.params === params && previous.url === url
+                ? previous : { params, url, readings: {}, speedHistory: [] };
+              return { ...current, readings: { ...current.readings, [alias]: { value, receivedAt } },
+                speedHistory: alias === 'MotorSpd'
+                  ? appendPoint(current.speedHistory, { receivedAt, value }) : current.speedHistory };
+            });
           } catch {
-            // 单个参数读失败不中断当前连接的轮询
+            if (canRead() && alias === 'MotorSpd') addGap(identity);
           }
         }
       } finally {
@@ -102,26 +204,39 @@ export function useDashboardPoller(enabled: boolean = false) {
       controller.abort();
       clearInterval(timer);
     };
-  // 参数通过 paramsRef 读取，连接/使能变化时独立重建轮询生命周期。
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connected, enabled, setValue]);
+  }, [connected, enabled, params, url, generation, setValue, request, isCurrent, addGap]);
 
   /** 写入单个寄存器（实际值） */
   const writeParam = useCallback(
     async (alias: string, actual: number): Promise<void> => {
-      if (!useConnectionStore.getState().connected) return;
-      const param = getParamByAlias(alias);
-      if (!param) return;
-      const raw = Math.round(actual * Math.pow(10, param.decimals));
+      const connection = useConnectionStore.getState();
+      if (!connection.connected) throw new Error('设备未连接');
+      const currentParams = useParamStore.getState().params;
+      const param = currentParams.find(item => item.alias === alias);
+      if (!param) throw new Error('参数表缺少此指令');
+      if (param.readOnly) throw new Error('此参数为只读');
+      if (param.isFloat) throw new Error('此指令不支持浮点写入');
+      if (!Number.isFinite(actual)) throw new Error('请输入有效数值');
+      if (!Number.isInteger(param.regAddr) || param.regAddr < 0 || param.regAddr > 0xffff
+        || !Number.isInteger(param.decimals) || param.decimals < 0 || param.decimals > 15
+        || !Number.isFinite(param.min) || !Number.isFinite(param.max) || param.min > param.max) {
+        throw new Error('参数定义无效');
+      }
+      if (actual < param.min || actual > param.max) throw new Error('设定值超出参数表范围');
+      const scaled = actual * Math.pow(10, param.decimals);
+      const raw = Math.round(scaled);
+      if (Math.abs(scaled - raw) > 1e-7) throw new Error('数值精度与参数表不一致');
+      if (!Number.isSafeInteger(raw) || raw < (param.signed ? -32768 : 0) || raw > (param.signed ? 32767 : 65535)) {
+        throw new Error('设定值超出寄存器范围');
+      }
       const unsigned = raw < 0 ? raw + 0x10000 : raw;
-      const frame = buildWriteSingle(param.regAddr, unsigned & 0xffff);
-      const waitP = waitModbusFrame();
-      wsClient.send(frame);
-      await waitP;
+      const frame = buildWriteSingle(param.regAddr, unsigned);
+      await request({ params: currentParams, url: connection.url, generation: wsClient.generation }, frame,
+        response => response.length === frame.length && response.every((byte, index) => byte === frame[index]));
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
+    [request],
   );
 
-  return { writeParam };
+  const visible = telemetry.params === params && telemetry.url === url;
+  return { writeParam, readings: visible ? telemetry.readings : {}, speedHistory: visible ? telemetry.speedHistory : [] };
 }

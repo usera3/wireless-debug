@@ -82,12 +82,17 @@ try {
     await disabled(page.getByRole('button', { name: /开始/ }), label + ' start disabled');
   }
   await nav('仪表盘');
-  await button('仪表盘使能').click();
-  for (const name of ['停止', '转速模式', '转矩模式']) {
+  await button('实时监测').click();
+  await page.getByText('高级调试', { exact: true }).click();
+  for (const name of ['停止', '转速模式', '转矩模式', '下发转速', '下发电流']) {
     await disabled(button(name), 'offline dashboard ' + name);
     await forcedClick(button(name));
   }
-  await disabled(page.locator('input[type=range]'), 'dashboard slider disabled');
+  const speedDraft = page.getByRole('spinbutton', { name: '目标转速', exact: true });
+  assert.equal(await speedDraft.isEditable(), true, 'offline numeric draft remains local');
+  await speedDraft.fill('600');
+  await speedDraft.press('Enter');
+  assert.equal(await page.getByTestId('dashboard-speed').innerText(), '—', 'offline keyboard cannot optimistically update feedback');
   await nav('固件烧录');
   const quickOps = ['进入 Bootloader 模式', '跳转到应用程序', '查看 MCU 信息', '擦除 Flash...'];
   for (const name of quickOps) {

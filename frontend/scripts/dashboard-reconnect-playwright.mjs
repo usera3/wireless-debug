@@ -59,7 +59,7 @@ try {
   await page.getByRole('button', { name: '连接', exact: true }).click();
   await page.evaluate(() => window.fixtureSockets.at(-1).open());
   await nav('仪表盘');
-  await page.getByRole('button', { name: '仪表盘使能', exact: true }).click();
+  await page.getByRole('button', { name: '实时监测', exact: true }).click();
   await page.waitForFunction(() => window.fixtureFrames.length === 1);
   await page.evaluate(() => window.fixtureSockets.at(-1).close());
   await page.waitForFunction(() => window.fixtureSockets.length === 2);
@@ -77,8 +77,8 @@ try {
   await page.getByText('123', { exact: true }).waitFor();
   await page.evaluate(() => { window.replyDashboard(999); window.fixtureSockets.at(-1).close(); });
   await page.waitForTimeout(50);
-  const iq = page.locator('.wd-metric').filter({ has: page.locator('.wd-metric-label', { hasText: '电机电流' }) });
-  assert.ok((await iq.innerText()).includes('--'), 'response resolved during disconnect cannot update stale dashboard values');
+  const iq = page.getByTestId('dashboard-metric-MotorIq');
+  assert.ok((await iq.innerText()).includes('—'), 'response resolved during disconnect cannot update stale dashboard values');
   const stopped = await page.evaluate(() => window.fixtureFrames.length);
   await page.waitForTimeout(600);
   assert.equal(await page.evaluate(() => window.fixtureFrames.length), stopped, 'old loops send no further requests while disconnected');
